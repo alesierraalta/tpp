@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/alesierraalta/tpp/internal/admit"
+	"github.com/alesierraalta/tpp/internal/assets"
 	"github.com/alesierraalta/tpp/internal/bench"
 	"github.com/alesierraalta/tpp/internal/buildinfo"
 	"github.com/alesierraalta/tpp/internal/evidence"
@@ -1886,5 +1887,67 @@ func TestSetupPrintsThePathLineWhenTheBinaryIsNotOnPath(t *testing.T) {
 	}
 	if last := lastLine(out); !strings.HasPrefix(last, "tpp is installed and working: ") || !strings.HasSuffix(last, "Stop hook wired to "+bin) {
 		t.Fatalf("a PATH warning is not a failure, and the hook still names the binary it runs; last line = %q\n%s", last, out)
+	}
+}
+
+// Codex, Gemini and OpenCode get the skills but no Stop hook, so setup must install into them, say the hook
+// is not wired rather than claim it, and still finish: the skills are the whole install there.
+func TestSetupOnAMachineWithoutClaudeInstallsTheSkillsAndSaysTheHookIsNotWired(t *testing.T) {
+	bin := buildCLI(t)
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out, code := runCLIEnv(t, bin, setupEnv(t, home, pathWithoutBin(t)), "setup")
+	if code != 0 {
+		t.Fatalf("setup with only Codex installed exit = %d, want 0\n%s", code, out)
+	}
+	for _, name := range assets.SkillNames() {
+		if _, err := os.Stat(filepath.Join(home, ".codex", "skills", name, "SKILL.md")); err != nil {
+			t.Fatalf("setup claims the skills are installed in codex, but %s is missing: %v\n%s", name, err, out)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude")); !os.IsNotExist(err) {
+		t.Fatalf("setup must not create a Claude config dir on a machine without Claude Code: %v", err)
+	}
+	last := lastLine(out)
+	if !strings.HasPrefix(last, "tpp is installed and working: ") || !strings.Contains(last, "in codex") ||
+		!strings.HasSuffix(last, "Stop hook not wired: Claude Code is not installed here, and the gate runs only there") {
+		t.Fatalf("last line = %q, want the working line naming codex and saying the hook is not wired\n%s", last, out)
+	}
+	if strings.Contains(out, "Stop hook wired to") {
+		t.Fatalf("setup claimed a wired hook with no Claude Code host:\n%s", out)
+	}
+}
+
+// After a clean sync the install can still be unusable: git is the one required tool, and without it the
+// gate cannot run. setup must then stop on "not finished", name the missing tool, and never claim success.
+func TestSetupIsNotFinishedWhenARequiredToolIsMissing(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		host string
+	}{
+		{"with Claude Code", ".claude"},
+		{"without Claude Code", ".codex"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bin := buildCLI(t)
+			home := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(home, tc.host), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			noTools := t.TempDir() // a PATH with no git on it
+			out, code := runCLIEnv(t, bin, setupEnv(t, home, noTools), "setup")
+			if code != 1 {
+				t.Fatalf("setup without git exit = %d, want 1\n%s", code, out)
+			}
+			last := lastLine(out)
+			if !strings.HasPrefix(last, "setup: not finished: ") || !strings.Contains(last, "git") {
+				t.Fatalf("last line = %q, want not finished naming git\n%s", last, out)
+			}
+			if strings.Contains(out, "installed and working") {
+				t.Fatalf("setup claimed success with a required tool missing:\n%s", out)
+			}
+		})
 	}
 }

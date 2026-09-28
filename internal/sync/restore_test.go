@@ -246,3 +246,44 @@ func TestRestoreRefusesManifestPathsOutsideTheStore(t *testing.T) {
 		})
 	}
 }
+
+// The full lifecycle for a managed path outside ConfigDir/skills: force-uninstalling a modified
+// Pi extension snapshots the operator's edit to the central store, and restore writes those
+// bytes back to the extension path — the same authority a skill backup gets.
+func TestRestoreReturnsAPiExtensionBackedUpByForceUninstall(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("TPP_HOME", root)
+	home := t.TempDir()
+	host := PiHost(home)
+	if _, err := SyncHosts([]Host{host}, bin, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	entry := filepath.Join(host.SkillsDir, "tpp", "index.ts")
+	if err := os.WriteFile(entry, []byte("user edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	uninstalled, err := Uninstall(UninstallOptions{Force: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	backup, ok := uninstalled.BackedUp[entry]
+	if !ok {
+		t.Fatalf("force uninstall did not back up the extension: %+v", uninstalled.BackedUp)
+	}
+	if _, err := os.Stat(entry); !os.IsNotExist(err) {
+		t.Fatalf("force uninstall left the extension: %v", err)
+	}
+
+	report, err := Restore(filepath.Base(backup), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Restored) != 1 || report.Restored[0] != entry {
+		t.Fatalf("Restored = %v, want [%s]", report.Restored, entry)
+	}
+	got, err := os.ReadFile(entry)
+	if err != nil || string(got) != "user edit\n" {
+		t.Fatalf("restored bytes = %q, err=%v, want the snapshotted edit", got, err)
+	}
+}

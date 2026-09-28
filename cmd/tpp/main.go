@@ -77,7 +77,8 @@ flags shared by gate, setup, sync, doctor, uninstall, feedback, repair:
   --config-dir <dir>   Claude config directory (default: ~/.claude)
 
 flags for sync and setup:
-  --hosts <a,b,...>    limit installation to named hosts (claude, opencode, gemini, codex)
+  --hosts <a,b,...>    limit installation to named hosts (claude, opencode, gemini, codex);
+                       sync additionally accepts pi, the opt-in extension host (setup refuses it)
   --dry-run            print the plan and write nothing (sync only)
 
 flags for setup and doctor:
@@ -516,7 +517,7 @@ func runSync(args []string) int {
 		return 2
 	}
 
-	selected, err := parseSyncHosts(*hostsFlag, flagSet(fs, "hosts"))
+	selected, err := parseSyncHostsAllowingPi(*hostsFlag, flagSet(fs, "hosts"))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "sync:", err)
 		return 2
@@ -526,7 +527,8 @@ func runSync(args []string) int {
 }
 
 // syncInstall is what sync and setup share: discover the hosts, narrow them to --config-dir and --hosts,
-// run the planner, print its report, and return the exit code with the hosts it ran against.
+// add the opt-in Pi host only when --hosts named it (setup never can), run the planner, print its
+// report, and return the exit code with the hosts it ran against.
 func syncInstall(configDir string, explicitConfigDir bool, selected map[string]bool, opts sync.Options) (int, sync.Discovery) {
 	discovery := discoverSync(configDir, explicitConfigDir)
 	if explicitConfigDir {
@@ -534,6 +536,14 @@ func syncInstall(configDir string, explicitConfigDir bool, selected map[string]b
 	}
 	if selected != nil {
 		discovery.Hosts = filterSyncHosts(discovery.Hosts, selected)
+		if selected["pi"] {
+			home, homeErr := os.UserHomeDir()
+			if homeErr != nil {
+				discovery.Problems = append(discovery.Problems, fmt.Sprintf("the pi host needs a home directory: %v", homeErr))
+			} else {
+				discovery.Hosts = append(discovery.Hosts, sync.PiHost(home))
+			}
+		}
 	}
 
 	text, err := syncReport(discovery, opts)
@@ -608,12 +618,26 @@ func syncPlan() (string, error) {
 	return syncReport(discoverSync("", false), sync.Options{DryRun: true})
 }
 
+// parseSyncHosts reads --hosts for setup, which offers only the discovered skill hosts: setup's
+// doctor pass and closing report are Claude-centered, so the opt-in Pi host stays a usage error
+// there until setup itself learns what a Pi install means (the follow-up task owns that).
 func parseSyncHosts(raw string, explicit bool) (map[string]bool, error) {
+	return parseHostSelection(raw, explicit, nil)
+}
+
+// parseSyncHostsAllowingPi reads --hosts for sync, where naming pi opts into the extension host
+// discovery never offers. The selection stays explicit: pi appears only when named, and only the
+// hosts named are installed.
+func parseSyncHostsAllowingPi(raw string, explicit bool) (map[string]bool, error) {
+	return parseHostSelection(raw, explicit, []string{"pi"})
+}
+
+func parseHostSelection(raw string, explicit bool, extraKnown []string) (map[string]bool, error) {
 	if !explicit {
 		return nil, nil
 	}
 	selected := map[string]bool{}
-	known := sync.KnownHosts()
+	known := append(sync.KnownHosts(), extraKnown...)
 	knownSet := make(map[string]bool, len(known))
 	for _, name := range known {
 		knownSet[name] = true

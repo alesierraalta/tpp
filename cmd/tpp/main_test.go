@@ -1514,6 +1514,66 @@ func TestSyncRefusesAnUnknownHostName(t *testing.T) {
 	}
 }
 
+// sync --hosts pi is the explicit opt-in for the extension host discovery never offers: the
+// selection resolves to PiHost and nothing else — no discovered host receives skills, no
+// settings.json is written for a host that wires no hook — and a dry-run creates nothing.
+func TestSyncHostsPiSelectsOnlyThePiHost(t *testing.T) {
+	bin := buildCLI(t)
+	home := syncTestHome(t)
+
+	dry, code := runCLIWithHome(t, home, bin, "sync", "--hosts", "pi", "--dry-run")
+	if code != 0 {
+		t.Fatalf("sync --hosts pi --dry-run exit = %d\n%s", code, dry)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".pi")); !os.IsNotExist(err) {
+		t.Fatalf("dry-run created the pi config dir: %v", err)
+	}
+
+	out, code := runCLIWithHome(t, home, bin, "sync", "--hosts", "pi")
+	if code != 0 {
+		t.Fatalf("sync --hosts pi exit = %d\n%s", code, out)
+	}
+	if !strings.Contains(out, "host: pi") || strings.Contains(out, "host: claude") {
+		t.Fatalf("report must name pi and no other host:\n%s", out)
+	}
+	entry := filepath.Join(home, ".pi", "agent", "extensions", "tpp", "index.ts")
+	if _, err := os.Stat(entry); err != nil {
+		t.Fatalf("pi extension not installed: %v", err)
+	}
+	for _, dir := range []string{
+		filepath.Join(home, ".claude"),
+		filepath.Join(home, ".config", "opencode"),
+		filepath.Join(home, ".gemini"),
+		filepath.Join(home, ".codex"),
+	} {
+		if _, err := os.Stat(filepath.Join(dir, "skills")); !os.IsNotExist(err) {
+			t.Fatalf("--hosts pi installed skills into %s: %v", dir, err)
+		}
+	}
+	for _, settings := range []string{
+		filepath.Join(home, ".claude", "settings.json"),
+		filepath.Join(home, ".pi", "settings.json"),
+	} {
+		if _, err := os.Stat(settings); !os.IsNotExist(err) {
+			t.Fatalf("--hosts pi wrote hook settings at %s: %v", settings, err)
+		}
+	}
+}
+
+// setup keeps its Claude-centered contract: --hosts pi stays a usage error there because setup's
+// doctor pass and closing report assume skills and a Stop hook. Widening setup is task 5's.
+func TestSetupStillRefusesThePiHost(t *testing.T) {
+	bin := buildCLI(t)
+	home := syncTestHome(t)
+	out, code := runCLIWithHome(t, home, bin, "setup", "--hosts", "pi")
+	if code != 2 {
+		t.Fatalf("setup --hosts pi exit = %d, want 2\n%s", code, out)
+	}
+	if !strings.Contains(out, `unknown host "pi"`) {
+		t.Fatalf("setup --hosts pi must refuse by name:\n%s", out)
+	}
+}
+
 func TestSyncDryRunNamesEveryHost(t *testing.T) {
 	bin := buildCLI(t)
 	home := syncTestHome(t)

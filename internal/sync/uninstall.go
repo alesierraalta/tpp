@@ -119,7 +119,7 @@ func planUninstall(st *state.State, components []manifest.Component, files map[s
 	sort.Strings(hosts)
 	for _, name := range hosts {
 		hostState := st.Hosts[name]
-		host := Host{Name: name, ConfigDir: hostState.ConfigDir, SkillsDir: filepath.Join(hostState.ConfigDir, "skills")}
+		host := hostForConfig(name, hostState.ConfigDir)
 		claims, _ := manifestClaims(host, components, files)
 		paths := make([]string, 0, len(hostState.Assets))
 		for path := range hostState.Assets {

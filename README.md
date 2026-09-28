@@ -149,6 +149,31 @@ When the binary's directory is not on `PATH` it prints the exact `export PATH=..
 warning, not a failure, because the Stop hook calls the absolute path. Run it from the binary you intend
 to keep: the hook records the path of the binary that ran it.
 
+### Modes: `setup` and `doctor` share `--mode auto|standalone|gentle`
+
+Run the mode you mean; it is resolved before any work runs, so a mode this build cannot honor stops
+at the flag instead of reporting under another contract:
+
+```sh
+tpp setup                      # auto: standalone, gentle only with a verified Gentle signal
+tpp doctor --mode standalone   # always the standalone contract
+tpp doctor --mode gentle       # refused (exit 2, "pending integration") without that signal
+tpp doctor --mode turbo        # refused (exit 2) naming auto, standalone, gentle
+```
+
+| `--mode` | Runs under |
+|---|---|
+| `auto` (default) | `gentle` when the verified Gentle signal is active, `standalone` otherwise — so outside the Pi extension `auto` is standalone, even with gentle-ai installed |
+| `standalone` | always standalone |
+| `gentle` | gentle under that same signal; otherwise refused as `pending integration` (exit 2) |
+
+The only signal `auto` and `gentle` accept is `TPP_GENTLE_OBSERVATION=pi-session-gentle-active`, and
+only in the environment of the single `tpp doctor` child the Pi extension spawns (through
+`execFile`'s env — no `process.env` mutation, no file), so it is process-scoped. It is a session UX
+observation, not authentication or security authority: any process can set an environment variable,
+nothing here verifies identity or trust, and it may steer only which mode this process selects and
+reports — never anything else.
+
 Step by step, for a person who wants to see each part:
 
 ```sh
@@ -173,7 +198,8 @@ It exits 0, prints a Stop payload naming the changed file, and leaves one line i
 reading `"fired":true`. The gate always exits 0: it grades the turn and never breaks it.
 
 `sync` installs the embedded skills into every host it finds: `~/.claude/skills`,
-`~/.config/opencode/skills`, `~/.gemini/skills`, and `~/.codex/skills`. The Stop hook is wired only
+`~/.config/opencode/skills`, `~/.gemini/skills`, and `~/.codex/skills`. Discovery never offers Pi —
+the Pi extension is the explicit `--hosts pi` opt-in described below. The Stop hook is wired only
 where its transport is known—Claude Code's `~/.claude/settings.json`; OpenCode, Gemini, and Codex
 receive skills but their transports are documented rather than wired. Claude's sync merges into
 `~/.claude/settings.json`: every existing hook and setting is preserved, the gate is added once,
@@ -184,6 +210,26 @@ written. Use `--config-dir` to target another Claude directory, `--hosts` to nar
 and `--dry-run` to see the plan. Without an explicit `--config-dir`, commands resolve the directory
 in this order: `CLAUDE_CONFIG_DIR`, then `PI_CODING_AGENT_DIR`, then `~/.claude`; empty values are
 ignored, and a ledger that lives under a different directory is reached with `--config-dir`.
+
+### The Pi extension (opt-in)
+
+The tpp core is shared: the Pi extension is a thin adapter over the same binaries — `/tpp check`,
+`/tpp feedback --summary`, and `/tpp doctor` run the CLI documented here. It adds no skills and
+duplicates nothing of Gentle's: ODD, Engram memory, and the review lifecycle remain Gentle's
+(gentle-ai / gentle-pi), and the extension never calls review authority.
+
+| Command | Behavior |
+|---|---|
+| `tpp sync --hosts pi` | The explicit opt-in, and the only way Pi is ever installed — discovery never offers it. It installs only the `tpp` extension component at `~/.pi/agent/extensions/tpp/index.ts`, the path Pi loads; a pi-only sync writes no skills and no hook settings. |
+| `tpp setup --hosts pi` | Refused as a usage error (exit 2): setup's install and doctor pass are Claude-centered; only `sync` accepts `pi`. |
+| `tpp doctor` | Checks the selected Claude config directory — skill drift, Stop-hook wiring, capabilities. It does not check Pi extension health. |
+| `tpp repair` | Claude-only: re-syncs the managed skills and re-wires Claude's Stop hook; the Pi extension is untouched. |
+
+Load the extension (`pi --extension <path>/tpp.ts`, or let Pi load it from
+`~/.pi/agent/extensions/`) and Pi gains a native `/tpp` command. The Pi Stop hook is a separate,
+**not verified** surface: its payload contract was read from the pi-hooks package and nobody has
+watched it fire here, so merging `assets/hosts/pi/settings.stop-hook.json` into Pi's settings is
+ready to test, not working.
 
 ### Upgrading from rdd-plus
 
@@ -200,8 +246,10 @@ ones win when both are present:
   until one is removed. tpp never renames your file.
 - `RDD_PLUS_HOME` and `RDD_PLUS_UPDATE_BASE_URL` are read when `TPP_HOME` and `TPP_UPDATE_BASE_URL`
   are unset.
-- The OpenCode and Pi snippets are copies, not managed files: re-copy `assets/hosts/opencode/tpp.ts`
-  and the `tpp gate` hook from `assets/hosts/pi/settings.stop-hook.json`.
+- The OpenCode snippet and Pi's settings hook are copies, not managed files: re-copy
+  `assets/hosts/opencode/tpp.ts` and the `tpp gate` hook from
+  `assets/hosts/pi/settings.stop-hook.json`. The Pi extension is different: `tpp sync --hosts pi`
+  manages `~/.pi/agent/extensions/tpp/index.ts`.
 
 ### State and safety
 
@@ -222,16 +270,16 @@ Commands table below.
 | Command | What it does |
 |---|---|
 | `tpp gate` | The Stop hook. Reads the hook payload on stdin, decides, logs one line, and emits Stop feedback when a session changed production source without loading the adversarial testing discipline. Always exits 0. |
-| `tpp setup [--hosts <a,b>] [--config-dir <dir>]` | Installs and verifies in one step: the same sync as `tpp sync`, the same checks as `tpp doctor` on the directory it wrote, and a PATH check that prints the `export PATH=...` line when the binary's directory is missing. Ends on `tpp is installed and working: ...` with exit 0, or exits with sync's code or 1 (`setup: not finished: ...`). |
-| `tpp sync [--dry-run] [--force]` | Installs the embedded skills into discovered hosts and wires Claude's Stop hook. `--dry-run` prints the plan and writes nothing; `--force` replaces modified managed files after snapshotting them. Idempotent. |
-| `tpp doctor` | Reports installed skills (and whether they drift from the embedded version), whether the hook is wired, and which optional tools are on PATH with what degrades without each. `--json` for machines. Exit 1 when git, a skill, or the hook is missing. |
+| `tpp setup [--hosts <a,b>] [--config-dir <dir>] [--mode <m>]` | Installs and verifies in one step: the same sync as `tpp sync`, the same checks as `tpp doctor` on the directory it wrote, and a PATH check that prints the `export PATH=...` line when the binary's directory is missing. `--hosts` accepts only the discovered skill hosts — `pi` is a usage error here (exit 2); only `sync` accepts it. Ends on `tpp is installed and working: ...` with exit 0, or exits with sync's code, 2 for a refused flag value, or 1 (`setup: not finished: ...`). |
+| `tpp sync [--dry-run] [--force] [--hosts <a,b>]` | Installs the embedded skills into discovered hosts and wires Claude's Stop hook. `--dry-run` prints the plan and writes nothing; `--force` replaces modified managed files after snapshotting them. `--hosts` narrows to the named hosts; naming `pi` is the only way the Pi extension is installed (see [The Pi extension](#the-pi-extension-opt-in)) and installs only that file. Idempotent. |
+| `tpp doctor [--mode <m>] [--config-dir <dir>] [--json]` | Reports installed skills (and whether they drift from the embedded version), whether the hook is wired, and which optional tools are on PATH with what degrades without each — against the selected Claude config directory, not Pi extension health. `--mode` per [Modes](#modes-setup-and-doctor-share---mode-autostandalonegentle); `--json` for machines. Exit 1 when git, a skill, or the hook is missing. |
 | `tpp status [--json]` | Reports local installation state, features, and available version — the cached result after `update` has checked, or `unknown (no update check yet)` before the first check. |
 | `tpp feature list\|enable\|disable <id> [--preview]` | Lists or toggles optional features; preview without changing state. |
 | `tpp tui` | Interactive menu over the status report, feature toggles (list, enable/disable, preview), and the sync dry-run plan. Needs an interactive terminal on Linux or macOS; elsewhere it refuses and points at `status`, `feature`, and `sync --dry-run`. |
 | `tpp update [--check]` | Checks the Go module proxy for a newer release and installs it with `go install github.com/alesierraalta/tpp/cmd/tpp@<tag>` (prints the command when `go` is absent); `--check` only refreshes the offline cache. |
 | `tpp uninstall [--dry-run] [--orphans] [--force] [--config-dir <dir>]` | Removes managed assets and unwires the Stop hook; never touches foreign files. Modified content needs `--force` (snapshot first); `--orphans` also removes assets the manifest no longer ships; `--dry-run` writes nothing. |
 | `tpp restore [--id <backup-id>] [--dry-run]` | Copies a backup store entry back onto its original paths (default: the latest backup). |
-| `tpp repair [--config-dir <dir>] [--dry-run] [--force]` | Brings a broken install back to what `doctor` reports healthy (missing/drifted managed skills and Stop hook re-wire); a healthy install is a no-op. |
+| `tpp repair [--config-dir <dir>] [--dry-run] [--force]` | Brings a broken install back to what `doctor` reports healthy (missing/drifted managed skills and Stop hook re-wire), Claude-only — the Pi extension is untouched; a healthy install is a no-op. |
 | `tpp plan` | Writes the plan skeleton, checks the contract, names the breadth still owed, and records one Findings row from flags. `add-finding` writes that row only: it refuses a row the checker would reject and never writes an evidence row. |
 | `tpp plan admit` | Reads the plan's Evidence ledger and decides every row. A dry run by default: `--execute` runs each admitted row's one command through `sh -c` twice, so a pin is only recorded over an output that held still, `--sandbox` observes it in a container with the tree mounted read-only and no network (it needs docker, and the default image is pulled on first use) and replays a declared `Mutate` edit against a writable copy of the tree, where the command must go red under the edit and green once the file is put back (a cell may hold a survey of edits separated by ` ;; `, each replayed on its own copy; an edit prefixed `~ ` is declared equivalent and must stay green, or the row is refused as `mutation-not-equivalent`; an admitted survey prints `N killed, M equivalent`; an edit whose own text contains ` ;; ` cannot be expressed), a row whose `Expect` cell is `fail` pins a test observed red (only an exit from 1 to 125 qualifies, so a missing command (127) is never pinned as red; a zero exit is refused as `expected-failure-passed`), `--only <ids>` narrows the run, `--timeout` bounds one command, and `--record <ids>` writes the observed digest into the plan together with the mode it was observed in. Exit 1 when a row is refused. |
 | `tpp plan export [--path <plan>] [--commit <sha>]` | Prints the plan's Findings as Markdown for a pull request comment: one row per finding with its location, severity, status, pinning test and the evidence that re-observes it (the Admit command, the digest shortened to 12 hex, and `Expect: fail` when declared), headed by the commit covered (default the short HEAD) and the plan's base name, never its directory. Every cell is sanitised like the gaps report's quotes. It never posts: `tpp plan export --path <plan> \| gh pr comment <n> -F -` is the operator's call. |
@@ -276,6 +324,7 @@ evidence record; anything not executed is a hypothesis.
 go test ./...           # unit, integration (real git repositories), and differential tests
 go run ./tools/mutants  # 23 literal mutants on the gate; every one must be killed
 make build              # bin/tpp
+node --test assets/hosts/pi/tpp.test.mjs  # the Pi extension's pure surface
 ```
 
 Integration tests build the CLI once and drive it with real repositories in temporary
@@ -283,7 +332,8 @@ directories; they are skipped under `-short`. The differential test compares the
 original Node hook when `node` and `~/.claude/hooks/testing-gate.mjs` are present.
 
 CI runs that suite on every pull request and on every push to `master`, with `node` installed so the
-benchmark's JavaScript cases run instead of skipping. It checks `gofmt`, `go vet`, the build and
+benchmark's JavaScript cases run instead of skipping, and it runs
+`node --test assets/hosts/pi/tpp.test.mjs` for the Pi extension. It checks `gofmt`, `go vet`, the build and
 `go test ./... -count=1` — the same commands `make vet`, `make build` and `make test` run locally.
 
 ## Pending
@@ -355,7 +405,8 @@ on top is knowing what THIS session did, which the repository cannot tell you.
 | Claude Code | verified: `sync` wires the Stop hook, `gate` reads its payload and answers in its schema, `doctor` runs the wired command and requires exit zero |
 | Anything that runs a command | verified: `check`, `plan init`, `plan check`, `plan gaps` need no host at all |
 | Gemini CLI | not implemented: its `settings.json` takes command hooks under different event names, and its payload and output schemas are not verified here |
-| Codex, OpenCode, Pi | not implemented: each has its own extension surface, and guessing a payload schema would ship a hook that silently never fires |
+| Pi | opt-in extension: `sync --hosts pi` installs it and Pi exposes a native `/tpp` command (`check`, `feedback --summary`, `doctor`); its dispatch is tested in CI (`assets/hosts/pi/tpp.test.mjs`). The native Pi Stop hook is **not verified** — payload contract read from the pi-hooks package, never watched firing |
+| Codex, OpenCode | not implemented: each has its own extension surface, and guessing a payload schema would ship a hook that silently never fires |
 
 Nothing above is a promise about a host that is not listed as verified. A hook that looks wired and
 never answers is the failure this project keeps finding, so a host counts as supported when its

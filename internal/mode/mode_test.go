@@ -1,6 +1,7 @@
 package mode
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -85,10 +86,48 @@ func TestResolveRejectsAnUnknownMode(t *testing.T) {
 	}
 }
 
-// There is no verified Gentle runtime integration in this build, and the seam must say so:
-// a signal that answered true would send both commands into a mode nothing implements.
-func TestNoVerifiedGentleSignalIsSupplied(t *testing.T) {
+// The protocol with the Pi extension (assets/hosts/pi/tpp.ts); each side's tests pin its
+// constant to these literals so neither shore can drift alone.
+const (
+	protocolEnv   = "TPP_GENTLE_OBSERVATION"
+	protocolValue = "pi-session-gentle-active"
+)
+
+// The extension's in-session observation — session UX evidence for mode selection, never
+// authentication or security authority (documented in mode.go) — is the one signal it accepts.
+func TestVerifiedGentleSignalAcceptsTheExtensionObservation(t *testing.T) {
+	if GentleObservationEnv != protocolEnv || GentleObservationValue != protocolValue {
+		t.Fatalf("protocol drift: mode declares (%q, %q), the extension protocol is (%q, %q)",
+			GentleObservationEnv, GentleObservationValue, protocolEnv, protocolValue)
+	}
+	t.Setenv(protocolEnv, protocolValue)
+	if !VerifiedGentleSignal() {
+		t.Fatal("VerifiedGentleSignal() = false under the extension's observation; the adapter's session evidence must reach the CLI")
+	}
+}
+
+// Anything that is not the exact observation must not select gentle, or the seam would accept
+// noise as evidence.
+func TestVerifiedGentleSignalRejectsAnyOtherValue(t *testing.T) {
+	for _, value := range []string{"", "1", "true", "gentle-ai", protocolValue + "x", " " + protocolValue} {
+		t.Setenv(protocolEnv, value)
+		if VerifiedGentleSignal() {
+			t.Errorf("VerifiedGentleSignal() = true for %q; only the exact extension observation counts", value)
+		}
+	}
+}
+
+// Without the observation there is no signal: outside the extension auto stays standalone, and
+// neither PATH nor versions are consulted (see mode.go).
+func TestVerifiedGentleSignalIsAbsentWithoutTheObservation(t *testing.T) {
+	original, had := os.LookupEnv(protocolEnv)
+	os.Unsetenv(protocolEnv)
+	t.Cleanup(func() {
+		if had {
+			os.Setenv(protocolEnv, original)
+		}
+	})
 	if VerifiedGentleSignal() {
-		t.Fatal("VerifiedGentleSignal() = true: no verified Gentle runtime integration exists in this build")
+		t.Fatal("VerifiedGentleSignal() = true without the observation; outside the extension auto must stay standalone")
 	}
 }

@@ -2,7 +2,10 @@
 // mode the command runs under, so both commands select and report modes the same way.
 package mode
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 // The values --mode accepts.
 const (
@@ -11,12 +14,22 @@ const (
 	Gentle     = "gentle"
 )
 
-// VerifiedGentleSignal reports whether a verified active Gentle runtime integration signal is
-// present. It answers false in this build: no Gentle runtime interface exists yet, and neither
-// a `gentle-ai` binary on PATH nor a version string counts as the signal — only the integration
-// itself can supply it, so nothing here may shortcut to "active" to make a mode selectable.
+// GentleObservationEnv and GentleObservationValue are the protocol with the Pi extension
+// (assets/hosts/pi/tpp.ts): the extension passes this observation to the single child tpp process
+// it spawns through child_process.execFile's env — no process.env mutation, no file — so it is
+// process-scoped. The observation is session UX evidence for mode selection and reporting, not
+// authentication or security authority: any process that can set an environment variable can set
+// it, nothing here verifies identity or trust, and it may steer only which mode this process
+// selects and reports — never anything else.
+const (
+	GentleObservationEnv   = "TPP_GENTLE_OBSERVATION"
+	GentleObservationValue = "pi-session-gentle-active"
+)
+
+// VerifiedGentleSignal accepts only that exact observation and consults nothing else — no PATH,
+// no version, no file — so outside the extension auto stays standalone even with gentle-ai there.
 func VerifiedGentleSignal() bool {
-	return false
+	return os.Getenv(GentleObservationEnv) == GentleObservationValue
 }
 
 // Resolve maps a requested --mode value to the mode the command runs under. The empty request

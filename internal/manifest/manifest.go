@@ -21,13 +21,25 @@ const (
 	KindSkill       Kind = "skill"
 	KindHook        Kind = "hook"
 	KindInstruction Kind = "instruction"
+	// KindExtension is one host adapter file installed under the host's entry-point name
+	// (Pi loads <extension-dir>/index.ts): opt-in per host, never a default.
+	KindExtension Kind = "extension"
 )
+
+// skillHosts is the host set the skill tree installs into. A wildcard would also claim the
+// opt-in Pi host, whose managed root is Pi's extension directory; naming the hosts keeps a
+// pi-only sync to the extension and keeps skills out of extension directories.
+var skillHosts = []string{"claude", "opencode", "gemini", "codex"}
+
+// extensionEntry is the destination name inside an extension directory: the payload's embed
+// name (tpp.ts) never decides where the host loads it from.
+const extensionEntry = "index.ts"
 
 // Component is one thing tpp can install.
 type Component struct {
 	ID      string
 	Kind    Kind
-	Source  string   // embed root for file-backed kinds, empty for a hook
+	Source  string   // embed path for file-backed kinds (a skill root or a single adapter file), empty for a hook
 	Hosts   []string // {"*"} for every host, otherwise explicit host names
 	Default bool
 }
@@ -39,7 +51,7 @@ func Components() []Component {
 		panic("embedded skills missing: " + err.Error())
 	}
 
-	components := make([]Component, 0, len(entries)+1)
+	components := make([]Component, 0, len(entries)+2)
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -48,7 +60,7 @@ func Components() []Component {
 			ID:      entry.Name(),
 			Kind:    KindSkill,
 			Source:  "skills/" + entry.Name(),
-			Hosts:   []string{"*"},
+			Hosts:   append([]string(nil), skillHosts...),
 			Default: true,
 		})
 	}
@@ -57,6 +69,13 @@ func Components() []Component {
 		Kind:    KindHook,
 		Hosts:   []string{"claude"},
 		Default: true,
+	})
+	components = append(components, Component{
+		ID:      "tpp",
+		Kind:    KindExtension,
+		Source:  "hosts/pi/tpp.ts",
+		Hosts:   []string{"pi"},
+		Default: false,
 	})
 	return components
 }
@@ -114,6 +133,26 @@ func ComponentFiles(id string) ([]File, error) {
 }
 
 func filesFor(component Component) ([]File, error) {
+	if component.Kind == KindExtension {
+		// One embedded file, one destination: Pi loads <extension-dir>/index.ts, and the
+		// writer resolves the same bytes through assets.Tree, so the digest spans both roots.
+		fsys, rel, err := assets.Tree(component.Source)
+		if err != nil {
+			return nil, err
+		}
+		data, err := fs.ReadFile(fsys, rel)
+		if err != nil {
+			return nil, fmt.Errorf("read embedded extension %q: %w", component.Source, err)
+		}
+		digest := sha256.Sum256(data)
+		return []File{{
+			Component: component.ID,
+			Source:    component.Source,
+			Rel:       extensionEntry,
+			SHA256:    hex.EncodeToString(digest[:]),
+			Size:      int64(len(data)),
+		}}, nil
+	}
 	var files []File
 	skills := assets.Skills()
 	err := fs.WalkDir(skills, component.ID, func(rel string, entry fs.DirEntry, err error) error {

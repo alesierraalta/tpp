@@ -8,11 +8,21 @@ import (
 	"strings"
 )
 
-// Host is an installed agent host and the directory from which it loads skills.
+// Host is an installed agent host and the directory from which it loads skills. For hosts
+// whose payload is not a skill tree (Pi), SkillsDir is the host's managed root instead and
+// the manifest places components under the host's own convention.
 type Host struct {
 	Name      string
 	ConfigDir string
 	SkillsDir string
+}
+
+// PiHost is the opt-in Pi host: SkillsDir is Pi's extension directory, so the shared claim
+// layout lands each component at <SkillsDir>/<component>/index.ts, which is the extension
+// path Pi loads. Discovery never offers it; a caller that wants Pi passes this host directly.
+func PiHost(home string) Host {
+	configDir := filepath.Join(home, ".pi")
+	return Host{Name: "pi", ConfigDir: configDir, SkillsDir: filepath.Join(configDir, "agent", "extensions")}
 }
 
 // Discovery is the non-fatal result of looking for host configuration directories.

@@ -353,7 +353,11 @@ func applyAsset(action Action, host Host, opts Options, payloads map[string]mani
 		report.BackedUp[action.Component] = backups.Dir()
 	}
 	if !opts.DryRun {
-		if err := writeSkillFile(assets.Skills(), strings.TrimPrefix(payload.Source, "skills/"), action.Path); err != nil {
+		fsys, rel, err := assets.Tree(payload.Source)
+		if err != nil {
+			return err
+		}
+		if err := writeSkillFile(fsys, rel, action.Path); err != nil {
 			return err
 		}
 		changed, err := recordAssetValue(installationState, host.Name, action.Path, payload)
@@ -591,8 +595,8 @@ func writeSkill(skills fs.FS, name, target string) error {
 	})
 }
 
-func writeSkillFile(skills fs.FS, source, target string) error {
-	data, err := fs.ReadFile(skills, source)
+func writeSkillFile(fsys fs.FS, source, target string) error {
+	data, err := fs.ReadFile(fsys, source)
 	if err != nil {
 		return err
 	}

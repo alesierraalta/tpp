@@ -1,13 +1,20 @@
 package sync
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	root "github.com/alesierraalta/tpp/assets"
 	"github.com/alesierraalta/tpp/internal/assets"
+	"github.com/alesierraalta/tpp/internal/state"
 )
 
 const bin = "/opt/tools/tpp"
@@ -673,4 +680,138 @@ func TestReportListsChangesAndCountsTheRest(t *testing.T) {
 	if !strings.Contains(out, "c ") || !strings.Contains(out, "written") || !strings.Contains(out, "2 skills unchanged") {
 		t.Errorf("write report does not list the written skill and count the unchanged ones:\n%s", out)
 	}
+}
+
+// An explicitly supplied pi host receives the extension and nothing else: no skill copies, no
+// hook settings, and a state record that names the installed bytes.
+func TestSyncPiHostReceivesOnlyTheExtension(t *testing.T) {
+	t.Setenv("TPP_HOME", t.TempDir())
+	home := t.TempDir()
+	host := Host{Name: "pi", ConfigDir: filepath.Join(home, ".pi"), SkillsDir: filepath.Join(home, ".pi", "agent", "extensions")}
+	report, err := SyncHosts([]Host{host}, bin, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entry := filepath.Join(host.SkillsDir, "tpp", "index.ts")
+	got, err := os.ReadFile(entry)
+	if err != nil {
+		t.Fatalf("pi extension not installed: %v", err)
+	}
+	want, err := fs.ReadFile(root.Root, "hosts/pi/tpp.ts")
+	if err != nil {
+		t.Fatalf("embedded hosts/pi/tpp.ts: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("installed extension is %d bytes, want the embedded tpp.ts (%d bytes)", len(got), len(want))
+	}
+
+	var unwanted []string
+	if err := filepath.WalkDir(home, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && (d.Name() == "SKILL.md" || d.Name() == "settings.json" || d.Name() == "settings.stop-hook.json") {
+			unwanted = append(unwanted, path)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(unwanted) != 0 {
+		t.Fatalf("pi host received files the manifest never ships for it: %v", unwanted)
+	}
+
+	gotReport := hostReport(t, report, "pi")
+	if !contains(gotReport.Written, "tpp") {
+		t.Fatalf("pi report wrote %v, want the extension component", gotReport.Written)
+	}
+	if gotReport.SettingsRead || gotReport.SettingsChanged || len(gotReport.RemovedHooks) != 0 {
+		t.Fatalf("pi host must not touch hook settings, got %+v", gotReport)
+	}
+
+	installationState, err := state.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostState := installationState.Hosts["pi"]
+	record, recorded := hostState.Assets[entry]
+	digest := sha256.Sum256(want)
+	if !recorded || record.SHA256 != hex.EncodeToString(digest[:]) {
+		t.Fatalf("state record for the extension = %+v, want sha256:%s", record, hex.EncodeToString(digest[:]))
+	}
+	if len(hostState.Components) != 1 || hostState.Components[0] != "tpp" {
+		t.Fatalf("state components for pi = %v, want exactly [tpp]", hostState.Components)
+	}
+}
+
+// The shared engine's guarantees come from the same code path: dry-run writes nothing, a second
+// run is a no-op, and a user-edited extension is refused until --force snapshots it.
+func TestSyncPiHostDryRunIdempotenceAndBackup(t *testing.T) {
+	stateRoot := t.TempDir()
+	t.Setenv("TPP_HOME", stateRoot)
+	home := t.TempDir()
+	host := Host{Name: "pi", ConfigDir: filepath.Join(home, ".pi"), SkillsDir: filepath.Join(home, ".pi", "agent", "extensions")}
+	entry := filepath.Join(host.SkillsDir, "tpp", "index.ts")
+
+	dry, err := SyncHosts([]Host{host}, bin, Options{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !errors.Is(mustStat(t, entry), os.ErrNotExist) {
+		t.Fatal("dry-run wrote the pi extension")
+	}
+	if got := hostReport(t, dry, "pi").Counts[ActionCreate]; got != 1 {
+		t.Fatalf("dry-run planned %d creates, want exactly the extension", got)
+	}
+
+	if _, err := SyncHosts([]Host{host}, bin, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	second, err := SyncHosts([]Host{host}, bin, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := hostReport(t, second, "pi"); len(got.Written) != 0 || !contains(got.Unchanged, "tpp") {
+		t.Fatalf("second run wrote %v, unchanged %v", got.Written, got.Unchanged)
+	}
+
+	user := []byte("user edit\n")
+	if err := os.WriteFile(entry, user, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	refused, err := SyncHosts([]Host{host}, bin, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(entry); !bytes.Equal(got, user) {
+		t.Fatal("sync without --force replaced the user edit")
+	}
+	if got := hostReport(t, refused, "pi"); !contains(got.Modified, entry) {
+		t.Fatalf("modified extension not reported: %+v", got.Modified)
+	}
+	if dirs := backupDirs(t, stateRoot); len(dirs) != 0 {
+		t.Fatalf("refusal created backups: %v", dirs)
+	}
+
+	forced, err := SyncHosts([]Host{host}, bin, Options{Force: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := fs.ReadFile(root.Root, "hosts/pi/tpp.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(entry); !bytes.Equal(got, want) {
+		t.Fatal("--force did not restore the embedded extension bytes")
+	}
+	if hostReport(t, forced, "pi").BackedUp["tpp"] == "" {
+		t.Fatal("--force did not report a central backup for the extension")
+	}
+}
+
+func mustStat(t *testing.T, path string) error {
+	t.Helper()
+	_, err := os.Stat(path)
+	return err
 }

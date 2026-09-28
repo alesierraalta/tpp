@@ -52,3 +52,22 @@ func hostNames(hosts []Host) []string {
 	}
 	return names
 }
+
+// Pi is opt-in: discovery never offers it, and the constructor names the extension directory
+// Pi actually loads (<config>/agent/extensions/<component>/index.ts).
+func TestDiscoveryNeverOffersPiAndPiHostFollowsTheExtensionConvention(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".pi", "agent", "extensions"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, host := range DiscoverHosts(home, "").Hosts {
+		if host.Name == "pi" {
+			t.Fatal("discovery must not offer the opt-in pi host")
+		}
+	}
+
+	host := PiHost(home)
+	if host.Name != "pi" || host.ConfigDir != filepath.Join(home, ".pi") || host.SkillsDir != filepath.Join(home, ".pi", "agent", "extensions") {
+		t.Fatalf("PiHost(home) = %+v, want the .pi config dir with agent/extensions as the managed root", host)
+	}
+}

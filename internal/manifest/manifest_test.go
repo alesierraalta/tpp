@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	root "github.com/alesierraalta/tpp/assets"
 	"github.com/alesierraalta/tpp/internal/assets"
 )
 
@@ -130,5 +131,72 @@ func TestComponentFilesRefusesAComponentWithNoPayload(t *testing.T) {
 	files, err := ComponentFiles("stop-gate")
 	if err == nil {
 		t.Fatalf("ComponentFiles(%q) returned files %v without an error", "stop-gate", files)
+	}
+}
+
+// The Pi extension is an opt-in component whose payload is exactly one embedded file,
+// installed under Pi's entry-point name; the adapter's hook settings and its tests are
+// shipped files, never manifest payload.
+func TestPiExtensionIsOptInAndHashedFromTheEmbeddedFile(t *testing.T) {
+	var ext *Component
+	for _, component := range Components() {
+		if component.ID == "tpp" {
+			c := component
+			ext = &c
+		}
+	}
+	if ext == nil {
+		t.Fatal(`Components() has no "tpp" extension component`)
+	}
+	if ext.Kind != Kind("extension") || ext.Source != "hosts/pi/tpp.ts" || ext.Default || len(ext.Hosts) != 1 || ext.Hosts[0] != "pi" {
+		t.Fatalf("tpp component = %+v, want an opt-in, pi-only extension over hosts/pi/tpp.ts", *ext)
+	}
+	if !AppliesTo("pi", *ext) || AppliesTo("claude", *ext) {
+		t.Fatalf("tpp applies to the wrong hosts: %v", ext.Hosts)
+	}
+
+	files, err := Files()
+	if err != nil {
+		t.Fatalf("manifest files: %v", err)
+	}
+	payload := files["tpp"]
+	if len(payload) != 1 {
+		t.Fatalf("tpp payload = %d files, want exactly one: %+v", len(payload), payload)
+	}
+	file := payload[0]
+	if file.Source != "hosts/pi/tpp.ts" || file.Rel != "index.ts" {
+		t.Fatalf("tpp file = source %q rel %q, want hosts/pi/tpp.ts installed as index.ts", file.Source, file.Rel)
+	}
+	want, err := fs.ReadFile(root.Root, "hosts/pi/tpp.ts")
+	if err != nil {
+		t.Fatalf("hosts/pi/tpp.ts must be embedded: %v", err)
+	}
+	digest := sha256.Sum256(want)
+	if file.SHA256 != hex.EncodeToString(digest[:]) || file.Size != int64(len(want)) {
+		t.Fatalf("tpp digest/size = %s/%d, want sha256:%s/%d", file.SHA256, file.Size, hex.EncodeToString(digest[:]), len(want))
+	}
+	for id, entries := range files {
+		for _, entry := range entries {
+			if strings.Contains(entry.Source, "settings.stop-hook") || strings.Contains(entry.Source, "tpp.test.mjs") {
+				t.Errorf("component %q ships %s; only the extension entry point is installed", id, entry.Source)
+			}
+		}
+	}
+}
+
+// Skills must not claim Pi's extension directory, and must keep claiming the four known hosts.
+func TestSkillComponentsNameTheirHostsAndSkipPi(t *testing.T) {
+	for _, component := range Components() {
+		if component.Kind != KindSkill {
+			continue
+		}
+		if AppliesTo("pi", component) {
+			t.Errorf("skill %q would install into Pi's extension directory", component.ID)
+		}
+		for _, host := range []string{"claude", "opencode", "gemini", "codex"} {
+			if !AppliesTo(host, component) {
+				t.Errorf("skill %q does not apply to %s", component.ID, host)
+			}
+		}
 	}
 }

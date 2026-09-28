@@ -152,13 +152,52 @@ func TestDoctorJSONShape(t *testing.T) {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"config_dir", "skills", "hook_wired", "capabilities", "problems", "healthy"} {
+	for _, key := range []string{"config_dir", "mode", "skills", "hook_wired", "capabilities", "problems", "healthy"} {
 		if _, ok := m[key]; !ok {
 			t.Errorf("json report lacks %q", key)
 		}
 	}
 	if m["problems"] == nil {
 		t.Fatal("problems must serialize as an array, never null")
+	}
+}
+
+// The report must carry the mode its health contract ran under, in both halves of the output:
+// a machine-readable consumer of `tpp doctor --json` needs to know which contract the verdict
+// came from, and the text header says the same thing for a person.
+func TestReportNamesTheModeItRanUnder(t *testing.T) {
+	r := Run(synced(t), allPresent)
+	r.Mode = "standalone"
+	if !strings.Contains(r.String(), "mode standalone") {
+		t.Fatalf("text report does not name the mode:\n%s", r.String())
+	}
+	raw, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"mode":"standalone"`) {
+		t.Fatalf("json report does not carry the mode:\n%s", raw)
+	}
+}
+
+// Standalone health is defined without Gentle AI: the contract this build runs must be healthy
+// when neither the Gentle runtime nor Engram exists on the machine at all, so their absence is
+// reported as a degradation the flow names, never as a missing requirement.
+func TestStandaloneHealthDoesNotRequireGentleOrEngram(t *testing.T) {
+	noGentle := func(name string) (string, error) {
+		if name == "gentle-ai" || name == "engram" {
+			return "", errors.New("not found")
+		}
+		return allPresent(name)
+	}
+	r := Run(synced(t), noGentle)
+	if !r.Healthy {
+		t.Fatalf("standalone health must not require Gentle or Engram: %v", r.Problems)
+	}
+	for _, c := range r.Capabilities {
+		if (c.Name == "gentle-ai" || c.Name == "engram") && c.Required {
+			t.Errorf("%s must not be required in standalone mode", c.Name)
+		}
 	}
 }
 

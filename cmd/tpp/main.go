@@ -26,6 +26,7 @@ import (
 	"github.com/alesierraalta/tpp/internal/feedback"
 	"github.com/alesierraalta/tpp/internal/gate"
 	"github.com/alesierraalta/tpp/internal/hookcmd"
+	"github.com/alesierraalta/tpp/internal/mode"
 	"github.com/alesierraalta/tpp/internal/plan"
 	"github.com/alesierraalta/tpp/internal/repair"
 	"github.com/alesierraalta/tpp/internal/sanitize"
@@ -78,6 +79,11 @@ flags shared by gate, setup, sync, doctor, uninstall, feedback, repair:
 flags for sync and setup:
   --hosts <a,b,...>    limit installation to named hosts (claude, opencode, gemini, codex)
   --dry-run            print the plan and write nothing (sync only)
+
+flags for setup and doctor:
+  --mode <m>           harness mode: auto (default; resolves to standalone until a verified Gentle
+                       runtime integration signal exists), standalone, or gentle (refused as
+                       pending integration), resolved before any work runs
 
 bench run [--cases <glob>] [--runner pi|claude] [--model <m>] [--runs N] [--max-turns N] [--timeout 30m]
           [--max-cost-usd N] [--out <dir>] [--bench-dir <dir>] [--dry-run] [--keep]
@@ -731,11 +737,19 @@ func runRepair(args []string) int {
 func runDoctor(args []string) int {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	configDir := fs.String("config-dir", defaultConfigDir(), "Claude config directory")
+	modeFlag := fs.String("mode", mode.Auto, "harness mode: auto, standalone, or gentle")
 	asJSON := fs.Bool("json", false, "machine-readable output")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	report := doctorReport(*configDir)
+	// Resolve before inspecting anything: a mode this build cannot run must be refused at the
+	// flag, with the reason, rather than answered with a report from a different contract.
+	runMode, err := mode.Resolve(*modeFlag, mode.VerifiedGentleSignal())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "doctor:", err)
+		return 2
+	}
+	report := doctorReport(*configDir, runMode)
 	if *asJSON {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")

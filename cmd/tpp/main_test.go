@@ -91,6 +91,12 @@ func TestCLIContract(t *testing.T) {
 		{name: "gate on empty stdin exits 0", args: []string{"gate"}, stdin: "", wantExit: 0},
 		{name: "gate on malformed stdin exits 0", args: []string{"gate"}, stdin: "{not json", wantExit: 0},
 		{name: "gate on an unknown flag exits 0", args: []string{"gate", "--nope"}, stdin: "{}", wantExit: 0},
+		// The mode contract is refused at the flag, before any work: an unknown value names the
+		// valid ones, gentle says why it cannot run, and commands that take no --mode reject it.
+		{name: "usage documents --mode", wantExit: 2, wantOut: "--mode <"},
+		{name: "doctor with an unknown mode exits 2", args: []string{"doctor", "--mode", "turbo"}, wantExit: 2, wantOut: "unknown mode"},
+		{name: "doctor refuses gentle as pending integration", args: []string{"doctor", "--mode", "gentle"}, wantExit: 2, wantOut: "pending integration"},
+		{name: "sync does not accept --mode", args: []string{"sync", "--mode", "standalone"}, wantExit: 2, wantOut: "flag provided but not defined"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1949,5 +1955,118 @@ func TestSetupIsNotFinishedWhenARequiredToolIsMissing(t *testing.T) {
 				t.Fatalf("setup claimed success with a required tool missing:\n%s", out)
 			}
 		})
+	}
+}
+
+// --mode is explicit on setup and doctor: the default and explicit auto/standalone both run and
+// report the standalone contract, gentle is refused as pending integration before any work, an
+// unknown value is a usage failure, and the doctor's report carries the mode it ran under.
+func TestModeFlagSelectsAndReportsTheStandaloneContract(t *testing.T) {
+	bin := buildCLI(t)
+	configDir := t.TempDir()
+	if got, code := runCLI(t, bin, "sync", "--config-dir", configDir); code != 0 {
+		t.Fatalf("sync exited %d, so the mode report's premise (a healthy doctor) does not hold\n%s", code, got)
+	}
+
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"the default", []string{"doctor", "--json", "--config-dir", configDir}},
+		{"explicit auto", []string{"doctor", "--json", "--mode", "auto", "--config-dir", configDir}},
+		{"explicit standalone", []string{"doctor", "--json", "--mode", "standalone", "--config-dir", configDir}},
+	} {
+		t.Run("doctor reports standalone for "+tc.name, func(t *testing.T) {
+			out, code := runCLI(t, bin, tc.args...)
+			if code != 0 {
+				t.Fatalf("exit = %d, want 0\n%s", code, out)
+			}
+			if !strings.Contains(out, `"mode": "standalone"`) {
+				t.Fatalf("doctor --json must carry the mode it ran under:\n%s", out)
+			}
+		})
+	}
+
+	t.Run("the text report names the mode", func(t *testing.T) {
+		out, code := runCLI(t, bin, "doctor", "--mode", "standalone", "--config-dir", configDir)
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0\n%s", code, out)
+		}
+		if !strings.Contains(out, "mode standalone") {
+			t.Fatalf("the text report must name the mode:\n%s", out)
+		}
+	})
+
+	t.Run("setup runs and reports an explicit standalone mode", func(t *testing.T) {
+		home := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		out, code := runCLIEnv(t, bin, setupEnv(t, home, pathWithoutBin(t)), "setup", "--mode", "standalone")
+		if code != 0 {
+			t.Fatalf("setup --mode standalone exit = %d, want 0\n%s", code, out)
+		}
+		if !strings.Contains(out, "mode standalone") {
+			t.Fatalf("setup must report the mode it ran under:\n%s", out)
+		}
+		if !strings.HasPrefix(lastLine(out), "tpp is installed and working: ") {
+			t.Fatalf("last line = %q\n%s", lastLine(out), out)
+		}
+	})
+
+	t.Run("setup refuses gentle before installing anything", func(t *testing.T) {
+		home := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		out, code := runCLIEnv(t, bin, setupEnv(t, home, pathWithoutBin(t)), "setup", "--mode", "gentle")
+		if code != 2 {
+			t.Fatalf("setup --mode gentle exit = %d, want 2\n%s", code, out)
+		}
+		if !strings.Contains(out, "pending integration") {
+			t.Fatalf("the refusal must say why gentle cannot run:\n%s", out)
+		}
+		if _, err := os.Stat(filepath.Join(home, ".claude", "skills")); !os.IsNotExist(err) {
+			t.Fatalf("a refused mode must not install anything: %v", err)
+		}
+	})
+
+	t.Run("setup rejects an unknown mode", func(t *testing.T) {
+		out, code := runCLIEnv(t, bin, setupEnv(t, t.TempDir(), pathWithoutBin(t)), "setup", "--mode", "turbo")
+		if code != 2 {
+			t.Fatalf("setup --mode turbo exit = %d, want 2\n%s", code, out)
+		}
+		if !strings.Contains(out, "unknown mode") {
+			t.Fatalf("the refusal must name the problem:\n%s", out)
+		}
+	})
+}
+
+// The Stop hook is required only from the hosts that wire one: selecting codex on a machine that
+// also has Claude installed installs into codex and must not demand — or claim — the Claude hook,
+// or standalone health would depend on a host the selection left out.
+func TestSetupHookRequirementFollowsTheSelectedHost(t *testing.T) {
+	bin := buildCLI(t)
+	home := t.TempDir()
+	for _, dir := range []string{".claude", ".codex"} {
+		if err := os.MkdirAll(filepath.Join(home, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, code := runCLIEnv(t, bin, setupEnv(t, home, pathWithoutBin(t)), "setup", "--hosts", "codex")
+	if code != 0 {
+		t.Fatalf("setup --hosts codex exit = %d, want 0: the selected host wires no Stop hook\n%s", code, out)
+	}
+	if strings.Contains(out, "Stop hook wired to") {
+		t.Fatalf("setup claimed a wired hook for a host that wires none:\n%s", out)
+	}
+	for _, name := range assets.SkillNames() {
+		if _, err := os.Stat(filepath.Join(home, ".codex", "skills", name, "SKILL.md")); err != nil {
+			t.Fatalf("codex skill %s not installed: %v\n%s", name, err, out)
+		}
+	}
+	last := lastLine(out)
+	if !strings.HasPrefix(last, "tpp is installed and working: ") || !strings.Contains(last, "in codex") {
+		t.Fatalf("last line = %q, want the working line naming codex\n%s", last, out)
 	}
 }

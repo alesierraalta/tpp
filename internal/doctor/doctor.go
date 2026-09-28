@@ -35,6 +35,7 @@ type Capability struct {
 // Report is the doctor's verdict; Healthy is false only for missing git, skills, or hook.
 type Report struct {
 	ConfigDir      string        `json:"config_dir"`
+	Mode           string        `json:"mode"` // the --mode the checks ran under; the command sets it from the resolver
 	Skills         []SkillStatus `json:"skills"`
 	HookWired      bool          `json:"hook_wired"`
 	HookKind       string        `json:"hook_kind"`   // HookTpp, HookStandalone or HookNone
@@ -111,11 +112,16 @@ func RunWith(cfgDir string, lookPath func(string) (string, error), probe func(co
 }
 
 // String renders the report for a terminal: what this build shipped against what the host has, in the four
-// blocks a reader scans — skills, hook, capabilities and the verdict. The header is composed here and each block
+// blocks a reader scans — skills, hook, capabilities and the verdict. When the command resolved a
+// mode, the header names it, so text and JSON report the same contract. The header is composed here and each block
 // writes its own bytes, so the order and the blank lines between them are one list a reader can follow.
 func (r Report) String() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "tpp doctor · config dir %s\n\nskills\n", r.ConfigDir)
+	header := "tpp doctor"
+	if r.Mode != "" {
+		header += " · mode " + r.Mode
+	}
+	fmt.Fprintf(&b, "%s · config dir %s\n\nskills\n", header, r.ConfigDir)
 	r.writeSkills(&b)
 	r.writeHook(&b)
 	r.writeCapabilities(&b)

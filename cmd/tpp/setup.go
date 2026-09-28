@@ -11,6 +11,7 @@ import (
 	"github.com/alesierraalta/tpp/internal/assets"
 	"github.com/alesierraalta/tpp/internal/doctor"
 	"github.com/alesierraalta/tpp/internal/hookcmd"
+	"github.com/alesierraalta/tpp/internal/mode"
 	"github.com/alesierraalta/tpp/internal/sync"
 )
 
@@ -21,7 +22,15 @@ func runSetup(args []string) int {
 	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
 	configDir := fs.String("config-dir", defaultConfigDir(), "Claude config directory")
 	hostsFlag := fs.String("hosts", "", "comma-separated hosts to install into")
+	modeFlag := fs.String("mode", mode.Auto, "harness mode: auto, standalone, or gentle")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	// The mode is resolved before anything runs: a request this build cannot honor must stop
+	// the command at the flag, never install under a name that would misreport the contract.
+	runMode, err := mode.Resolve(*modeFlag, mode.VerifiedGentleSignal())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "setup:", err)
 		return 2
 	}
 	selected, err := parseSyncHosts(*hostsFlag, flagSet(fs, "hosts"))
@@ -45,13 +54,13 @@ func runSetup(args []string) int {
 	// The doctor reads the Claude config dir sync just wrote, not the environment's default, so the check
 	// verifies the install that happened. Without Claude there is no hook to check, and the skill and hook
 	// problems the doctor would name are not problems; only a missing required tool still is.
-	report := doctorReport(discovery.ClaudeConfigDir)
+	report := doctorReport(discovery.ClaudeConfigDir, runMode)
 	fmt.Println()
 	problems := report.Problems
 	if claude {
 		fmt.Print(report.String())
 	} else {
-		fmt.Print("tpp doctor · no Claude Code host: skills and the Stop hook are not checked\n\ncapabilities\n")
+		fmt.Printf("tpp doctor · mode %s · no Claude Code host: skills and the Stop hook are not checked\n\ncapabilities\n", report.Mode)
 		fmt.Print(report.CapabilitiesString())
 		problems = missingRequiredTools(report)
 	}
@@ -72,9 +81,13 @@ func runSetup(args []string) int {
 	return 0
 }
 
-// doctorReport runs the doctor's checks against configDir, probing the wired hook with a payload.
-func doctorReport(configDir string) doctor.Report {
-	return doctor.RunWith(configDir, exec.LookPath, probeHook)
+// doctorReport runs the doctor's checks against configDir, probing the wired hook with a payload,
+// under the mode the command resolved, so the report (text and JSON alike) names the contract
+// its verdict came from.
+func doctorReport(configDir, runMode string) doctor.Report {
+	report := doctor.RunWith(configDir, exec.LookPath, probeHook)
+	report.Mode = runMode
+	return report
 }
 
 // hookBinary is the program the wired hook runs. The doctor resolves it only when a tpp is on PATH to

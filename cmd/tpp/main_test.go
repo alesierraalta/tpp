@@ -2042,6 +2042,54 @@ func TestModeFlagSelectsAndReportsTheStandaloneContract(t *testing.T) {
 	})
 }
 
+// The extension's process-scoped observation flips doctor's auto to gentle; without it — even
+// with a gentle-ai binary on PATH — auto stays standalone: the signal is the in-session
+// observation, never a program lookup (session UX evidence, not authentication).
+func TestDoctorModeFollowsTheExtensionObservationNotThePath(t *testing.T) {
+	bin := buildCLI(t)
+	configDir := t.TempDir()
+	if got, code := runCLI(t, bin, "sync", "--config-dir", configDir); code != 0 {
+		t.Fatalf("sync exited %d, so the mode report's premise (a healthy doctor) does not hold\n%s", code, got)
+	}
+
+	// A gentle-ai on PATH must be inert: the resolver never looks one up.
+	fake := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fake, "gentle-ai"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := fake + string(os.PathListSeparator) + pathWithoutBin(t)
+
+	// Every case starts from a cleared observation so an ambient value in the test environment
+	// cannot stand in for the extension; "last entry wins" makes the override deterministic.
+	cleared := "TPP_GENTLE_OBSERVATION="
+	observed := "TPP_GENTLE_OBSERVATION=pi-session-gentle-active"
+	for _, tc := range []struct {
+		name string
+		env  []string
+		args []string
+		want string
+	}{
+		{"auto without the observation stays standalone", []string{cleared, "PATH=" + path},
+			[]string{"doctor", "--json", "--config-dir", configDir}, `"mode": "standalone"`},
+		{"auto with the observation reports gentle", []string{cleared, "PATH=" + path, observed},
+			[]string{"doctor", "--json", "--config-dir", configDir}, `"mode": "gentle"`},
+		{"explicit gentle with the observation runs", []string{cleared, observed},
+			[]string{"doctor", "--json", "--mode", "gentle", "--config-dir", configDir}, `"mode": "gentle"`},
+		{"a foreign observation value stays standalone", []string{cleared, "TPP_GENTLE_OBSERVATION=yes"},
+			[]string{"doctor", "--json", "--config-dir", configDir}, `"mode": "standalone"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, code := runCLIEnv(t, bin, tc.env, tc.args...)
+			if code != 0 {
+				t.Fatalf("exit = %d, want 0\n%s", code, out)
+			}
+			if !strings.Contains(out, tc.want) {
+				t.Fatalf("doctor --json must report %s:\n%s", tc.want, out)
+			}
+		})
+	}
+}
+
 // The Stop hook is required only from the hosts that wire one: selecting codex on a machine that
 // also has Claude installed installs into codex and must not demand — or claim — the Claude hook,
 // or standalone health would depend on a host the selection left out.

@@ -19,10 +19,23 @@ type Host struct {
 
 // PiHost is the opt-in Pi host: SkillsDir is Pi's extension directory, so the shared claim
 // layout lands each component at <SkillsDir>/<component>/index.ts, which is the extension
-// path Pi loads. Discovery never offers it; a caller that wants Pi passes this host directly.
+// path Pi loads. Discovery never offers it; a caller that wants Pi passes this host directly
+// — `sync --hosts pi` is the CLI spelling of that opt-in.
 func PiHost(home string) Host {
-	configDir := filepath.Join(home, ".pi")
-	return Host{Name: "pi", ConfigDir: configDir, SkillsDir: filepath.Join(configDir, "agent", "extensions")}
+	return hostForConfig("pi", filepath.Join(home, ".pi"))
+}
+
+// hostForConfig rebuilds a host from its name and recorded config directory, deriving the
+// managed root that host actually loads content from: the skill hosts read <config>/skills,
+// while Pi's root is its extension directory outside any skills path. Uninstall reconstructs
+// hosts from state records with it, so a Pi extension recorded under agent/extensions is
+// classified against its real claims instead of being mistaken for an orphan.
+func hostForConfig(name, configDir string) Host {
+	skillsDir := filepath.Join(configDir, "skills")
+	if name == "pi" {
+		skillsDir = filepath.Join(configDir, "agent", "extensions")
+	}
+	return Host{Name: name, ConfigDir: configDir, SkillsDir: skillsDir}
 }
 
 // Discovery is the non-fatal result of looking for host configuration directories.

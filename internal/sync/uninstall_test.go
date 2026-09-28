@@ -318,3 +318,141 @@ func TestUninstallDryRunClassifiesAndWritesNothing(t *testing.T) {
 		t.Errorf("dry run created backups: %v", dirs)
 	}
 }
+
+// The Pi extension is recorded outside ConfigDir/skills (under agent/extensions), so uninstall
+// must rebuild the host from state instead of assuming a skills tree: a plain run classifies it
+// as the managed asset it is — not an orphan — removes it without --orphans, and drops the
+// record; the dry-run plans the same classification and writes nothing.
+func TestUninstallTreatsThePiExtensionAsAManagedAsset(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("TPP_HOME", root)
+	home := t.TempDir()
+	host := PiHost(home)
+	if _, err := SyncHosts([]Host{host}, bin, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	entry := filepath.Join(host.SkillsDir, "tpp", "index.ts")
+
+	dry, err := Uninstall(UninstallOptions{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sawRemove := false
+	for _, action := range dry.Actions {
+		if action.Path != entry {
+			continue
+		}
+		if action.Class != UninstallRemove {
+			t.Fatalf("dry run classifies the extension as %q, want %q (not an orphan): %+v", action.Class, UninstallRemove, action)
+		}
+		sawRemove = true
+	}
+	if !sawRemove {
+		t.Fatalf("dry run never classified %s: %+v", entry, dry.Actions)
+	}
+	if len(dry.Removed) != 0 {
+		t.Fatalf("dry run reported removals: %v", dry.Removed)
+	}
+	if _, err := os.Stat(entry); err != nil {
+		t.Fatalf("dry run touched the extension: %v", err)
+	}
+
+	report, err := Uninstall(UninstallOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(report.Removed, entry) {
+		t.Fatalf("plain uninstall did not remove the extension: %v", report.Removed)
+	}
+	if len(report.BackedUp) != 0 {
+		t.Fatalf("intact extension must not be backed up: %v", report.BackedUp)
+	}
+	if _, err := os.Stat(entry); !os.IsNotExist(err) {
+		t.Fatalf("extension still on disk: %v", err)
+	}
+	if dirs := backupDirs(t, root); len(dirs) != 0 {
+		t.Fatalf("plain uninstall created backups: %v", dirs)
+	}
+	after, err := state.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hostState, recorded := after.Hosts["pi"]; recorded {
+		t.Fatalf("pi record left in state: %+v", hostState)
+	}
+}
+
+// A user-edited extension is the operator's: without --force the whole uninstall refuses before
+// deleting anything and the refusal names the flag; with --force the edit is snapshotted to the
+// central backup store, then removed, and the record leaves state with the file.
+func TestUninstallModifiedPiExtensionRefusesUntilForcedWithBackup(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("TPP_HOME", root)
+	home := t.TempDir()
+	host := PiHost(home)
+	if _, err := SyncHosts([]Host{host}, bin, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	entry := filepath.Join(host.SkillsDir, "tpp", "index.ts")
+	if err := os.WriteFile(entry, []byte("user edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	refused, err := Uninstall(UninstallOptions{})
+	if err == nil || !strings.Contains(err.Error(), "--force") {
+		t.Fatalf("err = %v, want a refusal naming --force", err)
+	}
+	sawModified := false
+	for _, action := range refused.Actions {
+		if action.Class == UninstallModified && action.Path == entry {
+			sawModified = true
+		}
+	}
+	if !sawModified {
+		t.Fatalf("modified extension not classified: %+v", refused.Actions)
+	}
+	if _, err := os.Stat(entry); err != nil {
+		t.Fatalf("refusal must be atomic; extension gone: %v", err)
+	}
+	if dirs := backupDirs(t, root); len(dirs) != 0 {
+		t.Fatalf("refusal created backups: %v", dirs)
+	}
+	current, err := state.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, recorded := current.Hosts["pi"].Assets[entry]; !recorded {
+		t.Fatal("refusal cleared the extension record")
+	}
+
+	forced, err := Uninstall(UninstallOptions{Force: true})
+	if err != nil {
+		t.Fatalf("force: %v", err)
+	}
+	if _, err := os.Stat(entry); !os.IsNotExist(err) {
+		t.Fatalf("--force left the modified extension: %v", err)
+	}
+	backup, ok := forced.BackedUp[entry]
+	if !ok {
+		t.Fatalf("--force did not report a central backup: %+v", forced.BackedUp)
+	}
+	var snapshotManifest backupManifest
+	data, _ := os.ReadFile(filepath.Join(backup, "manifest.json"))
+	if err := json.Unmarshal(data, &snapshotManifest); err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshotManifest.Entries) != 1 {
+		t.Fatalf("manifest entries = %d, want 1", len(snapshotManifest.Entries))
+	}
+	snapshot, err := os.ReadFile(filepath.Join(backup, filepath.FromSlash(snapshotManifest.Entries[0].SnapshotPath)))
+	if err != nil || string(snapshot) != "user edit\n" {
+		t.Fatalf("snapshot = %q, err=%v, want the user's edit", snapshot, err)
+	}
+	after, err := state.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hostState, recorded := after.Hosts["pi"]; recorded {
+		t.Fatalf("forced uninstall left the pi record: %+v", hostState)
+	}
+}

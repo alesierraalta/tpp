@@ -46,19 +46,26 @@ def test_application_depends_only_on_domain():
 # --- Cycle detection: domain -> domain imports stay allowed; only cycles fail. ---
 
 def import_graph(src_root: Path, package: str) -> dict[str, set[str]]:
-    """Module -> set of in-package modules it imports (absolute imports only)."""
+    """Module -> set of in-package modules it imports (absolute and relative imports)."""
     modules = {
         ".".join(p.relative_to(src_root).with_suffix("").parts).removesuffix(".__init__"): p
         for p in (src_root / package).rglob("*.py")
     }
     graph: dict[str, set[str]] = {name: set() for name in modules}
     for name, path in modules.items():
+        # The package a relative import is resolved against: the module itself for an __init__.
+        here = name if path.name == "__init__.py" else name.rpartition(".")[0]
         for node in ast.walk(ast.parse(path.read_text())):
             targets = []
             if isinstance(node, ast.Import):
                 targets = [a.name for a in node.names]
-            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-                targets = [node.module] + [f"{node.module}.{a.name}" for a in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                base = node.module or ""
+                if node.level:
+                    parts = here.split(".")
+                    anchor = ".".join(parts[: len(parts) - (node.level - 1)])
+                    base = f"{anchor}.{base}" if base else anchor
+                targets = [base] + [f"{base}.{a.name}" for a in node.names]
             graph[name] |= {t for t in targets if t in modules and t != name}
     return graph
 
@@ -102,7 +109,10 @@ def find_cycles(graph: dict[str, set[str]]) -> list[list[str]]:
 
 def test_no_circular_dependencies():
     """Fails on any import cycle in the package, including inside the domain."""
-    assert find_cycles(import_graph(SRC_ROOT, PACKAGE)) == []
+    graph = import_graph(SRC_ROOT, PACKAGE)
+    # An empty graph means SRC_ROOT/PACKAGE is wrong: a pass there would prove nothing.
+    assert graph, f"no modules found under {SRC_ROOT / PACKAGE}"
+    assert find_cycles(graph) == []
 
 
 # --- Negative controls: prove the cycle check can fail (and does not over-fail). ---
@@ -116,6 +126,11 @@ def _make_pkg(root: Path, files: dict[str, str]) -> None:
 
 def test_cycle_check_goes_red_on_a_real_cycle(tmp_path):
     _make_pkg(tmp_path, {"__init__.py": "", "a.py": "import app.b\n", "b.py": "import app.a\n"})
+    assert find_cycles(import_graph(tmp_path, "app")) == [["app.a", "app.b"]]
+
+
+def test_cycle_check_goes_red_on_a_relative_import_cycle(tmp_path):
+    _make_pkg(tmp_path, {"__init__.py": "", "a.py": "from . import b\n", "b.py": "from .a import X\n"})
     assert find_cycles(import_graph(tmp_path, "app")) == [["app.a", "app.b"]]
 
 

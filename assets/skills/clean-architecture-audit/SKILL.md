@@ -4,7 +4,7 @@ description: "Trigger: clean architecture, architecture audit, layer conformance
 license: Apache-2.0
 metadata:
   author: "alesierraalta"
-  version: "1.1"
+  version: "1.2"
 ---
 
 ## Activation Contract

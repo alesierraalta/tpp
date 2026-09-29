@@ -262,3 +262,41 @@ test_module_git_commit_ref_allowed if {
 test_module_local_path_allowed if {
 	count(deny) == 0 with input as cfg_modules({"m": {"source": "./modules/net"}})
 }
+
+# ---------------------------------------------------------------- fail closed on unreadable resources
+
+test_after_null_denied if {
+	count(msgs("change.after is not an object")) == 1 with input as plan([change("aws_instance", "web", null)])
+}
+
+test_after_string_denied if {
+	count(msgs("change.after is not an object")) == 1 with input as plan([change("aws_instance", "web", "oops")])
+}
+
+test_after_object_not_flagged if {
+	count(msgs("change.after is not an object")) == 0 with input as plan([change("aws_instance", "web", {"tags": full_tags})])
+}
+
+test_sg_rule_missing_type_denied if {
+	count(msgs("has no type")) == 1 with input as plan([change("aws_security_group_rule", "r", {"from_port": 22, "to_port": 22, "protocol": "tcp", "cidr_blocks": ["0.0.0.0/0"]})])
+}
+
+test_sg_rule_with_type_not_flagged if {
+	count(msgs("has no type")) == 0 with input as plan([change("aws_security_group_rule", "r", {"type": "ingress", "from_port": 443, "to_port": 443, "protocol": "tcp", "cidr_blocks": ["10.0.0.0/8"]})])
+}
+
+test_public_unknown_ports_denied if {
+	count(msgs("unknown ports")) == 1 with input as plan([change("aws_security_group_rule", "r", {"type": "ingress", "from_port": null, "to_port": null, "protocol": "tcp", "cidr_blocks": ["0.0.0.0/0"]})])
+}
+
+test_public_udp_unknown_to_port_denied if {
+	count(msgs("unknown ports")) == 1 with input as plan([change("aws_vpc_security_group_ingress_rule", "r", {"from_port": 53, "ip_protocol": "udp", "cidr_ipv4": "0.0.0.0/0"})])
+}
+
+test_private_unknown_ports_allowed if {
+	count(msgs("unknown ports")) == 0 with input as plan([change("aws_security_group_rule", "r", {"type": "ingress", "from_port": null, "to_port": null, "protocol": "tcp", "cidr_blocks": ["10.0.0.0/8"]})])
+}
+
+test_public_known_safe_ports_allowed if {
+	count(deny) == 0 with input as plan([change("aws_security_group_rule", "r", {"type": "ingress", "from_port": 443, "to_port": 443, "protocol": "tcp", "cidr_blocks": ["0.0.0.0/0"]})])
+}

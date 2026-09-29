@@ -47,9 +47,23 @@ mandatory_tags := {"Environment", "Owner", "ManagedBy"}
 # Schema-driven: only resources whose plan carries a tags or tags_all attribute
 # are taggable. aws_security_group_rule, aws_s3_bucket_policy, aws_route, ...
 # have neither and are never checked.
-taggable(rc) if "tags" in object.keys(rc.change.after)
+taggable(rc) if {
+	is_object(rc.change.after)
+	"tags" in object.keys(rc.change.after)
+}
 
-taggable(rc) if "tags_all" in object.keys(rc.change.after)
+taggable(rc) if {
+	is_object(rc.change.after)
+	"tags_all" in object.keys(rc.change.after)
+}
+
+# Fail closed: a create/update whose planned state cannot be read is denied,
+# never skipped. Every rule below assumes an object `after`.
+deny contains msg if {
+	some rc in managed_changes
+	not is_object(rc.change.after)
+	msg := sprintf("Resource '%v' cannot be evaluated: change.after is not an object.", [rc.address])
+}
 
 # tags_all merges provider default_tags with resource tags; evaluate the union.
 effective_tags(rc) := object.union(
@@ -96,6 +110,7 @@ ingress_rules contains r if {
 	some i in as_list(object.get(rc.change.after, "ingress", null))
 	r := {
 		"address": rc.address,
+		"ports_known": ports_known(i),
 		"from": num(object.get(i, "from_port", 0)),
 		"to": num(object.get(i, "to_port", 0)),
 		"proto": object.get(i, "protocol", ""),
@@ -112,10 +127,12 @@ ingress_rules contains r if {
 ingress_rules contains r if {
 	some rc in managed_changes
 	rc.type == "aws_security_group_rule"
+	is_object(rc.change.after)
 	rc.change.after.type == "ingress"
 	a := rc.change.after
 	r := {
 		"address": rc.address,
+		"ports_known": ports_known(a),
 		"from": num(object.get(a, "from_port", 0)),
 		"to": num(object.get(a, "to_port", 0)),
 		"proto": object.get(a, "protocol", ""),
@@ -136,6 +153,7 @@ ingress_rules contains r if {
 	a := rc.change.after
 	r := {
 		"address": rc.address,
+		"ports_known": ports_known(a),
 		"from": num(object.get(a, "from_port", 0)),
 		"to": num(object.get(a, "to_port", 0)),
 		"proto": object.get(a, "ip_protocol", ""),
@@ -147,6 +165,13 @@ ingress_rules contains r if {
 		},
 	}
 }
+
+# Ports are known only when both are numbers. null or absent (unknown until
+# apply) is never coerced to a safe value.
+ports_known(o) := true if {
+	is_number(object.get(o, "from_port", null))
+	is_number(object.get(o, "to_port", null))
+} else := false
 
 num(x) := x if is_number(x)
 
@@ -172,9 +197,27 @@ deny contains msg if {
 	msg := sprintf("Resource '%v' opens all protocols and ports to the internet (protocol \"-1\"); verify the intent, denied unless waived.", [r.address])
 }
 
+# Fail closed on unknown ports: treat them as possibly including a sensitive port.
+deny contains msg if {
+	some r in public_ingress
+	r.proto in {"tcp", "6", "udp", "17"}
+	not r.ports_known
+	msg := sprintf("Resource '%v' opens tcp/udp to the internet with unknown ports; cannot exclude sensitive ports.", [r.address])
+}
+
+# A standalone rule without a readable type cannot be classified.
+deny contains msg if {
+	some rc in managed_changes
+	rc.type == "aws_security_group_rule"
+	is_object(rc.change.after)
+	not is_string(object.get(rc.change.after, "type", null))
+	msg := sprintf("Resource '%v' cannot be evaluated: aws_security_group_rule has no type.", [rc.address])
+}
+
 deny contains msg if {
 	some r in public_ingress
 	r.proto in {"tcp", "6"}
+	r.ports_known
 	ports := exposed_ports(r)
 	count(ports) > 0
 	msg := sprintf("Resource '%v' exposes sensitive ports %v to the internet (0.0.0.0/0 or ::/0).", [r.address, sort(ports)])

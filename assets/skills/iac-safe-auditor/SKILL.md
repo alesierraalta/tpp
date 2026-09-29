@@ -4,7 +4,7 @@ description: "Trigger: iac testing, terraform test, tflint, conftest, opa rego, 
 license: Apache-2.0
 metadata:
   author: "alesierraalta"
-  version: "0.1.0"
+  version: "0.1.1"
   requires_tpp: "0.4.1"
   scope: [terraform]
   auto_invoke: "Testing or auditing Terraform/OpenTofu: plan-JSON policy, mock unit tests, egress isolation, drift, cost"
@@ -59,4 +59,4 @@ Report target and scope, commands with tool versions, per-layer findings and the
 
 - `references/patterns.md`: mock tests with a negative control, the Rego rule table, LocalStack endpoints, Infracost gate, drift probe.
 - `assets/conftest-policy.rego`: OPA v1 policy for tags, public ingress, S3 encryption, IAM wildcards, version pinning.
-- `assets/conftest-policy_test.rego`: 49 unit tests, deny and allow fixtures per rule.
+- `assets/conftest-policy_test.rego`: unit tests, deny and allow fixtures per rule (run `opa test assets/ -v`; do not trust a hard-coded count).

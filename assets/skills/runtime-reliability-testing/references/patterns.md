@@ -25,8 +25,8 @@ Decouple request generation from response time. The arrival rate must remain fix
 
 - **Fail closed**: SLO thresholds come only from target-owned values; a missing bound aborts the run (the template throws), it is never defaulted.
 - **`dropped_iterations` is an abort condition**: the generator could not offer the declared rate (VUs exhausted), so the run is INCONCLUSIVE. Use `abortOnFail: true`, not only a threshold that fails after the fact.
-- **Offered vs completed**: offered = iterations started + dropped, completed = iterations finished. Report `offered_rate` and `completed_throughput` as separate numbers; a gap is the saturation signal.
-- **Timeouts are censored samples**: a request that times out has a latency of at least the timeout, not exactly the timeout. Keep it in the percentile denominator (k6 records it in `http_req_duration` at the timeout value) and count it in `http_req_failed` and a timeout counter. Dropping timeouts from percentiles hides the tail; report percentiles as lower bounds when any timeout occurred.
+- **Attempted vs completed**: attempted = completed iterations + `dropped_iterations` (arrivals the executor tried to schedule), completed = iterations finished. Report `attempted_rate_per_s` and `completed_throughput` as separate numbers; a gap is the saturation signal.
+- **Timeouts are censored samples**: a request that times out has a latency of at least the timeout, not a known value, and k6 reports it with status 0 (its `http_req_duration` value is not guaranteed to equal the timeout). Procedure: count timeouts separately (status 0 or the error code) in a counter, report that count next to the percentiles, and count them in `http_req_failed`. Percentiles computed only over successful responses are optimistic. Analysis rule the operator applies: when any timeout occurred, treat each timeout as a sample at or above the timeout and report the percentiles as lower bounds.
 - **Summary**: never return `{}` from `handleSummary`; that suppresses the default summary. Return the text summary on stdout plus a JSON file.
 
 ---

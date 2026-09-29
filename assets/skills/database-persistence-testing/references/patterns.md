@@ -15,26 +15,7 @@ The caller must complete authorization and preflight; the label is not proof of 
 
 Without an index on the referencing columns, a parent `DELETE`/`UPDATE` of a referenced key takes `RowShareLock` on the child table and runs a sequential scan of the child per parent row (`SHARE ROW EXCLUSIVE` is the lock of `ADD FOREIGN KEY`, not of this path). Prioritize by child-table size and parent delete/update frequency. The query is `assets/unindexed-foreign-keys.sql` (int2vector subscripts are 0-based; the FK columns must be the leading columns of a valid, non-partial, non-expression index):
 
-```sql
-SELECT
-    c.conrelid::regclass AS table_name,
-    c.conname AS foreign_key_name,
-    pg_get_constraintdef(c.oid) AS constraint_definition
-FROM pg_constraint c
-WHERE c.contype = 'f'
-  AND NOT EXISTS (
-      SELECT 1
-      FROM pg_index i
-      WHERE i.indrelid = c.conrelid
-        AND i.indisvalid
-        AND i.indpred IS NULL
-        AND i.indexprs IS NULL
-        AND i.indnkeyatts >= array_length(c.conkey, 1)
-        AND (i.indkey::int2[])[0:array_length(c.conkey, 1) - 1] @> c.conkey
-        AND (i.indkey::int2[])[0:array_length(c.conkey, 1) - 1] <@ c.conkey
-  )
-ORDER BY table_name, foreign_key_name;
-```
+Run `assets/unindexed-foreign-keys.sql` as is; it is the single source of truth for the query, so it is not copied here.
 
 ## 2. Zero-Downtime Expand/Contract Migration Protocol
 
@@ -89,7 +70,7 @@ Drop the legacy columns in a later migration, after no deployed application vers
 
 ## 3. Concurrency Lock Assertion (Pessimistic Queue Pattern)
 
-The test must be able to fail: it seeds a known queue, forces the workers to overlap with a barrier, and asserts the union equals the seeded set with no duplicates and both workers non-empty. With plain `FOR UPDATE` the second worker blocks behind the first (the barrier or the `lock_timeout` trips and the test goes red); with `SKIP LOCKED` it takes disjoint rows.
+The test must be able to fail: it seeds a known queue, makes both workers overlap on their first batch with a barrier, then each worker keeps claiming small batches with `FOR UPDATE SKIP LOCKED` until no rows remain. It asserts the union equals the seeded set, the sets are disjoint, and both workers claimed at least one row. With plain `FOR UPDATE` the second worker blocks behind the first worker's open transaction, never reaches the barrier, and the test goes red (barrier or `lock_timeout` trips). Workers may finish at different times, so no worker is assumed to take a fixed share.
 
 ```python
 import threading
@@ -97,6 +78,7 @@ import pytest
 from sqlalchemy import text
 
 N = 20
+BATCH = 2
 
 def test_concurrent_worker_skip_locked(db_engine):
     with db_engine.begin() as conn:
@@ -104,30 +86,48 @@ def test_concurrent_worker_skip_locked(db_engine):
         conn.execute(text("INSERT INTO task_queue (id, status) SELECT g, 'pending' FROM generate_series(1, :n) g"), {"n": N})
 
     barrier = threading.Barrier(2, timeout=10)
-    results = {}
+    results = {"a": set(), "b": set()}
+    errors = []
+
+    def claim(conn):
+        rows = conn.execute(text(
+            "SELECT id FROM task_queue WHERE status = 'pending' "
+            "ORDER BY id FOR UPDATE SKIP LOCKED LIMIT :k"), {"k": BATCH}).fetchall()
+        ids = [r[0] for r in rows]
+        if ids:
+            conn.execute(text("UPDATE task_queue SET status = 'completed' WHERE id = ANY(:ids)"), {"ids": ids})
+        return ids
 
     def worker(name):
-        with db_engine.connect() as conn, conn.begin():
-            conn.execute(text("SET LOCAL lock_timeout = '3s'"))
-            rows = conn.execute(text(
-                "SELECT id FROM task_queue WHERE status = 'pending' "
-                "ORDER BY id FOR UPDATE SKIP LOCKED LIMIT :k"), {"k": N // 2}).fetchall()
-            results[name] = {r[0] for r in rows}
-            barrier.wait()  # both transactions hold their locks at the same time
-            conn.execute(text("UPDATE task_queue SET status = 'completed' WHERE id = ANY(:ids)"),
-                         {"ids": list(results[name])})
+        try:
+            with db_engine.connect() as conn:
+                with conn.begin():  # first batch: the transaction stays open across the barrier
+                    conn.execute(text("SET LOCAL lock_timeout = '3s'"))
+                    results[name].update(claim(conn))
+                    barrier.wait()  # both workers hold their first-batch locks at the same time
+                while True:  # claim loop: small committed batches until the queue is empty
+                    with conn.begin():
+                        ids = claim(conn)
+                    if not ids:
+                        break
+                    results[name].update(ids)
+        except Exception as exc:  # a blocked or broken worker must fail the test, not hang it
+            errors.append(exc)
+            barrier.abort()
 
-    threads = [threading.Thread(target=worker, args=(n,)) for n in ("a", "b")]
+    threads = [threading.Thread(target=worker, args=(n,), daemon=True) for n in ("a", "b")]
     for t in threads: t.start()
-    for t in threads: t.join()
+    for t in threads: t.join(timeout=30)
 
+    assert not any(t.is_alive() for t in threads), "a worker hung: the test timed out"
+    assert not errors, errors
     a, b = results["a"], results["b"]
-    assert a and b, "a worker processed nothing"
+    assert a and b, "a worker claimed nothing"
     assert a.isdisjoint(b), "the same item was claimed twice"
     assert a | b == set(range(1, N + 1)), "queued items were lost or left unprocessed"
 ```
 
-Mutation check: replace `SKIP LOCKED` with nothing; worker `b` blocks on `a`'s row locks, never reaches the barrier in time, and the test fails with a timeout instead of passing.
+Mutation check: remove `SKIP LOCKED`; worker `b` blocks on `a`'s open row locks, never reaches the barrier, and the test fails with a timeout or lock error instead of passing.
 
 ## 4. Isolation anomalies (PostgreSQL semantics)
 

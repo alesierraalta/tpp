@@ -4,7 +4,7 @@ description: "Trigger: haz el testing, testea esto, prueba esto, test this, test
 license: Apache-2.0
 metadata:
   author: "alesierraalta"
-  version: "0.3.25"
+  version: "0.4.0"
   requires_tpp: "0.4.1"
   scope: [common]
   auto_invoke: "Any request to test something: infer scope and mode from repo state, build or resume the persisted plan, execute it through specialized testing skills"
@@ -23,34 +23,30 @@ This skill decides WHICH targets and routes; siblings do the work.
 
 ## Tooling
 
-This skill is written for `tpp 0.4.1`, and `tpp version` prints the build present.
-Install it from the repository with `make build`, which writes `bin/tpp`; put that on `PATH`,
-or use `go install github.com/alesierraalta/tpp/cmd/tpp@latest` once the module is
-published. Without the binary the run continues on documented fallbacks: `plan init` is replaced
-by copying [assets/test-plan-template.md](assets/test-plan-template.md) (rule 12); `plan check` by
-applying its checks by hand, as aligned with test-strategy 0.3.25 — the Findings section exists and is a
-table, and a finding is a row carrying `path:line` and an evidence id that exists, with no finding or
-evidence id repeated and no `razonado` row inside the ledger; settled rows name a pinning test;
-statuses stay inside the closed vocabulary; a prose line closes a table, a fenced block is
-documentation and an unclosed fence fails closed, while a row's cells must match its header; the
-`Run` column exists and its cells hold valid run slugs; a `Light:` declaration validates, is
-corroborated by a ranked target or a `path:line` citation, and gives every layer it leaves out a reason;
-a `Micro:` declaration reads `touches none`, is corroborated the same way, sits in a plan with no
-Layer matrix and no `Light:` line, and its ledger holds an `observado` row and a row with a filled `Mutate`
-cell — and saying in the report that the gate was
-applied by hand, which is a weaker claim than the binary's; and `doctor` by deciding CodeGraph
-availability from `codegraph` and `git ls-files`
-instead of the capability probe.
-The run's process feedback — what paid off, what was ceremony, where a rule had to be
-reverse-engineered, and whether the method earned its keep — is recorded at the end of the run
-under Hard Rule 14 with `tpp feedback --template`.
+Written for `tpp 0.4.1` (`tpp version` prints the build). Build it with `make build` (writes
+`bin/tpp`) and put it on `PATH`, or use `go install github.com/alesierraalta/tpp/cmd/tpp@latest` once published. Without the binary, fall back and say so in the report, since a
+hand-applied gate is a weaker claim than the binary's:
+
+- `plan init` -> copy [assets/test-plan-template.md](assets/test-plan-template.md) (rule 12).
+- `plan check` -> apply its checks by hand: Findings is a table; a finding row carries `path:line`
+  and an existing evidence id, no id repeats, no `razonado` row sits in the ledger; settled rows name
+  a pinning test; statuses stay in the closed vocabulary; the `Run` column holds valid slugs; a
+  prose line closes a table and an unclosed fence fails; `Light:` and `Micro:` declarations are
+  corroborated by a ranked target or a `path:line` citation (Light gives a reason per skipped layer;
+  Micro reads `touches none`, has no Layer matrix and no `Light:`, and its ledger holds an `observado`
+  row and a row with a filled `Mutate` cell).
+- `doctor` -> decide CodeGraph availability from `codegraph` and `git ls-files`.
 
 ## Hard Rules
 
 1. **Risk, not the file, is the unit of decision.** Rank qualitatively
    ([references/prioritization.md](references/prioritization.md)); no numeric scores or targets.
 2. **Falsifiable evidence per selected risk**: mutation, contract, invariant, negative control,
-   differential, metamorphic, or observed state. Coverage percentage is not evidence.
+   differential, metamorphic, or observed state. Coverage percentage is not evidence. Every
+   expected value has a source, best first: written spec or issue text > invariant or round trip >
+   independent reference model or differential > metamorphic relation > documented example >
+   current behavior. A finding whose only oracle is the code's current behavior is characterization
+   (rule 4), never `confirmed`; without a better source, ask or record `razonado`.
 3. **Contract boundary that survives a refactor** ([references/altitude.md](references/altitude.md));
    doubles only at process boundaries.
 4. **Legacy: characterization tests first**, labeled as such. **Bug: the reddening test first.**
@@ -58,9 +54,11 @@ under Hard Rule 14 with `tpp feedback --template`.
    today, a reddening test asserts what the contract promises. Never let one stand in for the
    other (rule 13).
 5. **THE PLAN NEVER SHRINKS.** Every ranked target keeps its row and target rung; budget decides
-   order and how far today, never what is dropped.
-6. **DEFAULT BUDGET is everything.** No user cap: every selected target runs to its target rung.
-   Stop only at a testability defect or a user cap; report the remainder.
+   order and how far today, never what is dropped. De-scoping is `n/a` with a reason.
+6. **Budget is spent by risk, with a floor.** Default: every selected target runs to its target
+   rung. Under a user cap or a testability defect, spend top-down by risk and report the remainder
+   (`pending` for a cap, `blocked` for a defect). Floor: a target with shared state, concurrency or
+   a clock always gets its concurrency and L4-L5 work first; it is never the part a cap cuts.
 7. **Routing is an instruction.** INVOKE the sibling (Skill tool, or read
    `~/.claude/skills/<name>/SKILL.md` and apply it inline where no Skill tool exists); what is
    forbidden is approximating it from memory.
@@ -95,27 +93,22 @@ under Hard Rule 14 with `tpp feedback --template`.
     behaviour.** A probe in the scratchpad proves the defect once; a test in the repository's own
     suite proves it on every run. The assertion states what the contract promises, so the test is
     RED on today's code and GREEN once the defect is fixed, in that order. Run it both ways and
-    record which run was which. Two failures look like compliance and are not: a test that passes
+    record which run was which. Then discriminate: it must also go red under at least one adjacent
+    mutation of the fixed line (boundary shifted, condition negated, branch removed), else it pins
+    only the exact revert and a wrong fix passes. Two failures look like compliance and are not: a test that passes
     either way pins nothing, and a test that asserts the defective output is a characterization
     test (rule 4) that turns red the day someone fixes the bug, so it defends the defect instead
     of demanding its repair. Promote through `no-excess-tests`, name it in the finding row, and
     label any characterization test as such in its own name. A finding whose probe was never
     promoted stays `open`, reason `not pinned`.
 
-14. **At the end of every run—including blocked, partial, or stopped-early runs—the executing agent
-records its own retrospective.** Use `mktemp` for a scratch file outside the repository, run
-`tpp feedback --template` into it, fill only the existing fields (`ts`, `repo`, `plan`, `skill`,
-`build`, `paid`, `cost`, `reason`, `verdict` of `paid`, `partly`, or `ceremony`, optional `guess` and
-`freeform`), then submit with `tpp feedback --file`; add no fields because the parser rejects
-unknown keys. Set `skill` to what actually ran as `<name>` or `<name> <version>`; a breakcheck run
-records `breakcheck <its version>`, not the template's default embedded test-strategy identity.
-
-## Beta retrospective
-
-Keep the full retrospective out of chat: reply with only a brief acknowledgment after the write
-succeeds. If storage fails or is uncertain, say so instead of claiming it was recorded. This record
-is the executing agent's own report about the method—not ground truth, a readiness vote, or an
-automatic change to this skill.
+14. **Record a retrospective at the end of every run**, including blocked or partial ones. Run
+    `tpp feedback --template` into a `mktemp` file outside the repository, fill only the existing
+    fields (`ts`, `repo`, `plan`, `skill`, `build`, `paid`, `cost`, `reason`, `verdict` of `paid`,
+    `partly` or `ceremony`, optional `guess`, `freeform`; the parser rejects unknown keys), then
+    `tpp feedback --file`. Set `skill` to what ran (`<name>` or `<name> <version>`; a breakcheck run
+    records `breakcheck <its version>`). Keep it out of chat: after a successful write reply with a
+    brief acknowledgment, and if storage fails say so instead of claiming it was recorded.
 
 ## Decision Gates
 

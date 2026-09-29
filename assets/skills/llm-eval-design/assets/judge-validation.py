@@ -40,7 +40,8 @@ def rates(human: list[bool], judge: list[bool]) -> dict:
 def rogan_gladen(observed: float, tpr: float, tnr: float) -> float:
     """Corrected pass rate. Unstable when tpr + tnr is near 1; raises then."""
     j = tpr + tnr - 1
-    if j < 0.1:
+    # NaN (a class with no human labels) compares False against anything, so test it explicitly.
+    if not math.isfinite(j) or j < 0.1:
         raise ValueError(f"judge unusable: tpr + tnr - 1 = {j:.2f} < 0.1")
     return min(1.0, max(0.0, (observed + tnr - 1) / j))
 
@@ -83,8 +84,19 @@ def _selftest() -> None:
         pass
     else:
         raise AssertionError("unusable judge must raise")
+    try:
+        rogan_gladen(0.5, float("nan"), 0.9)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("a NaN rate (no human positives) must raise, not slip past the guard")
     ci = bootstrap_corrected(human, judge, [True] * 58 + [False] * 42, iters=300)
     assert ci[0] <= ci[1]
+    # Rare failures: many resamples hold no human positive; the CI must stay finite.
+    rare_h = [True] + [False] * 29
+    rare_j = [True] + [False] * 29
+    ci = bootstrap_corrected(rare_h, rare_j, [False] * 30, iters=300)
+    assert all(math.isfinite(x) for x in ci), ci
     print("selftest ok")
 
 

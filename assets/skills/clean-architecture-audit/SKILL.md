@@ -1,65 +1,64 @@
 ---
 name: clean-architecture-audit
-description: "Trigger: clean architecture, architecture audit, layer conformance, mutation testing, cognitive complexity, duplicated logic, code health, AST linting. Enforce architectural boundaries and code maintainability."
+description: "Trigger: clean architecture, architecture audit, layer conformance, import cycles, boundary rules, ArchUnit, import-linter, API compatibility. Prove architectural boundaries with executable conformance rules."
 license: Apache-2.0
 metadata:
   author: "alesierraalta"
-  version: "1.0"
+  version: "1.1"
 ---
 
 ## Activation Contract
 
-Load when evaluating code design, architectural changes, PR diffs, or refactoring plans. Objective: prove that code respects layer boundaries, exhibits genuine behavioral test resilience (mutation-verified), and stays cognitively readable without "Clean Architecture Theater" (unearned indirection, 1:1 empty interfaces, mock-mirroring tests).
+Load when evaluating layer boundaries, dependency direction, import cycles, or public-API drift in an architectural change, PR diff, or refactoring plan. Objective: prove with executable rules that the code respects its boundaries, and that each rule can fail.
 
-NOT for: strategic test allocation (`test-strategy`), pruning excessive tests (`no-excess-tests`), or hunting dead unreferenced code (`implementation-theater`).
+NOT for: test allocation (`test-strategy`), pruning tests (`no-excess-tests`), dead code, duplicated logic and clone detection (`implementation-theater`), mutation testing in general (`exploit-testing`), swallowed errors and silent fallbacks (`silent-degradation`).
+
+Scope guard: a single-package CLI or a 3-file script needs no fitness functions; the language already enforces what they would check (Go forbids import cycles at compile time).
 
 ## Plan Contribution
 
-When invoked by `test-strategy` in PLAN mode: do not execute. Return target rows for the plan:
-target (package, module, or symbol) · check (layer boundary, cycle, domain isolation, unearned
-interface, survived mutants on high-risk logic, complexity hotspot, duplicated logic, swallowed
-error) · target depth · consequence class · why. Cover every check this skill would run on this
-codebase, including cheap static ones (dependency-cruiser / depguard / archon run, complexity scan).
+When invoked by `test-strategy` in PLAN mode: do not execute. Return target rows for the plan: target (package, module, or symbol) · check (layer boundary, cycle, domain isolation, unearned interface, public-API compatibility) · target depth · consequence class · why. Include cheap static checks (dependency-cruiser / import-linter / depguard / archon run).
 
 ## Hard Rules
 
-1. **Architecture is executable code, not diagrams**: layer boundaries are verified by automated conformance tests (`pytest-archon`, `ArchUnit`, `dependency-cruiser`, `arch-go`).
-2. **Domain isolation is non-negotiable**: the domain core never imports web frameworks, ORMs, or network clients. Infrastructure depends on domain, never the reverse.
-3. **No unearned interfaces**: one production implementation and no process boundary → delete the interface, depend on the concrete type.
-4. **Behavioral testing over line coverage**: for selected high-risk domain logic use incremental mutation when meaningful; classify survivors (equivalent, unexecuted, flaky, timeout, tooling-invalid) instead of treating each as a gap.
-5. **Cognitive complexity signal**: interpret each function against the target's configured threshold with recorded provenance and tolerance; when the target configures none, the package default of 15 defined in [references/conformance-and-complexity.md](references/conformance-and-complexity.md) applies, and it can only reach WARNING (never a blocker).
-6. **No silent error swallowing**: empty `catch`, `except: pass`, uninspected `?? []`, ignored Go errors are defects.
-7. **Evidence**: every finding carries an executed evidence record per `~/.claude/skills/test-strategy/references/evidence.md` (the conformance run, mutation run, or analyzer output); no finding from reading alone.
-8. **Stale comment audit**: a comment contradicting the code it annotates is a finding (`~/.claude/skills/test-strategy/references/comments.md`).
-9. **One invariant, one implementation**: duplicated logic is a maintainability finding, not a correctness one; report every live `path:line` site, then establish which copy actually runs with the clone procedure owned by `implementation-theater` — compare the two bodies, diff their divergence, and check which one the call graph reaches. Consolidate to one implementation, or keep the divergence and record it with the Hard Rule 7 evidence record that shows the two copies cannot disagree.
+1. **Architecture is executable code, not diagrams**: boundaries are verified by an automated conformance run (see the tool table in [references/conformance-and-complexity.md](references/conformance-and-complexity.md)).
+2. **Every rule needs a negative control**: inject one forbidden edge (a domain file importing the ORM, a two-module cycle), run the rule, and it MUST go red; remove the edge and it goes green. A rule that matches zero modules (wrong root package, typo) passes vacuously; the control catches it.
+3. **Domain isolation**: the domain core never imports web frameworks, ORMs, or network clients. Infrastructure depends on domain, never the reverse.
+4. **Cycles are strongly connected components of size > 1**, not "any import inside the same package". Domain-to-domain imports are legal; only a cycle is a finding.
+5. **Unearned interface**: one implementation and no process boundary is theater, EXCEPT a consumer-owned port that exists for a test double, a second adapter (present or planned), or a team/process boundary. Those are the seam and stay.
+6. **Complexity is a finding only when the target configures a limit** (linter or analyzer config); report the score against that limit. Invent no default threshold.
+7. **Evidence**: every finding carries an executed record per `~/.claude/skills/test-strategy/references/evidence.md` (the conformance run output); no finding from reading alone.
+8. **Architecture-contract mutants only**: break a boundary on purpose and the conformance test must go red. General mutation testing belongs to `exploit-testing`.
 
 ## Decision Gates
 
 | Finding | Classification | Mandatory Agent Action |
 | :--- | :--- | :--- |
 | Domain imports Infra or ORM | **BLOCKER** | Invert: port in application/domain, implementation in infra. |
-| Circular dependency ($|SCC| > 1$) | **BLOCKER** | Break the cycle: shared value object, domain events, or inverted dependency. |
-| Interface with one implementation (non-I/O) | **THEATER** | Remove the interface; inject the concrete class. |
-| High-risk domain logic with survived mutants | **WARNING** | Add the behavioral assertion that kills the exact survivor. |
-| Complexity above a configured threshold or the default 15 | **WARNING** | Guard clauses or extracted sub-functions; report threshold provenance (configured, or the package default 15). |
-| Complexity above a configured critical limit | **BLOCKER** | Redesign before merge; same provenance report. |
-| One invariant implemented twice across two live sites | **WARNING** | Name both `path:line` sites; establish which copy runs, then consolidate to one implementation, or keep the divergence with the Hard Rule 7 evidence record that shows the two copies cannot disagree. |
-| Mock asserting only on its own return values | **THEATER** | Real in-memory collaborator, or drop to integration test. |
-| Empty catch or swallowed exception | **BLOCKER** | Log, handle explicitly, or rethrow a domain exception. |
+| Import cycle (SCC size > 1) between modules of one component | **BLOCKER** | Break it: shared value object, domain event, or inverted dependency. |
+| Mutually recursive types inside one package | none | Not a finding; scope cycles to declared components. |
+| Interface with one implementation, no test double, no second adapter, no process boundary | **THEATER** | Remove it; depend on the concrete type. |
+| Consumer-owned port with a test double or second adapter | none | Keep; it is the seam. |
+| Rule never shown red (no negative control) | **WARNING** | Add the control before trusting the green. |
+| Published module changed its exported API incompatibly | **BLOCKER** if unversioned | Run the compatibility tool; bump the version or restore the API. |
+| Complexity above a limit the target configures | **WARNING** | Report score and configured limit. No configured limit: no finding. |
+| Duplicated logic across two live sites | route | Hand to `implementation-theater` (which copy runs). |
 
 ## Execution Steps
 
-1. **Static conformance**: run layer boundary checks (`pytest tests/test_architecture.py`, `npx depcruise`, `golangci-lint` with `depguard`); verify zero framework imports in the domain and an acyclic graph.
-2. **Cognitive complexity audit** on the symbols in the diff; flag against the target's configured threshold, or the package default of 15 when it configures none; remove nesting with early returns.
-3. **Targeted incremental mutation** when risk-appropriate: `stryker --since origin/main` or `mutmut run --paths-to-mutate <changed_domain_files>`; classify each survivor; use contract/invariant, negative-control, differential, metamorphic, or observed-state evidence when mutation is not meaningful.
-4. **Theater audit**: use cases orchestrate and enforce invariants rather than pass through; remove 1:1 DTOs that add no filtering or transformation.
-5. **Duplication audit** on the symbols in the diff: look for one invariant implemented twice (CodeGraph callers, similarity search), then establish which copy runs with the clone procedure owned by `implementation-theater`; consolidate, or keep the divergence with the Hard Rule 7 evidence record that shows the two copies cannot disagree.
+1. **Pick the tool** the repo already uses, else one row of the tool table; confirm the rules match a nonzero set of modules.
+2. **Run conformance**: layer boundaries, framework imports in the domain, cycles.
+3. **Negative control per rule**: inject the forbidden edge, observe red, revert, observe green. Record both runs.
+4. **Architecture-contract mutants**: for each boundary that matters, break it on purpose; the conformance test must go red. Everything else about mutation goes to `exploit-testing`.
+5. **API compatibility** for published modules: `gorelease`/`apidiff` (Go), `cargo-semver-checks` (Rust), `griffe check` (Python), `japicmp` (Java), `@microsoft/api-extractor` (TS).
+6. **Theater**: use cases that only pass through, and interfaces per Rule 5. Configured complexity limit exceeded: report it.
 
 ## Output Contract
 
-Report: architectural violations (file, line, rule) · mutation evidence (candidate gaps and classified survivors, with follow-up evidence) · complexity hotspots (symbol, score, threshold used and its provenance, nesting breakdown, refactoring diff) · duplication findings (every live site, which copy runs, consolidated, or kept with its evidence record) · theater and accidental indirection to prune · the evidence record per finding. RDD receipt when required: [references/rdd-receipt.md](references/rdd-receipt.md).
+Report: violations (file, line, rule) · per rule, the negative-control result (red on injected edge, green after revert) · compatibility tool output for published modules · configured-limit complexity hotspots · theater to prune · the evidence record per finding. RDD receipt when required: [references/rdd-receipt.md](references/rdd-receipt.md).
 
 ## References
 
-- [references/conformance-and-complexity.md](references/conformance-and-complexity.md) — layer rules, Tarjan SCC cycle math, cognitive vs McCabe complexity.
+- [references/conformance-and-complexity.md](references/conformance-and-complexity.md) — layer rules, tool table with edge-injection one-liners, cycle math, complexity when configured.
 - [references/rdd-receipt.md](references/rdd-receipt.md) — receipt contract for `lens:architecture`.
+- [assets/pytest-archon-template.py](assets/pytest-archon-template.py) — layer rules plus a real cycle check with negative controls.

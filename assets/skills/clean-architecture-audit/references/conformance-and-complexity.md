@@ -1,46 +1,34 @@
-# Architecture Conformance and Cognitive Complexity
+# Architecture Conformance
 
 ## 1. The Architectural Drift Problem
 
-Architecture diagrams decay into aspiration without automated tests. 
+Architecture diagrams decay into aspiration without automated tests.
 
 ### Core Layer Invariants (Clean / Hexagonal):
 1. **Domain Isolation**: Domain cannot import `infrastructure`, `adapters`, `ui`, or external frameworks.
 2. **Ports Ownership**: The consumer owns the port interface (`domain/ports/` or `application/ports/`). Concrete adapters in infrastructure implement that port.
-3. **Cycle Elimination**: The module dependency graph $G = (V, E)$ must be an Directed Acyclic Graph (DAG). Any Strongly Connected Component with $|SCC| > 1$ (Tarjan's algorithm) represents a fatal architectural cycle.
+3. **Cycle Elimination**: within a component the module dependency graph $G = (V, E)$ is a DAG. Any Strongly Connected Component with $|SCC| > 1$ (Tarjan) is a cycle. Importing another module of the same package is not one.
 
----
+## 2. Tool table (one row per ecosystem)
 
-## 2. Cognitive Complexity vs Cyclomatic Complexity
+| Ecosystem | Tool | Inject a forbidden edge |
+|---|---|---|
+| Python | `import-linter` (`layers`, `independence`, `forbidden` contracts; indirect-import aware); `pytest-archon` for small rule sets; stdlib `ast` + Tarjan as in `assets/pytest-archon-template.py` | add `import sqlalchemy` to a domain module |
+| TypeScript | `dependency-cruiser` (`no-circular`, `not-to-dev-dep`), `eslint-plugin-import` `no-cycle` | import an adapter from a domain file |
+| Java / Kotlin | ArchUnit (`layeredArchitecture()`, `slices().should().beFreeOfCycles()`) | call an infra class from a domain class |
+| Go | `go-arch-lint` (component YAML, deep scan); `depguard` only as an import deny list (no layer model, no transitive check); the compiler already forbids import cycles | import an adapter package from the domain package |
+| Rust | `cargo-modules` (graph), `cargo-deny` (crates); `pub` visibility is the boundary | make an internal item `pub` and use it across the boundary |
 
-### Why McCabe Fails at Maintainability:
-McCabe Cyclomatic Complexity counts linearly independent paths. It is completely **blind to nesting**:
-- A flat 5-case `switch` statement has $CC = 5$.
-- A 5-level nested `if (a) { if (b) { if (c) ... } }` also has $CC = 5$.
+Each rule is proven twice: red after the injection, green after reverting it. Static import rules miss `TYPE_CHECKING`-only imports, `importlib` dynamic imports, namespace packages and re-export barrels (`index.ts`); say so in the report when the target uses them.
 
-### Cognitive Complexity (Campbell, SonarSource):
-Quantifies human mental effort. It penalizes nesting levels geometrically:
-- Level 0 `if`: +1
-- Level 1 `if` (nested inside `for`): +2 (1 base + 1 nesting penalty)
-- Level 2 `if` (nested inside `if` inside `for`): +3 (1 base + 2 nesting penalty)
+## 3. Architecture-contract mutants
 
-### Conditional Interpretation:
-- Compare the score against the target's configured threshold or band, appropriate to the language, analyzer, and version; when the target configures none, compare it against the package default of 15.
-- Report the threshold in use and its provenance (target-configured, or the package default of 15), with the sample, measurement conditions, tolerance, rationale, and owner, alongside the score and nesting breakdown.
-- Three outcomes, one per score: above the threshold in use → WARNING; above a configured critical limit → BLOCKER; at or below the threshold in use → no classification, reported with the score and its nesting breakdown. A target that configures no critical limit has no BLOCKER outcome.
+Mutation testing in general (tools, scope, survivor classification, denominators) is owned by `exploit-testing`. This skill keeps only one use: break a boundary on purpose and require the conformance test to go red. A boundary that can be broken without a red test is unenforced.
 
----
+## 4. API compatibility for published modules
 
-## 3. High-Impact Incremental Mutation Testing
+Public-boundary drift is the same class of fitness function. Run the compatibility tool against the previous release: `gorelease`/`apidiff` (Go), `cargo-semver-checks` (Rust), `griffe check` (Python), `japicmp` (Java), `@microsoft/api-extractor` (TS). An incompatible change requires a version bump or a revert.
 
-Mutation testing proves assertions are meaningful. Count only comparable, valid mutant outcomes in the score:
-$$\text{MSI} = \frac{\text{Confirmed Killed}}{\text{Confirmed Killed} + \text{Survived} + \text{Unexecuted} + \text{Flaky} + \text{Timed Out}} \times 100$$
+## 5. Complexity, only when configured
 
-Equivalent and tooling-invalid mutants are excluded from the denominator, but every category is reported with counts and examples. Timed-out mutants are not killed; preserve their timeout evidence and classify them separately.
-
-### Fast Execution Protocol:
-1. **Scope to Diff**: Run only against modified files (`--since origin/main`).
-2. **Coverage Matrix**: Execute only the tests that hit the mutated line, and record unexecuted mutants rather than treating them as killed.
-3. **Outcome Classification**: Confirm killed and survived outcomes; rerun and classify flaky, timeout, equivalent, and tooling-invalid outcomes explicitly. Do not silently coerce an unresolved or timed-out result into killed.
-4. **Mutant Schemata**: Mutate in-memory with boolean flags instead of writing files to disk.
-5. **Risk Filter**: Mutate domain algorithms and state transitions; ignore DTOs and configs. Do not require mutation per test or production line.
+Cognitive complexity (SonarSource) penalizes nesting where McCabe does not. It is a finding only when the target configures a limit (for example `gocognit`, `radon`, `eslint-plugin-sonarjs`, `clippy::cognitive_complexity` in the repo config). Report the score, the configured limit and its source. With no configured limit there is no finding and no invented default.

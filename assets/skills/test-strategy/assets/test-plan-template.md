@@ -39,7 +39,7 @@ The `Run` column identifies which bounded run owns each layer and target row; le
 | Layer | Skill | Scope | Status | Run |
 |---|---|---|---|---|
 | Security | `appsec-adversarial-auditor` | auth boundaries, untrusted input, secrets | pending |  |
-| Runtime and faults | `runtime-reliability-testing` | load, latency, fault injection, smoke | pending |  |
+| Runtime and faults | `runtime-reliability-testing`, `resilience-fault-injection` | load, latency, fault injection, smoke | pending |  |
 | Persistence and migrations | `database-persistence-testing` | migration naming/order/idempotency, isolation, N+1 | pending |  |
 | Architecture conformance | `clean-architecture-audit` | layer purity, targeted mutation | pending |  |
 | Critical e2e journeys | `real-run-validation` | <journey 1>, <journey 2>, <journey 3> | pending |  |

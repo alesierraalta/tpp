@@ -182,7 +182,7 @@ it covers; post it (`gh pr comment <n> -F -`) only with the operator's approval.
    ports/adapters, critical journeys.
 2. Layer sweep: invoke each layer owner in PLAN mode and take the target rows it returns
    (its own checks): security `appsec-adversarial-auditor` · runtime and faults
-   `runtime-reliability-testing` · persistence and migrations `database-persistence-testing` ·
+   `runtime-reliability-testing` and `resilience-fault-injection` · persistence and migrations `database-persistence-testing` ·
    architecture `clean-architecture-audit` · e2e journeys `real-run-validation`; when the
    surface exists: `iac-safe-auditor`, `rag-audit-evaluator`, `llm-eval-design`, `agent-eval`, `llm-redteam`. The router
    ranks what siblings contribute, never invents it.

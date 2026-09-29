@@ -321,10 +321,11 @@ compare` refuses when the two digests differ.
 | g04-skipped-guard | go | library | 1 | inclusive-boundary |
 | n15-contract-compat | node | http | 2 | signature-reserialized-body, n-1-payload-incompatible |
 | n16-crash-state | node | cli | 2 | non-atomic-write, swallowed-write-error |
+| n17-event-consumer | node | worker | 2 | non-idempotent-consumer, out-of-order-overwrite |
 | c01-clean-allocate | node | library | 0 (clean control) | — |
 | g05-clean-backoff | go | library | 0 (clean control) | — |
 
-Thirty-five defects across twenty defective cases, plus two clean controls that plant nothing.
+Thirty-seven defects across twenty-one defective cases, plus two clean controls that plant nothing.
 
 ### The guarded-defect family
 

@@ -1,0 +1,51 @@
+{
+ "id": "n17-event-consumer",
+ "language": "node",
+ "suite": "node --test",
+ "surface": "worker",
+ "request": "the event consumer that keeps the per-order ledger",
+ "defects": [
+  {
+   "id": "D1",
+   "file": "src/consumer.js",
+   "line": 14,
+   "class": "non-idempotent-consumer",
+   "keywords": [
+    "idempotent",
+    "redelivery",
+    "duplicate",
+    "dedupe",
+    "eventid",
+    "ack"
+   ],
+   "description": "apply adds a payment to the order total without recording the eventId, so a message redelivered after a failed ack is applied a second time and the customer is credited twice.",
+   "trigger": {
+    "input": "publish payment.captured {eventId:'e1',orderId:'o1',amount:40}; broker.ack throws once ('ack timeout') during consumer.pump(); broker.restart(); consumer.drain(); consumer.getOrder('o1')",
+    "expected": "paid is 40 (README: each event id changes the ledger at most once)",
+    "actual": "paid is 80 (observed: D1 observed paid=80; assert.equal actual: 80, expected: 40)"
+   },
+   "why_missed": "Every test publishes each message once and never fails an ack or restarts the broker, so the at-least-once redelivery the README describes is never exercised."
+  },
+  {
+   "id": "D2",
+   "file": "src/consumer.js",
+   "line": 18,
+   "class": "out-of-order-overwrite",
+   "keywords": [
+    "order",
+    "version",
+    "stale",
+    "overwrite",
+    "sequence",
+    "status"
+   ],
+   "description": "apply sets the status from whichever order.status event arrives last, ignoring the version, so an older event delivered after a newer one regresses the order status.",
+   "trigger": {
+    "input": "publish order.status version 2 (status 'shipped') then version 1 (status 'paid') for o1; consumer.drain(); consumer.getOrder('o1')",
+    "expected": "{ paid: 0, status: 'shipped', version: 2 } (README: the order shows the status of the highest version)",
+    "actual": "{ paid: 0, status: 'paid', version: 1 }"
+   },
+   "why_missed": "The only status test publishes versions 1 and 2 in ascending order, so arrival order and version order coincide and the version field is never compared."
+  }
+ ]
+}

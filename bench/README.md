@@ -319,10 +319,11 @@ compare` refuses when the two digests differ.
 | g02-config-merge | go | library | 2 | config-merge |
 | g03-batch-writer | go | worker | 2 | data-loss, error-reporting |
 | g04-skipped-guard | go | library | 1 | inclusive-boundary |
+| n15-contract-compat | node | http | 2 | signature-reserialized-body, n-1-payload-incompatible |
 | c01-clean-allocate | node | library | 0 (clean control) | — |
 | g05-clean-backoff | go | library | 0 (clean control) | — |
 
-Thirty-one defects across eighteen defective cases, plus two clean controls that plant nothing.
+Thirty-three defects across nineteen defective cases, plus two clean controls that plant nothing.
 
 ### The guarded-defect family
 

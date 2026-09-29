@@ -154,6 +154,7 @@ approximating them from memory degrades the method into generic advice.
 | RAG hallucinations, Faithfulness (NLI) | `rag-audit-evaluator` | Atomic claim decomposition, NLI entailment, and RAG triad scoring. |
 | RAG cross-tenant or ACL leakage, injected-document canary, citation support, abstention, deletion SLA, embedding upgrade | `rag-audit-evaluator` | Two-principal canary probes, unanswerable and no-context controls, shadow index on the same query set. |
 | LLM eval design, judge validation, eval statistics | `llm-eval-design` | Error analysis first, binary criteria, judge TPR/TNR with confidence intervals on held-out human labels, bias battery, bootstrap/paired CIs, pinned-model regression. |
+| API, schema or webhook change with an external consumer, N/N-1 skew, persisted payloads | `contract-compat-testing` | Breaking-change diff against the released spec (`oasdiff`, `buf breaking`), consumer contracts with `can-i-deploy`, old-writer payload fixtures, raw-body webhook signature and replay probes. |
 | Agent and tool-use evaluation | `agent-eval` | Final-state grading, tool-call correctness, pass^k over repeated trials, semantic loop detection, grader tampering, side effects. |
 | LLM red-teaming: indirect injection, exfiltration, excessive agency, prompt leakage | `llm-redteam` | Lethal-trifecta audit first; attack success rate over repeated trials; deterministic controls stay with `appsec-adversarial-auditor`. |
 | No oracle, or quality is unmeasured | `silent-degradation` | Hunt silent data loss and unmeasured degradations. |

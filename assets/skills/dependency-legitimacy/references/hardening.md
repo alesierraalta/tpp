@@ -32,8 +32,10 @@ version is malicious after a maintainer account is taken over.
   CI or auth.
 - Read the changelog and the diff for anything in the direct dependency set. If there is
   no changelog and no matching git tag, that itself is the finding.
-- Prefer a short cooldown on brand-new versions of critical dependencies rather than
-  installing within hours of publication.
+- Release-age cooldown: use the manager's native minimum-release-age setting (pnpm 11
+  defaults `minimumReleaseAge` to 1440 minutes, https://pnpm.io/supply-chain-security) so a
+  version is not installed within hours of publication; allow a reviewed override for
+  security fixes. Cooldown is a cheap signal, not proof: it does not replace the review.
 - Re-run the vulnerability scan after every bump, not on a schedule.
 
 ## Phantom and unused dependencies
@@ -48,17 +50,33 @@ version is malicious after a maintainer account is taken over.
 - **Wrong section**: a build/test-only package sitting in production dependencies ships
   code you never intended to ship.
 
+## Dependency confusion
+
+An internal package name that also resolves on a public registry is installed from the
+public one when the higher version wins. Check that every internal name is either
+reserved on the public registry or scoped, and pin the source: npm scope-to-registry in
+`.npmrc`; pip `--index-url` only (never `--extra-index-url` for a private index);
+Go `GOPRIVATE`/`GONOSUMDB`; Maven repository ordering and `<mirrorOf>`; Cargo `[source]`
+replacement. Probe: does the internal name exist on the public registry?
+
+## Execution-rights dependencies
+
+Anything that runs code or shapes what runs on your machine is a dependency; apply G1
+(canonical source), G2 (age and history), G4 (repo matches), G5 (provenance) to each:
+MCP servers, agent skills and plugins, container base images (pin by digest), Terraform
+providers and modules (pin version, lock file), git and pre-commit hooks, model files.
+
 ## CI and tokens
 
 - The publish/registry token is scoped and short-lived; prefer trusted publishing with
   OIDC over a long-lived token in a secret.
-- Pin GitHub Actions to a commit SHA, not a moving tag — an action is a dependency with
-  full access to your runner.
+- Workflow hardening (SHA pinning, permissions, `pull_request_target`, script injection)
+  lives in `references/ci-actions.md`.
 - The dependency install step in CI has no access to production secrets.
 
 ## Auditing an existing tree
 
-1. `osv-scanner scan source -r .` over the repo; triage by whether the vulnerable path is
+1. `osv-scanner scan source -r .` over the repo (it also reports malicious-package advisories); triage by whether the vulnerable path is
    actually reachable, not only by CVSS.
 2. List packages with install scripts; justify each.
 3. List direct dependencies added in the last N months and run G2/G4 on any you do not

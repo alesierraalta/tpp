@@ -1,11 +1,15 @@
+# Semgrep is triage, not proof: a hit is a hypothesis to confirm with an executed probe,
+# and silence proves nothing. These rules are Flask-only (request.json/args/form sources);
+# on FastAPI, Django or Express write scratch rules with that stack's request sources or
+# use framework-aware registry packs (verify pack names in the Semgrep registry).
 rules:
   - id: raw-sql-injection-taint
     languages: [python]
     severity: ERROR
-    message: "Untrusted input detected in raw SQL execution. Use parameterized queries."
+    message: "Flask-only triage: untrusted input reaches raw SQL execution. Confirm with a probe; use parameterized queries."
     metadata:
       cwe: "CWE-89"
-      owasp: "A03:2021 - Injection"
+      owasp: "A05:2025 - Injection"
     mode: taint
     pattern-sources:
       - pattern: request.json[...]
@@ -19,13 +23,15 @@ rules:
       - pattern: int(...)
       - pattern: uuid.UUID(...)
 
+  # No sanitizer on purpose: a check-then-fetch validator (resolve, check, fetch) is the
+  # TOCTOU / DNS-rebinding shape, so suppressing on it hides real hits. Enforce at the dialer.
   - id: ssrf-untrusted-request-taint
     languages: [python]
     severity: ERROR
-    message: "Possible SSRF: untrusted URL passed directly to outbound HTTP request."
+    message: "Flask-only triage: untrusted URL reaches an outbound HTTP request. Confirm with an SSRF probe; enforce IP policy at the socket dialer."
     metadata:
       cwe: "CWE-918"
-      owasp: "A10:2021 - SSRF"
+      owasp: "A01:2025 - Broken Access Control (includes SSRF)"
     mode: taint
     pattern-sources:
       - pattern: request.json.get("url")
@@ -33,5 +39,3 @@ rules:
     pattern-sinks:
       - pattern: requests.get($URL, ...)
       - pattern: httpx.get($URL, ...)
-    pattern-sanitizers:
-      - pattern: validate_outbound_ip(...)

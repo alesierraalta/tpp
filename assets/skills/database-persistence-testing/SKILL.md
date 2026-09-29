@@ -4,7 +4,7 @@ description: "Trigger: database testing, migration testing, schema migration, up
 license: Apache-2.0
 metadata:
   author: "alesierraalta"
-  version: "1.0"
+  version: "1.1"
 ---
 
 ## Activation Contract
@@ -46,7 +46,7 @@ Full text and rationale: [references/invariants.md](references/invariants.md).
 
 | Change Scope | Required Testing Altitude | Enforcement / Metric |
 | :--- | :--- | :--- |
-| **New / modified migration** | Static checks (naming, order, up/down, idempotency) plus contract-selected reversibility or compatibility and lock audit | Declared invariant passes; `eugene`/`squawk` findings evaluated against the target's budget |
+| **New / modified migration** | Static checks (naming, order, up/down, idempotency) plus contract-selected reversibility or compatibility and lock audit | Declared invariant passes; `squawk` findings evaluated against the target's budget |
 | **Breaking schema change** | Expand / contract compatibility verification | Compatibility and rollback or backup/restore evidence meet the declared contract |
 | **Repository / query changes** | Query budget and N+1 assertion | Observed behavior meets the configured budget for the sampled workload |
 | **Concurrent mutations / locks** | Declared parallelism and isolation probe | Observed anomalies and recovery meet the documented contract |
@@ -54,14 +54,15 @@ Full text and rationale: [references/invariants.md](references/invariants.md).
 
 ## Execution Steps
 
-1. **Ephemeral test database**: PostgreSQL / MySQL / SQLite in an isolated container or in-process engine.
+1. **Ephemeral test database**: the production dialect and major version in an isolated container (`docker-test-containers`). An in-process SQLite stand-in is not valid for PostgreSQL/MySQL semantics (locking, isolation, DDL, types); use it only when SQLite is the production engine.
 2. **Static migration checks**: naming, ordering, up/down presence, idempotency (`assets/migration-idempotency-check.sh --mode reversible`, explicit `--target` and argv arrays).
 3. **Contract-selected migration verification**: reversible → baseline/rollback/UP schema dumps compared; irreversible → old and new application compatibility plus the documented restore path. Record dialect, operation class, invariant selection, exceptions.
-4. **Static DDL lock inspection**: `eugene lint` or SQL AST parser for hazardous operations.
+4. **Static DDL lock inspection**: `squawk` (default) on migration files, or the manual lock checklist in `references/patterns.md` section 5 when it is unavailable.
 5. **Query budget and N+1 assertions** with query logging interceptors or framework counters.
-6. **Concurrency and isolation suite**: parallel workers on shared state; assert the expected isolation behavior.
+6. **Concurrency and isolation suite**: parallel workers on shared state; assert the expected isolation behavior (anomaly table and retry contract: `references/patterns.md` section 4).
 7. **Foreign key index audit** via catalog query (`references/patterns.md`).
-8. **Clean teardown** of containers and volumes.
+8. **Backup restore**, when backups are in scope: restore into a scratch instance and query it; a dump exit code is not evidence.
+9. **Clean teardown** of containers and volumes.
 
 ## Output Contract
 
@@ -70,7 +71,7 @@ Report: migration verification (invariant, evidence, rollback path, budget with 
 ## References
 
 - [references/invariants.md](references/invariants.md) — full rule text and static migration checks.
-- [references/patterns.md](references/patterns.md) — SQL patterns for expand/contract, concurrency locks, FK audits.
+- [references/patterns.md](references/patterns.md) — SQL patterns for expand/contract, concurrency locks, FK audits, isolation anomalies, lint and restore.
 - [references/rdd-receipt.md](references/rdd-receipt.md) — receipt contract for `lens:persistence`.
 - `assets/migration-idempotency-check.sh` — reversible-only up/down/up canonical schema-dump check; explicit commands and target, no ambient defaults.
-- `assets/unindexed-foreign-keys.sql` — PostgreSQL query for missing FK indices.
+- `assets/unindexed-foreign-keys.sql` — PostgreSQL query for FKs without a valid leading-column index.

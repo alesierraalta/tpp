@@ -21,6 +21,14 @@ Decouple request generation from response time. The arrival rate must remain fix
 - Pre-allocate enough Virtual Users (`maxVUs`) to sustain the declared target rate during
   latency spikes when that capability is available; otherwise record the limitation.
 
+### Reporting rules for open-workload runs
+
+- **Fail closed**: SLO thresholds come only from target-owned values; a missing bound aborts the run (the template throws), it is never defaulted.
+- **`dropped_iterations` is an abort condition**: the generator could not offer the declared rate (VUs exhausted), so the run is INCONCLUSIVE. Use `abortOnFail: true`, not only a threshold that fails after the fact.
+- **Offered vs completed**: offered = iterations started + dropped, completed = iterations finished. Report `offered_rate` and `completed_throughput` as separate numbers; a gap is the saturation signal.
+- **Timeouts are censored samples**: a request that times out has a latency of at least the timeout, not exactly the timeout. Keep it in the percentile denominator (k6 records it in `http_req_duration` at the timeout value) and count it in `http_req_failed` and a timeout counter. Dropping timeouts from percentiles hides the tail; report percentiles as lower bounds when any timeout occurred.
+- **Summary**: never return `{}` from `handleSummary`; that suppresses the default summary. Return the text summary on stdout plus a JSON file.
+
 ---
 
 ## 2. Tail Latency Amplification

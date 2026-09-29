@@ -1,0 +1,8 @@
+{
+  "name": "job-state",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "bin": { "job-state": "src/main.js" },
+  "scripts": { "test": "node --test" }
+}

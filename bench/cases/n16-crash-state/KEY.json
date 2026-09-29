@@ -1,0 +1,51 @@
+{
+ "id": "n16-crash-state",
+ "language": "node",
+ "suite": "node --test",
+ "surface": "cli",
+ "request": "the job state file save path and its exit codes",
+ "defects": [
+  {
+   "id": "D1",
+   "file": "src/store.js",
+   "line": 18,
+   "class": "non-atomic-write",
+   "keywords": [
+    "atomic",
+    "rename",
+    "truncate",
+    "temp",
+    "fsync",
+    "crash"
+   ],
+   "description": "saveState opens the live state file with 'w', which truncates it, and writes in place; a write that fails or a crash part-way leaves a truncated file that loadState rejects, losing every recorded job instead of keeping the previous state.",
+   "trigger": {
+    "input": "saveState(f,{jobs:{a:'done'}}); recordJob(f,'b','running', fs) where fs.writeSync writes the first 10 bytes then throws ENOSPC; then loadState(f)",
+    "expected": "the save throws and loadState(f) returns {\"jobs\":{\"a\":\"done\"}} (previous state intact)",
+    "actual": "save threw ENOSPC; file content is \"{\\n  \\\"jobs\\\"\"; load: SyntaxError: Expected ':' after property name in JSON at position 10 (line 2 column 9)"
+   },
+   "why_missed": "The suite only saves to a healthy temp directory and reads back, so no test makes a write fail part-way or looks at the file after an interrupted save."
+  },
+  {
+   "id": "D2",
+   "file": "src/cli.js",
+   "line": 18,
+   "class": "swallowed-write-error",
+   "keywords": [
+    "exit",
+    "code",
+    "swallowed",
+    "enospc",
+    "catch",
+    "status"
+   ],
+   "description": "The mark command catches a failed save, prints a warning and still returns 0, so a scheduler is told the job was recorded when the state file was not written.",
+   "trigger": {
+    "input": "run(['mark','b','done'], {fs, env:{JOB_STATE_FILE:f}, err, out}) where fs.writeSync throws ENOSPC",
+    "expected": "exit code 1 (README: 1 when the state could not be saved)",
+    "actual": "exit 0, stderr \"warning: could not save state: ENOSPC: no space left on device, write\\n\""
+   },
+   "why_missed": "Every CLI test runs against a writable file, so the catch branch never executes and no test asserts the exit code of a failed save."
+  }
+ ]
+}

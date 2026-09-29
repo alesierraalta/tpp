@@ -4,7 +4,7 @@ description: "Trigger: agregar una dependencia, npm install, pip install, un imp
 license: Apache-2.0
 metadata:
   author: "alesierraalta"
-  version: "1.0"
+  version: "1.1"
   scope: [common]
   auto_invoke: "Verifying a dependency is real, canonical and safe before it enters the project"
 ---
@@ -22,8 +22,8 @@ post rather than from the library's own documentation.
    squatted name gets executed. Verify against the registry first, then install.
 2. Any name not read from the library's OWN current docs is UNVERIFIED — a model's
    suggestion, your memory, a snippet. Models hallucinate package names at measurable
-   rates and **repeat the same fabricated name across runs**, so a plausible name that
-   feels familiar is not evidence.
+   rates (5.2% commercial, 21.7% open-source models across 576,000 samples,
+   https://arxiv.org/abs/2406.10279), so a plausible name that feels familiar is not evidence.
 3. **Existing on the registry proves nothing.** Age, publish history, download volume, a
    real linked repo and a maintainer must all agree. A brand-new package with one version
    and a plausible name is the attack, not the library.
@@ -49,13 +49,15 @@ post rather than from the library's own documentation.
 | Version bump / dependabot PR | Diff the changelog, check install scripts, re-run the vuln scan |
 | Auditing an existing tree | `references/hardening.md` — lockfile, provenance, scripts, phantom deps |
 | Import in code, absent from the manifest | Phantom dependency: it works via a transitive and breaks on any upgrade — declare it |
+| Workflow file, action, or `pull_request_target` | `references/ci-actions.md` |
+| MCP server, agent skill, base image, Terraform provider, git hook | Treat as a package: `references/hardening.md` (execution-rights dependencies) |
 | Cannot verify the package | Do not install. Say so and propose the stdlib or an existing dependency |
 
 ## Execution Steps
 
 1. **G0 — do we need it?** stdlib, an existing dependency, or twenty lines of our own?
    A dependency is permanent; check `right-size` before adding one.
-2. Run the gate (`references/new-dependency-gate.md`) in order; stop at the first failure.
+2. Run the gate (`references/new-dependency-gate.md`) in order and collect all cheap evidence; stop when a gate returns an unsafe verdict (G1, G2, G4 red flags). G3 is a signal that raises suspicion, not a stop rule.
 3. Install with scripts disabled, pin the exact version, commit the lockfile.
 4. Run the vulnerability scan and the license check; record both.
 5. Apply the standing hardening items (`references/hardening.md`) if not already in place.
@@ -65,13 +67,14 @@ post rather than from the library's own documentation.
 
 Per package: name · canonical? · registry age and publish history · linked repo matches? ·
 provenance/attestation · known vulns · license · install scripts? · **verdict**
-(legítimo / sospechoso / no verificable) with the evidence. Then the manifest and lockfile
+(legitimate / suspicious / unverifiable) with the evidence. Then the manifest and lockfile
 changes, and anything left unverified.
 
 ## References
 
 - [references/new-dependency-gate.md](references/new-dependency-gate.md) — G0–G8, the pre-install checks and their commands.
-- [references/hardening.md](references/hardening.md) — lockfiles, provenance, install scripts, phantom deps, standing posture.
+- [references/hardening.md](references/hardening.md) — lockfiles, provenance, install scripts, phantom deps, cooldown, dependency confusion, execution-rights dependencies.
+- [references/ci-actions.md](references/ci-actions.md) — GitHub Actions and CI hardening.
 - [assets/dependency-review-template.md](assets/dependency-review-template.md) — review artifact.
 - `~/.claude/skills/right-size/SKILL.md` — G0, do we need it at all.
 - `~/.claude/skills/implementation-theater/SKILL.md` — sibling: is our own code real.

@@ -1,10 +1,8 @@
-# The gate — run in order, stop at the first failure
+# The gate — run in order; stop on an unsafe verdict
 
-Why this exists in this form: LLMs fabricate package names at rates measured around 5%
-for commercial models and ~20%+ for open-source ones, and roughly **43% of fabricated
-names recur across identical prompts**. Reproducible hallucinations are registrable by an
-attacker, which is what turned this from a nuisance into a live supply-chain vector with
-confirmed incidents. The gate assumes the name is wrong until the registry says otherwise.
+Why this exists in this form: LLMs fabricate package names: 5.2% for commercial and 21.7% for open-source models across
+576,000 samples (https://arxiv.org/abs/2406.10279). A fabricated name an attacker can
+register is a live supply-chain vector (slopsquatting). The gate assumes the name is wrong until the registry says otherwise.
 
 ## G0 — Do we need it at all?
 
@@ -37,15 +35,14 @@ version · no repository field · a generic or machine-written description · a 
 count that does not match how "well known" the name felt to you · a maintainer with no
 other packages.
 
-A name that feels familiar plus a package created last month is the exact signature of a
-squat on a hallucination.
+A familiar-feeling name plus a package created last month is a strong squat signal, not proof; confirm with G1 and G4.
 
 ## G3 — Cross-registry check
 
 Look the same name up in the other ecosystems. A meaningful share of names hallucinated
 for Python exist on npm and vice versa, which lets an attacker plant a payload where a
 developer of the other language will reach for it. A name that exists in both places with
-unrelated content is a strong signal to stop.
+unrelated content is an investigation signal, not a stop rule by itself: raise suspicion and settle it with G2 and G4.
 
 ## G4 — Does the linked repository match?
 
@@ -66,7 +63,10 @@ npm audit signatures
 
 Note that this is NOT enforced at install time by the package manager: absence of
 provenance is not proof of anything, but its presence is real evidence, and for a package
-you are unsure about it should tip the decision.
+you are unsure about it should tip the decision. Verify, do not just see a badge:
+`npm audit signatures`, `gh attestation verify` (GitHub artifact attestations), or
+`cosign verify-attestation`; the attested source repo and workflow must match G4. A claimed
+SLSA level (https://slsa.dev/spec/v1.2/) is evidence of build integrity, not an audit.
 
 ## G6 — Known vulnerabilities
 
@@ -74,6 +74,10 @@ you are unsure about it should tip the decision.
 osv-scanner scan source -r .        # any ecosystem
 pip-audit                            # Python; queries OSV/PyPA/GitHub advisories
 npm audit --omit=dev
+govulncheck ./...                    # Go, reachability-aware
+cargo audit                          # Rust (RustSec)
+mvn org.owasp:dependency-check-maven:check   # Maven
+trivy fs .                           # dependency and image CVE scan (moved here from appsec)
 ```
 
 Run it on the whole resulting tree, not just the direct package.
@@ -96,7 +100,7 @@ doubt.
 
 ## Verdict
 
-Write one of three, with the evidence: **legítimo** (every gate passed, cite G2 and G4)
-· **sospechoso** (a red flag; name it and do not install) · **no verificable** (registry
+Write one of three, with the evidence: **legitimate** (every gate passed, cite G2 and G4)
+· **suspicious** (a red flag; name it and do not install) · **unverifiable** (registry
 or docs unavailable; do not install, propose the alternative). "Probably fine" is not a
 verdict.

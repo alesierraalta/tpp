@@ -5,7 +5,7 @@
 | Package | Canonical name verified (source) | Created / versions / last publish | Repo matches | Provenance | Vulns | License | Install scripts | Verdict |
 |---|---|---|---|---|---|---|---|---|
 
-Verdicts: legítimo · sospechoso · no verificable.
+Verdicts: legitimate · suspicious · unverifiable.
 
 ## Justification (G0)
 

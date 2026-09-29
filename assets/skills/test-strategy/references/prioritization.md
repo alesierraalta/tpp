@@ -19,17 +19,16 @@ the plan before ranking anything.
 
 **1. Blast radius — who breaks if this is wrong.** CodeGraph already emits this per
 symbol, including the `no covering tests found` warning. That pairing — many callers and
-nothing pinning it — is the highest-value target in any codebase, and it is handed to you
-for free. Prefer the transitive count over the direct one; a port with three adapters
+nothing pinning it — is a strong target, and it is handed to you for free. Prefer the transitive count over the direct one; a port with three adapters
 behind it carries all of them.
 
-**2. Historical defect density — the single best predictor of the next bug.** Code that
-has been fixed before gets fixed again.
+**2. Historical defect density — a strong signal in many repositories; verify it locally.** Code
+that has been fixed before tends to be fixed again.
 
 ```bash
 git log --oneline --since=2.years -- <path> | wc -l                 # churn
 git log --oneline --since=2.years --grep='^fix' -- <path> | wc -l   # past defects
-git log --format='%an' --since=2.years -- <path> | sort -u | wc -l  # authors (context loss)
+git log --format='%an' --since=2.years -- <path> | sort -u | wc -l  # authors (weak hint: squash merges and bots distort it)
 ```
 
 High churn plus high fix count plus many authors is where the money is. Stable code
@@ -41,11 +40,11 @@ a silently wrong answer a human will act on · a visible error · cosmetic. A si
 wrong answer outranks a visible crash: the crash announces itself, the wrong answer does
 not (`silent-degradation`).
 
-Error-handling code sits at the top of this ranking by default. Yuan et al. (OSDI 2014) traced
-92% of catastrophic failures in five production systems to mishandled errors the system had
-explicitly signaled, and 58% of those were catchable by a simple test of the handler. A `catch`
-with nothing in it, a handler that returns success, or a `TODO` inside one is a probe target
-before any happy path is.
+Error-handling code ranks high by default. In five distributed data systems, Yuan et al.
+(OSDI 2014) found 92% of catastrophic failures came from mishandled non-fatal errors, about one
+third were trivial handler mistakes (empty, abort or TODO handlers), and 77% were reproducible by a
+unit test. A `catch` with nothing in it, a handler that returns success, or a `TODO` inside one is
+a probe target before any happy path is.
 
 **4. Existing evidence and bounded cost.** Record the evidence type, result, limitations,
 and cost before choosing the next probe. For mutation, preserve Stryker's raw outcomes:
@@ -85,7 +84,7 @@ X because Y" stops asking, and a silent gap looks identical to an oversight.
 A coverage percentage counts lines executed. A line executed by a test with no meaningful
 assertion counts exactly the same as one properly pinned. That is why coverage targets
 reliably produce tests that assert nothing — the metric is satisfied by execution alone.
-Measured, not opined: across 31,000 suites on five Java systems, coverage correlated only
+Measured, not opined: across five large Java systems, coverage correlated only
 weakly with effectiveness once suite size was controlled (Inozemtseva & Holmes, ICSE 2014).
 
 When someone asks for a coverage number, translate the request: they want confidence that

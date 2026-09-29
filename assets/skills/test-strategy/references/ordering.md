@@ -62,10 +62,12 @@ list is in the plan, untested, in this order" is a professional result. Silence 
 
 ## Budget framing
 
-Every test is code maintained forever plus CI time on every run for years. It has to earn
-that. Treat the effort as a fixed budget spent top-down on the ranked list, and be willing
-to say out loud that something low on the list is not worth it — that is a decision, not
-negligence, and writing it down is what distinguishes the two.
+Every test is code maintained forever plus CI time on every run, so it has to earn its place.
+The default budget is every selected target to its target rung. Under a user cap or a testability
+defect, spend the effort top-down by risk and report where it ended. Floor: a target with shared
+state, concurrency or a clock always gets its concurrency and L4-L5 work first, whatever else the
+cap cuts. Low-ranked rows are never dropped: they stay `pending`, or become `n/a` with a written
+reason when judged not worth testing.
 
 ---
 
@@ -80,19 +82,16 @@ The plan lives at `docs/testing/test-plan.md` by default (or the path the user n
 ```
 
 A plan nobody declares is a plan nothing clears. Rows are never deleted by budget. The stopping
-point is recorded as row status (`pending`, `in progress`, `done`, `blocked`), not as prose.
-EXECUTE mode resumes from the first `pending` row; a refreshed PLAN keeps existing statuses.
+point is recorded with the statuses the code enforces (`pending`, `in progress`, `done`, `blocked`,
+or `n/a` with a reason), not as prose or invented status words. EXECUTE mode resumes from the first `pending` row; a refreshed PLAN keeps existing statuses.
 
 ---
 
 ## Scoped runs: what a bounded trigger buys
 
 A bounded trigger — the operator names one area, file or module, or the diff is confined to one or two
-files — buys a plan that says what it left out and why. It does not buy a cheaper run, and the
-measurement is blunt about it: on the eighteen-case corpus at three runs a case, the scoped mode
-declared itself seven times on **each** side and the change cost 8.5% more turns and 6% more tokens,
-with detection unchanged. What it buys is the record: a `Light:` run names its blast radius, the classes
-it touched, and a reason for every layer it skipped, which a plan that swept everything never states.
+files — buys a plan that says what it left out and why, not a cheaper run: a `Light:` run names its blast
+radius, the classes it touched, and a reason for every layer it skipped.
 
 What the trigger does not change is the depth: execution inside the scope is not reduced. The target it
 reaches climbs to its rung through its sibling, leaves a pinning test and an evidence row, and the run
@@ -121,16 +120,7 @@ ten lines or fewer, its contract unchanged, and none of the refused classes. `pl
 shape, the corroborated file, the absence of a Layer matrix and of a `Light:` line, and the two ledger
 rows; whether the function was really that small stays, as with `Light:`, with the operator and the reader.
 
-Whether Micro is cheaper is not established. One A/B on 2026-09-26 (tpp 0.3.13, test-strategy
-0.3.16, runner pi, `openai-codex/gpt-5.6-luna`, twenty cases at three runs each, corpus
-`sha256:61d78d07b4779295`) compared the shipped skill with the same build whose SKILL.md dropped the Micro
-route. Detection did not move (caught 65 of 93 defect-runs on both sides), and the side with the route cost
-more ($2.05 and 1,737 turns against $1.79 and 1,558), but the comparison cannot be charged to Micro: the arm
-without the route still declared Micro eleven times against three, because the embedded micro template and
-`plan init --micro` stayed reachable. Within the nine cases where some runs went micro and others did not,
-micro runs took fewer turns in five and more in four, on one to three micro runs a case. Treat Micro as a
-record that states less, not as a measured saving; a clean measurement needs an arm with no path to Micro at
-all.
+Micro is a record that states less; it is not a measured saving.
 
 ---
 
@@ -144,16 +134,17 @@ approximating them from memory degrades the method into generic advice.
 | Once target and risk are chosen | Invoke Sibling Skill | Purpose |
 |---|---|---|
 | High risk, needs real adversarial probing | `exploit-testing` | Layered adversarial tests (L1–L5) to actively break the implementation. |
+| One candidate needs a bounded adversarial campaign and a readiness disposition before RDD | `breakcheck` | Attack one candidate under a stated budget; report evidence and readiness. |
 | Property-based, stateful model-based, differential, metamorphic | `exploit-testing` | Technique catalog and runnable shapes (`Hypothesis`, shrinking, back-to-back). |
+| Mutation testing, killed mutants on the PR diff | `exploit-testing` | Mutate the changed lines, classify survivors as equivalent or missed; no numeric target. |
+| Races, interleavings, linearizability, shared state or a clock in the target | `exploit-testing` | Concurrency probes; see its `references/concurrency.md`. |
 | Operational load, latency p95/p99, soak leaks | `runtime-reliability-testing` | Open-model arrival-rate load testing (`k6`) without coordinated omission. |
 | Network faults, circuit breakers, retry jitter | `runtime-reliability-testing` | Deterministic socket fault injection with `Toxiproxy`. |
-| API boundary fuzzing, smoke journeys | `runtime-reliability-testing` | OpenAPI fuzzing with `Schemathesis`, sub-30s smoke tests with `Playwright`. |
+| API boundary fuzzing | `runtime-reliability-testing` | OpenAPI fuzzing with `Schemathesis`. |
 | Business logic authorization, BOLA/IDOR | `appsec-adversarial-auditor` | Dual-persona authorization verification (`403/404` red-under-mutation). |
 | Parser safety with untrusted input | `appsec-adversarial-auditor` | Coverage-guided fuzzing (`testing.F`, libFuzzer-style) of parsers and decoders. |
 | Secret leaks in diffs, taint tracking | `appsec-adversarial-auditor` | AST taint analysis (`Semgrep`) and high-entropy secret detection (`Gitleaks`). |
-| Layer boundaries, clean architecture purity | `clean-architecture-audit` | Automated architecture conformance tests (`pytest-archon`, `dependency-cruiser`). |
-| Genuine test resistance, killed mutants on PR diff | `clean-architecture-audit` | Incremental mutation testing (`Stryker`, `Mutmut`) on the PR diff; classify survivors, no numeric target. |
-| Code readability, cognitive load ceiling | `clean-architecture-audit` | Flag Cognitive Complexity above 15 (package default, WARNING) or above the target's configured threshold; BLOCKER still requires a configured critical limit. |
+| Layer boundaries, clean architecture purity | `clean-architecture-audit` | Architecture conformance tests (`pytest-archon`, `dependency-cruiser`) and architecture-contract mutants only. |
 | Duplicated logic, one invariant implemented twice | `clean-architecture-audit` | Clone detection with CodeGraph and similarity search; establish which copy runs, then consolidate to one implementation, or keep the divergence with its evidence record. |
 | Database migrations, up/down idempotency, locks | `database-persistence-testing` | Reversible migration verification, DDL lock inspection, and expand/contract patterns. |
 | DB deadlocks, isolation, N+1 query budget | `database-persistence-testing` | Concurrency stress, pessimistic locks (`SKIP LOCKED`), and query count assertions. |
@@ -161,7 +152,7 @@ approximating them from memory degrades the method into generic advice.
 | Cloud unit tests with mocks, FinOps budget | `iac-safe-auditor` | Zero-risk `terraform test` with `mock_provider` and Infracost cost delta gates. |
 | RAG retrieval accuracy (Hit Rate, MRR, NDCG) | `rag-audit-evaluator` | Decoupled retrieval evaluation on annotated chunk golden sets. |
 | RAG hallucinations, Faithfulness (NLI) | `rag-audit-evaluator` | Atomic claim decomposition, NLI entailment, and RAG triad scoring. |
-| LLM judge calibration, Cohen's Kappa, G-Eval | `ai-evals-auditor` | Symmetric pairwise positional swapping, G-Eval logprob continuous scoring, $\kappa \ge 0.70$. |
+| LLM judge validation | `ai-evals-auditor` | Agreement with human labels on a held-out set, reporting TPR/TNR with confidence intervals; symmetric pairwise position swapping. |
 | Autonomous agent tool accuracy & loops | `ai-evals-auditor` | Tool precision/recall, action hashing loop detection, and strict schema validation. |
 | Adversarial Red-Teaming (Promptfoo/Garak) | `ai-evals-auditor` | Direct/indirect prompt injection, crescendo attacks, and CI budget circuit breakers. |
 | No oracle, or quality is unmeasured | `silent-degradation` | Hunt silent data loss and unmeasured degradations. |

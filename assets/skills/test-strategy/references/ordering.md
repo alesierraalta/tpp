@@ -152,6 +152,7 @@ approximating them from memory degrades the method into generic advice.
 | Cloud unit tests with mocks, FinOps budget | `iac-safe-auditor` | Zero-risk `terraform test` with `mock_provider` and Infracost cost delta gates. |
 | RAG retrieval accuracy (Hit Rate, MRR, NDCG) | `rag-audit-evaluator` | Decoupled retrieval evaluation on annotated chunk golden sets. |
 | RAG hallucinations, Faithfulness (NLI) | `rag-audit-evaluator` | Atomic claim decomposition, NLI entailment, and RAG triad scoring. |
+| RAG cross-tenant or ACL leakage, injected-document canary, citation support, abstention, deletion SLA, embedding upgrade | `rag-audit-evaluator` | Two-principal canary probes, unanswerable and no-context controls, shadow index on the same query set. |
 | LLM judge validation | `ai-evals-auditor` | Agreement with human labels on a held-out set, reporting TPR/TNR with confidence intervals; symmetric pairwise position swapping. |
 | Autonomous agent tool accuracy & loops | `ai-evals-auditor` | Tool precision/recall, action hashing loop detection, and strict schema validation. |
 | Adversarial Red-Teaming (Promptfoo/Garak) | `ai-evals-auditor` | Direct/indirect prompt injection, crescendo attacks, and CI budget circuit breakers. |

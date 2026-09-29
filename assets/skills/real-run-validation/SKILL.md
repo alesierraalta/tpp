@@ -4,34 +4,43 @@ description: "Trigger: terminé una implementación, validar que funciona de ver
 license: Apache-2.0
 metadata:
   author: "alesierraalta"
-  version: "1.1"
+  version: "1.2"
 ---
 
 # Real-Run Validation
 
 ## Activation Contract
 
-Run after finishing an implementation that touches product source, BEFORE
-declaring it done or opening a PR. Green unit tests are necessary but not
-sufficient: asserts prove the cases the author imagined; a real run reveals
-what actually happens. Skip only for pure docs/comment/test-only diffs (no
-runtime surface to drive).
+Run after an implementation that changes wiring, packaging, configuration, an entry
+point, or a user journey, BEFORE declaring it done or opening a PR. Green unit tests
+prove the cases the author imagined; a real run reveals what actually happens.
+Record "not applicable: <reason>" instead of running when the diff is docs/comment/
+test-only, or is pure logic whose unit test already exercises the real artifact.
 
 ## Hard Rules
 
-- Exercise the REAL built artifact (installed module / running service / real
-  CLI), never a mock or reimplementation.
-- Use REAL, representative inputs — a plausible payload, secret, file, or
-  request — not `foo`/`bar` placeholders.
-- OBSERVE and report actual outputs and side effects; do not infer success
-  from exit code alone.
-- Explicitly probe the failure path (bad input, tamper, wrong auth) and
-  confirm it fails as intended — fail-closed, not silently.
+- Target safety first: state the target (host, environment, data set) before running.
+  Never run against production or shared environments or with real credentials. Use
+  synthetic data only, and start the target with an isolated HOME
+  (`HOME=$(mktemp -d)`) and no cloud profile or credential variables. `env -i` alone is
+  not enough when HOME still points at the operator's: SDKs such as boto3 read
+  `~/.aws/credentials` and can reach real services at startup. If only an unsafe target
+  exists, stop and report it.
+- Exercise the REAL built artifact (installed module / built binary / running
+  service), never a mock or reimplementation, and never the source tree shadowing it.
+- Prove artifact identity before the run: print which build actually executed (installed
+  dist version plus the module's import path; binary path plus `--version`; image digest).
+  A path inside the source checkout when an installed build was intended is a defect in
+  the run, not a pass.
+- Use representative synthetic inputs (a plausible payload, file, or request), not
+  `foo`/`bar` placeholders.
+- OBSERVE and report actual outputs and side effects; do not infer success from exit
+  code alone.
+- Run a negative control at the real boundary: one input the contract must reject
+  (bad input, tamper, wrong auth), observed rejected fail-closed.
+- Final evidence comes from a clean re-run in a fresh environment (new venv/HOME/temp
+  dir), not from a session that accumulated state.
 - State plainly what was validated vs what was NOT reachable this way.
-- Start the target with an isolated HOME (`HOME=$(mktemp -d)`) and no cloud profile or
-  credential variables. `env -i` alone is not enough when HOME still points at the
-  operator's: SDKs such as boto3 read `~/.aws/credentials` and can reach real services
-  at startup.
 - Never invent output. If you cannot run it, say so and stop.
 - Evidence: every finding carries an executed evidence record per
   `~/.claude/skills/test-strategy/references/evidence.md`; no finding from reading alone.
@@ -58,11 +67,12 @@ Also fill the plan's "Real-run recipes" table for every journey you contribute (
 ## Execution Steps
 
 1. Identify the runtime surface of the change (table above).
-2. Build/install so the driver hits the REAL artifact (right venv/deps). Record the
-   isolated HOME and environment in the recipe so EXECUTE starts the target the same way.
-3. Write a minimal driver with real inputs covering: happy path (exact
-   round-trip / expected effect) AND at least one failure path.
-4. Run it. Capture verbatim output.
+2. Build/install into a fresh env so the driver hits the REAL artifact, then print its
+   identity. Record the isolated HOME, environment, and identity check in the recipe so
+   EXECUTE starts the target the same way.
+3. Write a minimal driver with synthetic inputs covering: happy path (exact
+   round-trip / expected effect) AND the negative control.
+4. Run it, then repeat in a fresh env for the final evidence. Capture verbatim output.
 5. Compare each observed behavior against the intended contract.
 6. Report the observation table; flag any mismatch as a defect, not a nit.
 7. Preview scratchpad cleanup and explicitly confirm deletion of only the owned driver/artifacts within a bounded target; retain rollback/inspection artifacts and report ambiguous or skipped items. Keep all drivers out of the commit.
@@ -70,9 +80,9 @@ Also fill the plan's "Real-run recipes" table for every journey you contribute (
 ## Output Contract
 
 Return a compact table: behavior tested → observed result → matches contract?
-State the two validation layers explicitly (deterministic tests vs observed
+Include the artifact identity line and the target. State the two validation layers explicitly (deterministic tests vs observed
 real run), and name anything the real run could not exercise.
 
 ## References
 
-- `assets/driver_template.py` — starter driver: real inputs, happy + failure path.
+- `assets/driver_template.py` — starter driver: identity proof, synthetic input, happy path + negative control.

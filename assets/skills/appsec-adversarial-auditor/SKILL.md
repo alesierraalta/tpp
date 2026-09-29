@@ -4,7 +4,7 @@ description: "Trigger: security audit, appsec testing, vulnerability test, IDOR,
 license: Apache-2.0
 metadata:
   author: "alesierraalta"
-  version: "1.2"
+  version: "1.3"
 ---
 
 ## Activation Contract
@@ -39,7 +39,7 @@ cheap static ones (Semgrep, Gitleaks).
 2. **Dual-persona authorization**: for each endpoint handling tenant/user-scoped data, use authorized synthetic identities (User A attempting to read/mutate User B's resource ID). Never real secrets, never cross-tenant exposure; if the target cannot provide safe identities or isolation, record the surface as unreachable.
 3. **Falsifiability verification**: mutation or a controlled bypass where meaningful; otherwise a contract/invariant, negative-control, differential, metamorphic, or observed-state check. Do not require mutation or a named production line for every probe.
 4. **Isolated sandboxing**: dynamic attacks run only on a target that passes the Preflight Safety Gate (a throwaway worktree or an ephemeral container, `docker-test-containers`). No unconstrained denial-of-service against shared environments.
-5. **Severity by impact and exploitability evidence**, not by label, per [references/severity.md](references/severity.md): classify at the sink, name it `file:line`, otherwise the finding is a hypothesis.
+5. **Severity by impact and exploitability evidence**, not by label, per the impact x exploitability matrix in [references/severity.md](references/severity.md): the matrix cell gives the C/M/N label; a "hypothesis" cell (not reproduced, or no named `file:line` sink) is reported as a hypothesis, never as C/M/N.
 6. **Evidence**: every finding carries an executed evidence record per `~/.claude/skills/test-strategy/references/evidence.md`; no finding from reading alone.
 7. **Positive control for every denial**: a denied probe counts only when the authorized caller succeeds on the same route in the same run; otherwise a 404 from a wrong route reads as "secure".
 
@@ -63,7 +63,7 @@ cheap static ones (Semgrep, Gitleaks).
 2. **Scan static sinks and secrets**: Gitleaks against `origin/main..HEAD`; Semgrep with security rulesets and custom taint queries.
 3. **Dual-persona authorization probes**: synthetic Persona A (owner) and Persona B (attacker) in isolated fixtures with declared tenant scope; submit mutations and queries as B against A's resource IDs; assert the declared denial status, plus an owner positive control and unchanged state after each denied mutation.
 4. **Fuzzing invariants for parsers**: arbitrary byte streams into untrusted deserializers; prove crash-freedom and absence of uncaught panics / OOM loops.
-5. **Synthesize and triage**: tag each finding with C/M/N severity, CWE/OWASP identifier, observed reproduction payload, and its evidence record.
+5. **Synthesize and triage**: score impact and exploitability, read the matrix in `references/severity.md`, and tag each reproduced finding with its C/M/N label (unreproduced or sink-less items stay "hypothesis"), CWE/OWASP identifier, observed reproduction payload, and its evidence record.
 
 ## Output Contract
 

@@ -1,0 +1,52 @@
+{
+ "id": "n18-dependency-client",
+ "language": "node",
+ "suite": "node --test",
+ "surface": "http",
+ "request": "the payments client that calls the charge service with retries",
+ "defects": [
+  {
+   "id": "D1",
+   "file": "src/client.js",
+   "line": 26,
+   "class": "deadline-not-propagated",
+   "keywords": [
+    "deadline",
+    "budget",
+    "remaining",
+    "propagat",
+    "timeout",
+    "backoff"
+   ],
+   "description": "send never compares elapsed time with the deadline: every attempt gets the full per-attempt timeout and the retry loop only stops on the attempt count, so a call with a 1500 ms deadline against an upstream that never answers keeps retrying and backing off for 3300 ms.",
+   "trigger": {
+    "input": "server.always('hang'); client.send('GET', '/charges', undefined, { deadlineMs: 1500 }); read clock.now() afterwards (fake clock, sleep advances it)",
+    "expected": "the call stops by 1500 ms of clock time and returns { ok: false, error: 'deadline exceeded' } (README: every attempt and every backoff sleep together finish within deadlineMs)",
+    "actual": "D1 elapsed=3300ms budget=1500ms calls=3 result={\"ok\":false,\"error\":\"timeout\"}"
+   },
+   "why_missed": "The only deadline test asserts ok is false, which is also true when the call overruns its budget; no test reads the clock after a call that times out."
+  },
+  {
+   "id": "D2",
+   "file": "src/client.js",
+   "line": 17,
+   "class": "retry-without-idempotency-key",
+   "keywords": [
+    "idempotency",
+    "key",
+    "duplicate",
+    "POST",
+    "retry",
+    "lost",
+    "timeout"
+   ],
+   "description": "A new idempotency key is generated on every attempt instead of once per logical POST, so when a charge is applied but its response is lost the retry carries a different key, the service cannot recognise it and the customer is charged twice.",
+   "trigger": {
+    "input": "server.script(['lost']); client.send('POST', '/charges', { amount: 40 }); server.charges.length",
+    "expected": "one charge (README: a logical POST carries one idempotency key, the same on every retry, so the service applies it at most once)",
+    "actual": "D2 ok=true calls=2 charges=2"
+   },
+   "why_missed": "The retry test uses a 503, which the service never processed, and the key test looks at a single attempt; no test loses a response after the charge was made, the only case where key reuse matters."
+  }
+ ]
+}

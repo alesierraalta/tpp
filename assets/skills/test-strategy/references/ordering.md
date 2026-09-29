@@ -139,7 +139,7 @@ approximating them from memory degrades the method into generic advice.
 | Mutation testing, killed mutants on the PR diff | `exploit-testing` | Mutate the changed lines, classify survivors as equivalent or missed; no numeric target. |
 | Races, interleavings, linearizability, shared state or a clock in the target | `exploit-testing` | Concurrency probes; see its `references/concurrency.md`. |
 | Operational load, latency p95/p99, soak leaks | `runtime-reliability-testing` | Open-model arrival-rate load testing (`k6`) without coordinated omission. |
-| Network faults, circuit breakers, retry jitter | `runtime-reliability-testing` | Deterministic socket fault injection with `Toxiproxy`. |
+| Calls to a dependency: timeouts, deadlines, retries, circuit breakers, bounded queues, graceful shutdown | `resilience-fault-injection` | Deadline propagation, retry budget and idempotency key on write retries, breaker state transitions, recovery after the fault is removed, drain on SIGTERM, faults through a fake clock and transport or `Toxiproxy`. |
 | API boundary fuzzing | `runtime-reliability-testing` | OpenAPI fuzzing with `Schemathesis`. |
 | Business logic authorization, BOLA/IDOR | `appsec-adversarial-auditor` | Dual-persona authorization verification (`403/404` red-under-mutation). |
 | Parser safety with untrusted input | `appsec-adversarial-auditor` | Coverage-guided fuzzing (`testing.F`, libFuzzer-style) of parsers and decoders. |

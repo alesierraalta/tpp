@@ -4,7 +4,7 @@ description: "Trigger: funciona pero está mal, la precisión es baja y nadie se
 license: Apache-2.0
 metadata:
   author: "alesierraalta"
-  version: "1.0"
+  version: "1.1"
   scope: [common]
   auto_invoke: "Hunting silent quality loss in a system that reports success"
 ---
@@ -24,20 +24,25 @@ LIES. NOT for: crashes, exceptions, failing tests, or security exploitation.
 1. **A system's self-report is a claim, not a measurement.** "OK", exit 0, 200, "0
    errors" say the code RAN, never that the outcome is CORRECT. Never accept them as
    quality evidence.
-2. No quality claim without a NUMBER, a frozen goldset it was measured on, and the date.
-   "It works well" is not a result.
+2. No quality claim without a NUMBER, an appropriate frozen oracle (goldset, invariant,
+   reconciliation equation, or contract; see the oracle table in `references/measurement.md`),
+   and the measurement date. "It works well" is not a result.
 3. **Validate the metric before the system**: deliberately break the pipeline (empty the
    index, shuffle the retrieval, drop the reranker, corrupt an input) and confirm the
    metric DROPS. A metric that stays green on a broken system measures nothing — that is
-   the first finding, and it outranks everything else.
-4. Every stage reports **in / out / dropped, with a named reason per drop**. An
-   unattributed drop is a defect, whatever the final output looks like.
+   the first finding, and it outranks everything else. A metric or alert must also be
+   proven able to FIRE: synthetic breach, observed alert or metric change.
+4. Every stage reports **in / out / dropped, with a named reason per drop**, under a
+   stage-appropriate equation declared up front. Fan-out, aggregation, joins, retries and
+   sampling do not satisfy `out + dropped == in`. An unattributed drop is a defect under
+   the declared equation.
 5. Every filter, permission scope and truncation must be probed WITH and WITHOUT it, and
    the difference set inspected item by item. Over-restriction is invisible by design.
-6. Never conclude from one sample or one run. Nondeterministic output is judged over N
-   runs and over the goldset.
-7. Report as a defect anything the system CANNOT observe about itself — a missing
-   counter is why nobody noticed.
+6. Never conclude from one sample of a nondeterministic stage: judge it over N runs and
+   the oracle set. A deterministic stage needs one run over the full oracle set.
+7. Report what the system CANNOT observe as a finding, then classify it: release blocker,
+   observability debt, or accepted risk with a reason. A missing counter is a risk
+   classification, not an automatic defect.
 
 ## Decision Gates
 
@@ -48,7 +53,8 @@ LIES. NOT for: crashes, exceptions, failing tests, or security exploitation.
 | Everything green, output still bad | Break it on purpose; if the metric holds, the metric is the bug (Rule 3) |
 | Don't know WHICH stage loses quality | Ablation + ceiling analysis — `references/measurement.md` |
 | Suspect a filter/permission over-restricts | With/without diff of the result sets — `references/silent-loss.md` |
-| Nobody would notice a regression tomorrow | Wire the metric to CI/alerting as a threshold, not a dashboard |
+| Nobody would notice a regression tomorrow | Wire the metric to CI/alerting as a threshold, then prove it fires with a synthetic breach (`promtool test rules` for Prometheus rules tests rule logic, not delivery) |
+| Loss under concurrency, retries, or time/numeric edge cases | Conservation probe under fault injection — `references/silent-loss.md` |
 
 ## Execution Steps
 
@@ -56,20 +62,21 @@ LIES. NOT for: crashes, exceptions, failing tests, or security exploitation.
    Not "ran", not "no errors" — the result quality.
 2. Inventory every silent-loss site along the path (`references/silent-loss.md`) and
    instrument it: in/out/dropped + reason.
-3. Build or freeze a goldset; measure the baseline; record the number and the date.
-4. Validate the metric with a deliberate break (Rule 3) before believing any of it.
+3. Pick the oracle type, build or freeze it, measure the baseline; record the number and the date.
+4. Validate the metric with a deliberate break (Rule 3) and try to satisfy it while making
+   the outcome worse (Goodhart) before believing any of it.
 5. Attribute the loss: ablate each stage; replace each stage with a perfect oracle to see
    the ceiling. The stage whose removal changes nothing is broken or unmeasured.
 6. Diff every filter/permission with and without it; justify every excluded item.
 7. Fix the OBSERVABILITY GAP too, not just the defect: leave the counter and the
-   threshold behind so the next regression announces itself.
+   threshold behind, and fire the alert once with a synthetic breach.
 
 ## Output Contract
 
 The stage table (stage → in → out → dropped → reason), the baseline number with its
-goldset and date, the metric-validation result (what broke, how much it dropped), the
-ablation table, and defects split into `pérdida de calidad` vs `ceguera del sistema`.
-Say plainly what remains unmeasured.
+oracle and date, the metric-validation result (what broke, how much it dropped), the alert
+fire result, the ablation table, and defects split into `quality loss` vs `system
+blindness`. Say plainly what remains unmeasured.
 
 ## References
 

@@ -40,6 +40,18 @@ random quality.
 success; a fire-and-forget task whose failure nobody observes; a retry that eventually
 gives up quietly; a queue where one tenant's backlog starves the rest.
 
+**Concurrency loss** — lost update or last-writer-wins, message dropped on backpressure or a
+drop-oldest bounded queue, ack or offset commit before processing, non-idempotent redelivery,
+a worker panic or exception swallowed, a partial batch reported as success. Probe:
+conservation under fault injection and duplicate delivery, `sent == processed + dead-lettered
++ rejected`, and a check that every ack follows a completed process.
+
+**Time and numeric loss** — late data past a watermark, event time vs processing time, a
+timezone bucket boundary, a DST day of 23 or 25 hours, a TTL expiry, a cron overlap or skip;
+a NaN dropped by a predicate (NaN comparisons are false, so the row vanishes), summation
+order and float drift, currency rounding, a counter overflow. Probe: feed the boundary
+value (NaN, the DST day, an event older than the watermark) and count it out the other end.
+
 **Model and index mismatch (RAG/ML specific)** — the embedding model at index time
 differs from query time; the index is stale after an update; deleted documents remain
 retrievable; the distance metric differs from the one used to build the index; the
@@ -53,10 +65,11 @@ context, a template variable rendering empty because the key was missing.
 
 ## The counting principle
 
-For every stage: `in`, `out`, `dropped`, and a reason label per drop.
-`out + dropped == in` must hold, and every unit in `dropped` must carry a reason a human
-would accept. When the numbers do not add up, stop and find the leak before measuring
-anything else. This single table finds more silent loss than any amount of reading.
+For every stage: `in`, `out`, `dropped`, and a reason label per drop. Declare the
+stage-appropriate equation before measuring: one-to-one stages may use `out + dropped ==
+in`; fan-out, aggregation, joins, retries and sampling need their own equation or
+denominator. Every unattributed drop is a defect under that equation; find the leak before
+measuring anything else.
 
 ## The with/without diff — for every filter, scope and truncation
 

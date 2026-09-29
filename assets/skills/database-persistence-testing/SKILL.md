@@ -4,7 +4,7 @@ description: "Trigger: database testing, migration testing, schema migration, up
 license: Apache-2.0
 metadata:
   author: "alesierraalta"
-  version: "1.1"
+  version: "1.2"
 ---
 
 ## Activation Contract

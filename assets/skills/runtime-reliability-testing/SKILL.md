@@ -4,7 +4,7 @@ description: "Trigger: runtime testing, load testing, chaos testing, stress test
 license: Apache-2.0
 metadata:
   author: "alesierraalta"
-  version: "1.1"
+  version: "1.2"
 ---
 
 ## Activation Contract
@@ -32,7 +32,7 @@ journey, Schemathesis against an existing OpenAPI spec).
 
 1. **No probe without a FALSIFIABLE CLAIM**: "If <invariant/latency/threshold> violates <bound>, this probe goes RED". A probe that cannot go red is decorative.
 2. **Execute against the REAL RUNNING ARTIFACT**: real services in ephemeral containers (`docker-test-containers`); never mock the seam being validated. If isolation cannot be provided, record the surface as unreachable.
-3. **No coordinated omission**: load tests use arrival-rate / open workload models (`references/patterns.md`); closed loops must state the omission bias. Closed-model tools (autocannon, `wrk`, fixed-VU loops) are allowed only for an explicitly closed-model question (a connection-pool or fixed-client ceiling), labelled as such and never used for latency SLOs or capacity numbers. Offered arrival rate and completed throughput are separate metrics, and timed-out requests stay in the percentile denominator, censored at the timeout (`references/patterns.md`).
+3. **No coordinated omission**: load tests use arrival-rate / open workload models (`references/patterns.md`); closed loops must state the omission bias. Closed-model tools (autocannon, `wrk`, fixed-VU loops) are allowed only for an explicitly closed-model question (a connection-pool or fixed-client ceiling), labelled as such and never used for latency SLOs or capacity numbers. Attempted arrival rate (completed plus dropped iterations) and completed throughput are separate metrics, and timed-out requests (status 0) are counted separately and reported next to the percentiles, since percentiles over successful responses alone are optimistic (`references/patterns.md`).
 4. **Assert on OBSERVED TELEMETRY, not exit codes**: database state, wire payloads, Toxiproxy logs, RSS/heap trends, breaker counters.
 5. **Blast radius containment**: chaos injection is scoped to test-owned ephemeral containers on isolated networks; approved exceptions keep the same bounded limits and stop contract.
 6. **Teardown is mandatory**: every injected fault is removed in a `finally` hook, even on assertion failure; only test-owned faults, never pre-existing toxics.

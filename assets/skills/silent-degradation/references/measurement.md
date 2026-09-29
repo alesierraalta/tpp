@@ -16,6 +16,16 @@ Per surface, the number that would actually prove the thing works:
 
 Write the threshold BEFORE measuring. A number with no threshold generates no decision.
 
+### Oracle types
+
+| Oracle | Fits | Example |
+|---|---|---|
+| Goldset | quality of retrieval, classification, extraction | recall@k on 100 labeled cases |
+| Invariant / property | logic with a checkable law | output sorted; idempotent on re-run |
+| Reconciliation | data movement | source count and sum equal sink plus rejects |
+| Contract / schema | interfaces | response validates against the schema |
+| Reference distribution | drift in inputs or scores | PSI or KS against the frozen baseline |
+
 ## 2. Build the goldset (small, frozen, honest)
 
 50–200 cases beats 10.000 unlabeled ones. Take them from REAL traffic, including the
@@ -43,7 +53,10 @@ is blind and every green it ever produced was noise.
 | Return a constant answer for everything | Every quality metric collapses to the baseline |
 
 This is mutation testing applied to the evaluation. A green suite over a deliberately
-broken system is the finding, and it outranks anything else you would report.
+broken system is the finding, and it outranks anything else you would report. Also try to
+satisfy the metric while making the outcome worse (Goodhart); if it stays green, the metric
+is the finding. Check drift and segment shifts, and record who changed an alert threshold,
+when, and why.
 
 ## 4. Attribute the loss — ablation and ceiling
 
@@ -63,8 +76,9 @@ bad answer with a bad retrieval are different bugs with opposite fixes.
 
 ## 5. Judge nondeterministic output honestly
 
-- N runs, report the distribution, not a sample. Same input twice giving different
-  answers IS a measurement — record the disagreement rate.
+- For a nondeterministic stage: N runs, report the distribution, not a sample. A
+  deterministic stage needs one run over the full oracle set. Same input twice giving
+  different answers IS a measurement — record the disagreement rate.
 - LLM-as-judge only against an explicit RUBRIC (grounded in context? answers the
   question? invents an entity?), and the judge must be validated against human labels on
   a sample before its verdicts count. An unvalidated judge is one more untested
@@ -76,7 +90,8 @@ bad answer with a bad retrieval are different bugs with opposite fixes.
 
 A number in a chat message decays in a day. Leave behind: the goldset in the repo, the
 metric computed by a command anyone can run, the baseline committed with its date, and a
-threshold that fails CI or pages someone. Plus the per-stage counters from
+threshold that fails CI or pages someone, proven by a synthetic breach that makes it fire
+(for Prometheus, `promtool test rules` covers the rule logic only, not delivery to a pager). Plus the per-stage counters from
 `silent-loss.md`, with the drop-reason label, exported where they are actually watched.
 
 Ratio alerts beat absolute ones: `dropped/in`, `zero-result queries/total`,

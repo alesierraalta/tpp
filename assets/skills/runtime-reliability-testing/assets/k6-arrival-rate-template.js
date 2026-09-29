@@ -1,14 +1,21 @@
 import http from 'k6/http';
 import { check } from 'k6';
-import { Trend, Rate } from 'k6/metrics';
+import { Trend, Rate, Counter } from 'k6/metrics';
+import { textSummary } from 'https://jslib.k6.io/k6-summary/0.1.0/index.js';
 
 const customLatency = new Trend('target_custom_latency', true);
 const errorRate = new Rate('target_error_rate');
+const timeouts = new Counter('target_timeouts');
 const required = (name) => {
   if (!__ENV[name]) throw new Error(`${name} is required; set an explicit target-owned value`);
   return __ENV[name];
 };
-const number = (name, example) => Number(__ENV[name] || example);
+const number = (name, example) => Number(__ENV[name] || example); // shape parameters only
+const requiredNumber = (name) => { // SLO bounds fail closed: no default, no run
+  const v = Number(required(name));
+  if (!Number.isFinite(v)) throw new Error(`${name} must be a number`);
+  return v;
+};
 const stages = __ENV.TARGET_STAGES
   ? JSON.parse(__ENV.TARGET_STAGES)
   : [{ duration: '1m', target: 100 }, { duration: '3m', target: 100 }, { duration: '30s', target: 0 }]; // EXAMPLE only
@@ -25,10 +32,15 @@ export const options = {
     stages,
   } },
   thresholds: {
-    http_req_duration: [`p(95)<${number('TARGET_P95_MS', 200)}`, `p(99)<${number('TARGET_P99_MS', 400)}`],
-    http_req_failed: [`rate<${number('TARGET_HTTP_ERROR_RATE', 0.005)}`],
-    target_error_rate: [`rate<${number('TARGET_ERROR_RATE', 0.005)}`],
-    dropped_iterations: ['count==0'], // Exhausted VUs makes the result INCONCLUSIVE.
+    // SLO thresholds come only from target-owned env vars; a missing one aborts before the run.
+    // http_req_duration keeps timed-out requests at the timeout value (censored samples), so
+    // they stay in the percentile denominator instead of vanishing from the tail.
+    http_req_duration: [`p(95)<${requiredNumber('TARGET_P95_MS')}`, `p(99)<${requiredNumber('TARGET_P99_MS')}`],
+    http_req_failed: [`rate<${requiredNumber('TARGET_HTTP_ERROR_RATE')}`],
+    target_error_rate: [`rate<${requiredNumber('TARGET_ERROR_RATE')}`],
+    // Dropped iterations mean the generator could not offer the declared rate: the run is
+    // INCONCLUSIVE, so stop it instead of letting it finish with a flattering tail.
+    dropped_iterations: [{ threshold: 'count==0', abortOnFail: true }],
   },
 };
 
@@ -43,15 +55,32 @@ export default function () {
   const res = http.post(`${TARGET_URL}/api/v1/workload`, JSON.stringify({ timestamp: Date.now(), action: 'probe' }), {
     headers: { 'Content-Type': 'application/json' }, timeout: REQUEST_TIMEOUT,
   });
-  customLatency.add(res.timings.duration);
+  customLatency.add(res.timings.duration); // timed-out requests included, censored at the timeout
+  if (res.status === 0) timeouts.add(1);
   const ok = check(res, {
     'status and semantic response are valid': (r) => (r.status === 200 || r.status === 201) && validateResponse(r),
   });
   errorRate.add(!ok);
 }
 
+// Offered load and completed throughput are different numbers: report both.
+// offered = iterations started + dropped; completed = iterations that finished.
 export function handleSummary(data) {
-  if ((data.metrics.dropped_iterations?.values?.count || 0) > 0)
-    console.warn('INCONCLUSIVE: dropped_iterations > 0; maxVUs was exhausted');
-  return {};
+  const secs = (data.state.testRunDurationMs || 0) / 1000;
+  const completed = data.metrics.iterations?.values?.count || 0;
+  const dropped = data.metrics.dropped_iterations?.values?.count || 0;
+  const load = {
+    duration_s: secs,
+    offered_iterations: completed + dropped,
+    offered_rate_per_s: secs ? (completed + dropped) / secs : null,
+    completed_iterations: completed,
+    completed_throughput_per_s: secs ? completed / secs : null,
+    timeouts: data.metrics.target_timeouts?.values?.count || 0,
+    inconclusive: dropped > 0,
+  };
+  if (load.inconclusive) console.warn('INCONCLUSIVE: dropped_iterations > 0; maxVUs was exhausted');
+  return {
+    stdout: textSummary(data, { indent: ' ', enableColors: false }) + `\nload: ${JSON.stringify(load)}\n`,
+    'summary.json': JSON.stringify({ load, metrics: data.metrics }, null, 2),
+  };
 }

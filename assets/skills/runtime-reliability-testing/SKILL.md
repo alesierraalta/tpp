@@ -4,7 +4,7 @@ description: "Trigger: runtime testing, load testing, chaos testing, stress test
 license: Apache-2.0
 metadata:
   author: "alesierraalta"
-  version: "1.0"
+  version: "1.1"
 ---
 
 ## Activation Contract
@@ -32,7 +32,7 @@ journey, Schemathesis against an existing OpenAPI spec).
 
 1. **No probe without a FALSIFIABLE CLAIM**: "If <invariant/latency/threshold> violates <bound>, this probe goes RED". A probe that cannot go red is decorative.
 2. **Execute against the REAL RUNNING ARTIFACT**: real services in ephemeral containers (`docker-test-containers`); never mock the seam being validated. If isolation cannot be provided, record the surface as unreachable.
-3. **No coordinated omission**: load tests use arrival-rate / open workload models (`references/patterns.md`); closed loops must state the omission bias.
+3. **No coordinated omission**: load tests use arrival-rate / open workload models (`references/patterns.md`); closed loops must state the omission bias. Closed-model tools (autocannon, `wrk`, fixed-VU loops) are allowed only for an explicitly closed-model question (a connection-pool or fixed-client ceiling), labelled as such and never used for latency SLOs or capacity numbers. Offered arrival rate and completed throughput are separate metrics, and timed-out requests stay in the percentile denominator, censored at the timeout (`references/patterns.md`).
 4. **Assert on OBSERVED TELEMETRY, not exit codes**: database state, wire payloads, Toxiproxy logs, RSS/heap trends, breaker counters.
 5. **Blast radius containment**: chaos injection is scoped to test-owned ephemeral containers on isolated networks; approved exceptions keep the same bounded limits and stop contract.
 6. **Teardown is mandatory**: every injected fault is removed in a `finally` hook, even on assertion failure; only test-owned faults, never pre-existing toxics.
@@ -44,7 +44,7 @@ journey, Schemathesis against an existing OpenAPI spec).
 | :--- | :--- | :--- | :--- |
 | Latency compliance under concurrency | **k6** | Open workload arrival-rate (`assets/k6-arrival-rate-template.js`) | Target-declared latency/error SLO with provenance, sample context, tolerance |
 | Memory leaks and endurance | **k6 + pprof** | Target-configured soak duration and load profile | Target-declared RSS/heap trend criterion |
-| Breaking throughput limit | **autocannon** | Step-up stress with HTTP pipelining | Target-declared saturation criterion |
+| Breaking throughput limit | **k6** | Step-up `ramping-arrival-rate` stages, open workload | Target-declared saturation criterion; `dropped_iterations` aborts the run |
 | Circuit breaker transitions | **Toxiproxy** | `latency` and drop toxics (`assets/toxiproxy-breaker-test.py`) | Declared state-transition, timeout, fail-fast contract |
 | Network drops and corruption | **Toxiproxy** | `reset_peer`, `packet_loss`, `slicer` | Target-declared idempotency and retry contract |
 | API contract robustness | **Schemathesis** | Property fuzzing against OpenAPI | Target-declared error and schema conformance |

@@ -6,7 +6,8 @@
 #   ./ephemeral-pg.sh                       # start, print DSN, wait for Ctrl-C
 #   ./ephemeral-pg.sh -- pytest tests/       # start, run the command, tear down
 #
-# Env overrides: PG_IMAGE, PG_PORT, PG_DB, PG_PASSWORD, TMPFS_SIZE
+# Env overrides: PG_IMAGE, PG_PORT, PG_DB, PG_PASSWORD, TMPFS_SIZE, PG_MEMORY, PG_CPUS
+# Port is published on 127.0.0.1 only. PGDATA=/pgdata sits outside every image VOLUME (PG16-PG18+).
 set -Eeuo pipefail
 
 PG_IMAGE="${PG_IMAGE:-pgvector/pgvector:pg16}"
@@ -26,7 +27,8 @@ docker run --rm -d --name "$NAME" --label ephemeral=1 \
   -e POSTGRES_DB="$PG_DB" \
   -e PGDATA=/pgdata \
   --tmpfs "/pgdata:rw,size=${TMPFS_SIZE},mode=1777" \
-  -p "${PG_PORT}:5432" \
+  --memory "${PG_MEMORY:-1g}" --cpus "${PG_CPUS:-2}" \
+  -p "127.0.0.1:${PG_PORT}:5432" \
   "$PG_IMAGE" >/dev/null
 
 # Resolve the port Docker actually bound.
@@ -34,10 +36,10 @@ PORT="$(docker port "$NAME" 5432/tcp | head -1 | sed 's/.*://')"
 
 # Readiness, never a fixed sleep.
 for _ in $(seq 1 60); do
-  docker exec "$NAME" pg_isready -U postgres -d "$PG_DB" >/dev/null 2>&1 && break
+  docker exec "$NAME" pg_isready -h 127.0.0.1 -p 5432 -U postgres -d "$PG_DB" >/dev/null 2>&1 && break
   sleep 0.5
 done
-docker exec "$NAME" pg_isready -U postgres -d "$PG_DB" >/dev/null 2>&1 || {
+docker exec "$NAME" pg_isready -h 127.0.0.1 -p 5432 -U postgres -d "$PG_DB" >/dev/null 2>&1 || {
   echo "postgres did not become ready" >&2
   docker logs "$NAME" >&2
   exit 1

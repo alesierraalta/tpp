@@ -181,7 +181,7 @@ it covers; post it (`gh pr comment <n> -F -`) only with the operator's approval.
    (its own checks): security `appsec-adversarial-auditor` · runtime and faults
    `runtime-reliability-testing` · persistence and migrations `database-persistence-testing` ·
    architecture `clean-architecture-audit` · e2e journeys `real-run-validation`; when the
-   surface exists: `iac-safe-auditor`, `rag-audit-evaluator`, `ai-evals-auditor`. The router
+   surface exists: `iac-safe-auditor`, `rag-audit-evaluator`, `llm-eval-design`, `agent-eval`, `llm-redteam`. The router
    ranks what siblings contribute, never invents it.
 3. Rank ([references/prioritization.md](references/prioritization.md)).
 4. Per target: altitude, target rung L1–L5, sibling skill, verdict.

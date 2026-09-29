@@ -153,9 +153,9 @@ approximating them from memory degrades the method into generic advice.
 | RAG retrieval accuracy (Hit Rate, MRR, NDCG) | `rag-audit-evaluator` | Decoupled retrieval evaluation on annotated chunk golden sets. |
 | RAG hallucinations, Faithfulness (NLI) | `rag-audit-evaluator` | Atomic claim decomposition, NLI entailment, and RAG triad scoring. |
 | RAG cross-tenant or ACL leakage, injected-document canary, citation support, abstention, deletion SLA, embedding upgrade | `rag-audit-evaluator` | Two-principal canary probes, unanswerable and no-context controls, shadow index on the same query set. |
-| LLM judge validation | `ai-evals-auditor` | Agreement with human labels on a held-out set, reporting TPR/TNR with confidence intervals; symmetric pairwise position swapping. |
-| Autonomous agent tool accuracy & loops | `ai-evals-auditor` | Tool precision/recall, action hashing loop detection, and strict schema validation. |
-| Adversarial Red-Teaming (Promptfoo/Garak) | `ai-evals-auditor` | Direct/indirect prompt injection, crescendo attacks, and CI budget circuit breakers. |
+| LLM eval design, judge validation, eval statistics | `llm-eval-design` | Error analysis first, binary criteria, judge TPR/TNR with confidence intervals on held-out human labels, bias battery, bootstrap/paired CIs, pinned-model regression. |
+| Agent and tool-use evaluation | `agent-eval` | Final-state grading, tool-call correctness, pass^k over repeated trials, semantic loop detection, grader tampering, side effects. |
+| LLM red-teaming: indirect injection, exfiltration, excessive agency, prompt leakage | `llm-redteam` | Lethal-trifecta audit first; attack success rate over repeated trials; deterministic controls stay with `appsec-adversarial-auditor`. |
 | No oracle, or quality is unmeasured | `silent-degradation` | Hunt silent data loss and unmeasured degradations. |
 | Might never execute in production | `implementation-theater` | Verify code is referenced and alive before spending test budget. |
 | A new third-party package appears in the plan | `dependency-legitimacy` | Audit supply chain and hallucinated packages before installation. |

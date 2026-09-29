@@ -36,4 +36,4 @@ Probe: make the authorization, validation, or rate-limit dependency fail (kill t
 | Model output to sink | make the model emit `'; DROP...`, shell metacharacters, `<script>` and follow it to the SQL, shell, or HTML sink | output reaches the sink unparameterized or unescaped |
 | Retrieval tenant scoping | as tenant B, query text that only matches tenant A documents | any tenant A chunk is returned |
 
-Behavioral prompt-injection evaluation stays with `ai-evals-auditor`.
+Behavioral prompt-injection evaluation stays with `llm-redteam`.

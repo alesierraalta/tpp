@@ -161,8 +161,8 @@ approximating them from memory degrades the method into generic advice.
 | The test diff is already written and too bloated | `no-excess-tests` | Prune fragile, low-value tests and keep behavioral ones. |
 | Final end-to-end reality check of completed change | `real-run-validation` | Exercise real code with real inputs, not just passing mocks. |
 | Database / cache ephemeral containers | `docker-test-containers` | Spin up zero-leak ephemeral Postgres/Redis/Mongo containers. |
-| Python-specific test patterns and fixtures | `python-testing-patterns` | Idiomatic Pytest, TDD, and test structure. |
-| Go-specific teatest, golden files, coverage | `go-testing` | Idiomatic Go test conventions. |
+| Python (pytest) false greens and flaky tests | `python-testing-patterns` | Order-dependent or leaky fixtures, stale mocks and cassettes, swallowed exceptions, unawaited coroutines, lost multiplicity. |
+| Go test races, leaks, time flakiness, fuzzing | `go-testing` | Data races, goroutine leaks, order dependence, sleep-based flakiness, parser panics, golden drift. |
 
 Each of these also activates on its own triggers without passing through here. This table
 is the path when starting from the strategic question: *"What should I test, and how?"*

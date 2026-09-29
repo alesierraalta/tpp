@@ -4,7 +4,7 @@ description: "Trigger: haz el testing, testea esto, prueba esto, test this, test
 license: Apache-2.0
 metadata:
   author: "alesierraalta"
-  version: "0.4.0"
+  version: "0.4.1"
   requires_tpp: "0.4.1"
   scope: [common]
   auto_invoke: "Any request to test something: infer scope and mode from repo state, build or resume the persisted plan, execute it through specialized testing skills"
@@ -109,6 +109,9 @@ hand-applied gate is a weaker claim than the binary's:
     `tpp feedback --file`. Set `skill` to what ran (`<name>` or `<name> <version>`; a breakcheck run
     records `breakcheck <its version>`). Keep it out of chat: after a successful write reply with a
     brief acknowledgment, and if storage fails say so instead of claiming it was recorded.
+15. **Ask only when it changes the test.** Ask the user only when the target is ambiguous or the next
+    action is irreversible; research everything else. Report each finding consequence first, and mark
+    it inferred when it was not observed.
 
 ## Decision Gates
 

@@ -10,9 +10,9 @@ import (
 )
 
 var expected = []string{
-	"agent-eval", "appsec-adversarial-auditor", "ask-or-research", "breakcheck", "clean-architecture-audit", "database-persistence-testing",
+	"agent-eval", "appsec-adversarial-auditor", "breakcheck", "clean-architecture-audit", "database-persistence-testing",
 	"dependency-legitimacy", "docker-test-containers", "exploit-testing", "go-testing", "iac-safe-auditor", "implementation-theater",
-	"llm-eval-design", "llm-redteam", "no-excess-tests", "purpose-first", "python-testing-patterns", "rag-audit-evaluator", "real-run-validation", "runtime-reliability-testing", "silent-degradation",
+	"llm-eval-design", "llm-redteam", "no-excess-tests", "python-testing-patterns", "rag-audit-evaluator", "real-run-validation", "runtime-reliability-testing", "silent-degradation",
 	"test-strategy",
 }
 

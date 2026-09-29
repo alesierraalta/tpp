@@ -1462,7 +1462,7 @@ func TestSyncConfigDirOnlyTargetsClaude(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("sync --config-dir exit = %d\n%s", code, out)
 	}
-	if _, err := os.Stat(filepath.Join(custom, "skills", "ask-or-research", "SKILL.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(custom, "skills", "breakcheck", "SKILL.md")); err != nil {
 		t.Fatalf("custom Claude directory did not receive skills: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(custom, "settings.json")); err != nil {
@@ -1482,7 +1482,7 @@ func TestSyncHostsFlagNarrowsTheInstall(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("sync --hosts exit = %d\n%s", code, out)
 	}
-	name := "ask-or-research"
+	name := "breakcheck"
 	for _, host := range []struct {
 		name string
 		dir  string

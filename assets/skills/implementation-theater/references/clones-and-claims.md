@@ -2,11 +2,10 @@
 
 ## Divergent clones — duplication is not the finding, DIVERGENCE is
 
-Copy-paste is now the dominant shape in AI-assisted commits: GitClear's dataset shows
-duplicated blocks rising ~8x in 2024, refactoring down ~40%, and, for the first time,
-copy-pasted lines exceeding moved lines. Cloned blocks carry an estimated 15–50% more
-defects. The mechanism is simple and brutal: two copies exist, a bug is found, and the
-fix lands in one of them.
+Two copies exist, a bug is found, and the fix lands in one of them. This skill owns clone
+detection (handed over from `clean-architecture-audit`); it is a finding only with a
+violated shared contract or demonstrated behavioral divergence plus reachability of the
+diverging copy.
 
 Procedure:
 
@@ -16,11 +15,11 @@ Procedure:
 2. **Establish which one RUNS** — the R chain in `reachability.md`. Often both do, for
    different callers, which is the worst case.
 3. **Diff them and read the difference.** Every divergence is either an intentional
-   variation (say why) or a fix that landed in only one copy (a defect in the other).
+   variation (say why) or a behavioral difference that violates the shared contract.
 4. **Check the history**: `git log -S "<distinctive fragment>"` over both paths. A commit
-   touching one and not the other is the finding, with the strongest possible evidence.
-5. Decide: consolidate, or document why two exist and who owns each. Leaving them
-   undocumented guarantees the next fix diverges again.
+   touching one and not the other is corroboration to investigate, not proof.
+5. Decide: consolidate, or record the divergence with the evidence and the owner of each
+   copy. Undocumented twins guarantee the next fix diverges again.
 
 Same procedure for a partial clone: the same logic reimplemented with different names
 (the arithmetic repeated inside a test instead of calling the unit, a threshold applied
@@ -59,4 +58,5 @@ the code as it was when the comment was written.
 
 State each finding as: the claim, the line that should make it true, and what the code
 does instead. Then the fix — usually renaming or deleting the claim is correct and
-cheaper than making the code live up to it. Say which you chose.
+cheaper than making the code live up to it. Say which you chose, with confidence, unknowns
+and the next proof.

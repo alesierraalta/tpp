@@ -1,19 +1,19 @@
 # Code that runs and does not do the work
 
 Reachable is not the same as real. These are the shapes that execute happily while
-producing nothing, and they are measurably rising in AI-assisted code — error masking is
-one of the risk signals GitClear now tracks across 200M+ lines.
+producing nothing. AI-assisted code adds two typical shapes: a hallucinated call wrapped
+in `try/except` that never errors, and a `return True` stub behind a green test.
 
-## The knob test — run it on EVERY parameter, threshold and config option
+## The knob test — perturb only risk-bearing knobs
 
-The fastest way to find a disconnected implementation: **set the knob to an absurd value
-and observe.** `timeout=0`, `top_k=1`, `max_retries=0`, `limit=1`, a threshold at 1.0, a
-flag inverted. If behavior does not change, that knob is decorative and every caller
-believing it configures something is wrong.
+Not every parameter. Pick a parameter, timeout, threshold, or config value whose changed
+value MUST alter a defined observable. Before perturbing, write the expected oracle and safe
+bounds (a controlled value that cannot damage the environment or run up cost; never
+`timeout=0` against a real dependency). Then change it, reload if required, drive the real
+entry point, observe the defined effect, and restore the value. Unchanged observable means
+the knob is disconnected, overridden, or read at the wrong time.
 
-This finds a class nothing else does: the parameter accepted by the signature, passed
-down two layers, and then never read. The caller is confident, the code is green, and the
-setting has never had any effect.
+This finds the parameter accepted by the signature, passed down two layers, and never read.
 
 Same test for a config file: change a value, restart, observe. No change means the config
 is not loaded, is overridden downstream, or is read once at import before the override.
@@ -28,12 +28,12 @@ stand-in, a "response" assembled from the request without consulting anything,
 **Error masking** — `except: pass`, `except Exception:` with a debug-level log or none, an
 empty catch block, `try/catch` returning a default, `?? []`, `.get(k, fallback)` on a key
 that should always exist, a retry wrapper that swallows the final failure. Each one turns
-a defect into a silent wrong answer. Rule: every swallowed error emits a counter with a
-reason, or it is a finding.
+a defect into fake success. Detect the masking here; the missing metric is
+`silent-degradation`'s finding, and an intentional fallback needs a contract plus telemetry.
 
 **Always-one-way branches** — `if False`, a flag never enabled, a condition on a value
 that is constant in practice, an `else` that cannot be reached, a `while` that never
-loops. Prove it by forcing the other branch: if you cannot make it execute, say so.
+loops. Prove it by forcing the other branch: if no proven environment can execute it, say so.
 
 **Functions that assert nothing** — a `validate_*` that never rejects, a `check_*` that
 returns `True` unconditionally, a sanitizer that returns its input, a permission check
@@ -49,11 +49,19 @@ log at a level the deployment filters out, a span with no exporter configured, a
 correlation id generated but not propagated. This class is what makes the other classes
 invisible; hunt it first when nothing anywhere seems to explain a symptom.
 
-**Self-admitted debt** — `TODO`, `FIXME`, `XXX`, `HACK` sitting in a reachable path. The
-research view is useful here: these markers are high-precision and low-recall, so treat
-every hit as real and never assume their absence means the code is finished. Grep them,
-then ask of each: is this path reachable in prod, and what does it do when it hits the
-unfinished branch?
+**Concurrency and time theater** — a lock created per call (`threading.Lock()` inside the
+function, `synchronized` on a fresh object), a mutex copied by value (`go vet` copylocks), a
+coroutine or promise created and never awaited, `await` on a sync stub, a goroutine started
+and never joined, a "thread-safe" cache over an unsynchronized map, `parallel`/`batch`
+hiding a sequential loop, retry with `sleep(0)`, a timeout parameter accepted but never
+passed to the client, a TTL never checked. Contention probe: run N workers released by a
+barrier against the claimed critical section (race detector on where available, e.g.
+`go test -race`) and observe whether the exclusion, parallelism, timeout or expiry actually
+happens. Pass means the effect is observed, not that the code reads correctly.
+
+**Self-admitted debt** — `TODO`, `FIXME`, `XXX`, `HACK` in a reachable path are candidates
+for claim falsification, not automatic defects (docs, examples and accepted debt can be
+intentional). Verify what the marker claims and what the path does before filing.
 
 ## How to prove it, not argue it
 

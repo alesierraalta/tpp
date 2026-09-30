@@ -109,6 +109,13 @@ hand-applied gate is a weaker claim than the binary's:
     `tpp feedback --file`. Set `skill` to what ran (`<name>` or `<name> <version>`; a breakcheck run
     records `breakcheck <its version>`). Keep it out of chat: after a successful write reply with a
     brief acknowledgment, and if storage fails say so instead of claiming it was recorded.
+    To review saved feedback, run `tpp feedback --pending` (add `--config-dir <dir>` to select the
+    feedback store; `TPP_HOME` remains the separate TPP local-state root). The first call establishes
+    a baseline now at its exact snapshot and excludes all reports already present; its review cursor
+    is a private sidecar beside the local telemetry ledger. Later calls return the pending reports
+    and one exact snapshot token. Review the full batch before acknowledging that token with
+    `tpp feedback --mark-reviewed <token>`; reports appended after that snapshot remain pending.
+    `tpp feedback --summary` is all-history and cursor-neutral.
 15. **Ask only when it changes the test.** Ask the user only when the target is ambiguous or the next
     action is irreversible; research everything else. Report each finding consequence first, and mark
     it inferred when it was not observed.

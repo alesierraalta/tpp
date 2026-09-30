@@ -69,8 +69,8 @@ commands:
            printing the exact command when go is absent
   feature  list, enable, or disable an optional feature
   tui      interactive menu over status, feature toggles, and the sync dry-run plan
-  feedback record an honest process report on the method itself, or read the reports back
-           (--template | --file <path> | --summary)
+  feedback record an honest process report on the method itself, read all reports, or review pending reports
+           (--template | --file <path> | --summary | --pending | --mark-reviewed <token>)
   version  print the version
 
 flags shared by gate, setup, sync, doctor, uninstall, feedback, repair:
@@ -131,7 +131,7 @@ repair [--config-dir <dir>] [--dry-run] [--force]
 feature list|enable|disable <id> [--preview]
 --path: relative values resolve against the worktree root; absolute values are taken as given except in check, which refuses them. Without --path, use the plan declared in .tpp.json when there is one, else docs/testing/test-plan.md
 --run: a lowercase slug identifying the active run; plan gaps uses the declaration when omitted, while --all forces whole-document counts
-feedback [--config-dir <dir>] [--template] [--file <path>] [--plan <path>] [--summary]
+feedback [--config-dir <dir>] [--template] [--file <path>] [--plan <path>] [--summary] [--pending] [--mark-reviewed <token>]
 `
 
 func defaultConfigDir() string {
@@ -832,15 +832,41 @@ func flagSet(fs *flag.FlagSet, name string) bool {
 }
 
 // runFeedback is the destination the gate's Stop offer never had: --template hands the operator a
-// fillable report, --file records it, and no flags reads the reports back.
+// fillable report, --file records it, and review actions read or acknowledge a pending snapshot.
 func runFeedback(args []string) int {
 	fs := flag.NewFlagSet("feedback", flag.ContinueOnError)
 	configDir := fs.String("config-dir", defaultConfigDir(), "Claude config directory")
 	template := fs.Bool("template", false, "print a fillable skeleton and write nothing")
 	file := fs.String("file", "", "submit the report written in this file")
 	plan := fs.String("plan", "", "repository-relative plan path the report is about")
-	summary := fs.Bool("summary", false, "read the reports back and print the summary")
+	summary := fs.Bool("summary", false, "read the all-history summary without moving the review cursor")
+	pending := fs.Bool("pending", false, "print reports appended since the review cursor")
+	markReviewed := fs.String("mark-reviewed", "", "acknowledge the exact review snapshot token")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	fileSet := flagSet(fs, "file")
+	if fileSet && *file == "" {
+		fmt.Fprintln(os.Stderr, "feedback: --file requires a path")
+		return 2
+	}
+	markReviewedSet := flagSet(fs, "mark-reviewed")
+	if markReviewedSet && strings.TrimSpace(*markReviewed) == "" {
+		fmt.Fprintln(os.Stderr, "feedback: --mark-reviewed requires a non-empty token")
+		return 2
+	}
+	if (*pending || markReviewedSet) && (*template || fileSet || *summary || flagSet(fs, "plan")) {
+		fmt.Fprintln(os.Stderr, "feedback: --pending and --mark-reviewed cannot be combined with --template, --file, --plan, or --summary")
+		return 2
+	}
+	actions := 0
+	for _, active := range []bool{*template, fileSet, *summary, *pending, markReviewedSet} {
+		if active {
+			actions++
+		}
+	}
+	if actions > 1 {
+		fmt.Fprintln(os.Stderr, "feedback: choose only one action")
 		return 2
 	}
 	switch {
@@ -853,7 +879,7 @@ func runFeedback(args []string) int {
 			Build: buildinfo.String(),
 		}))
 		return 0
-	case *file != "":
+	case fileSet:
 		raw, err := os.ReadFile(*file)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "feedback:", err)
@@ -887,6 +913,42 @@ func runFeedback(args []string) int {
 			}
 		}
 		fmt.Printf("recorded %s feedback for %s\n", r.Verdict, recordedRepo)
+		return 0
+	case *pending:
+		batch, err := feedback.Pending(*configDir)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "feedback:", err)
+			return 1
+		}
+		fmt.Printf("run feedback: %d report(s)\n", batch.SnapshotCount)
+		if batch.Initialized {
+			fmt.Printf(
+				"first-use review baseline established: %d existing report(s); historical reports were not included\n",
+				batch.BaselineCount,
+			)
+			fmt.Println("no pending reports")
+			return 0
+		}
+		if len(batch.Reports) == 0 {
+			fmt.Println("no pending reports")
+			return 0
+		}
+		for _, report := range batch.Reports {
+			fmt.Printf(
+				"ts: %s\nrepo: %s\nplan: %s\nskill: %s\nbuild: %s\npaid: %s\ncost: %s\nreason: %s\nverdict: %s\nguess: %s\nfreeform: %s\n\n",
+				report.TS, report.Repo, report.Plan, report.Skill, report.Build, report.Paid, report.Cost,
+				report.Reason, report.Verdict, report.Guess, report.Freeform,
+			)
+		}
+		fmt.Printf("review token: %s\n", batch.Token)
+		return 0
+	case markReviewedSet:
+		mark, err := feedback.MarkReviewed(*configDir, *markReviewed)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "feedback:", err)
+			return 1
+		}
+		fmt.Printf("marked %d new report(s) as reviewed\n", mark.NewlyReviewed)
 		return 0
 	default:
 		_ = *summary // --summary and no flags are the same cheapest path to the answer

@@ -1,7 +1,11 @@
 package gate
 
 import (
+	"bytes"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -431,6 +435,99 @@ func TestDecideStaysSilentWhenTheBindingNamesNoRun(t *testing.T) {
 	}
 	if res.Entry == nil || res.Entry.Skipped != "session_run_unbound" || res.Entry.Audited {
 		t.Fatalf("entry = %#v, want skipped session_run_unbound with nothing audited", res.Entry)
+	}
+}
+
+// The binding named this exact plan and the read failed: there is no decision to report — no audit
+// ran, nothing fires, and no problem or reason may reach the model or the operator — but the
+// telemetry row must still record which fact was missing, with a code distinct from an unbound
+// session and a missing run, and carrying neither the raw path nor the error text.
+func TestDecideRecordsTheBoundPlanItCouldNotRead(t *testing.T) {
+	const declared = "docs/testing/scoped-plan.md"
+	repo := auditRepo()
+	repo.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
+	// Both fallback routes sit readable on purpose: a read that redirected to the declaration or to
+	// the default plan would audit instead of skipping and fail every assertion below.
+	repo.planConfig = `{"planPath":"` + plan.DefaultPath + `"}`
+	repo.plans = map[string]string{plan.DefaultPath: owedRuns}
+	setBinding(t, "sess-audit", "/repo", declared, "run-a")
+
+	res := Decide(Input{SessionID: "sess-audit", TranscriptPath: "t"}, repo.deps(auditNow))
+
+	// Run emits only on fire, audit, or problem: all empty here means the hook writes no output.
+	if res.Fire || res.Audit || res.Problem != "" || res.Reason != "" {
+		t.Fatalf("result = %#v, want silence: no fire, no audit, no problem, no reason", res)
+	}
+	if res.Entry == nil {
+		t.Fatalf("want a telemetry entry recording the skip")
+	}
+	if res.Entry.Skipped != "bound_plan_unreadable" {
+		t.Fatalf("skipped = %q, want the stable bound_plan_unreadable code, distinct from %q and %q",
+			res.Entry.Skipped, SkippedUnbound, SkippedRunUnbound)
+	}
+	if res.Entry.Audited || res.Entry.Plan != declared {
+		t.Fatalf("entry = %#v, want only the bound plan named and nothing audited", res.Entry)
+	}
+}
+
+// The hook's own output contract for the same failure, end to end with real dependencies: stdout
+// stays empty — no model context, no operator line — and the log row carries the stable skip code
+// instead of an audit. The declaration and the default plan both sit readable while the bound plan
+// is absent, so any fallback to either would audit, print, and fail here.
+func TestRunStaysSilentWhenTheBoundPlanIsUnreadable(t *testing.T) {
+	t.Setenv(BindingEnv, "")
+	base := t.TempDir()
+	repo := filepath.Join(base, "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	if out, err := exec.Command("git", "init", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v %s", err, out)
+	}
+	rev := exec.Command("git", "rev-parse", "--show-toplevel")
+	rev.Dir = repo
+	rootOut, err := rev.Output()
+	if err != nil {
+		t.Fatalf("rev-parse: %v", err)
+	}
+	root := strings.TrimSpace(string(rootOut))
+	if err := os.MkdirAll(filepath.Join(repo, filepath.Dir(plan.DefaultPath)), 0o755); err != nil {
+		t.Fatalf("mkdir plan dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, plan.DefaultPath), []byte(owedRuns), 0o644); err != nil {
+		t.Fatalf("write default plan: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, plan.ConfigName), []byte(`{"planPath":"`+plan.DefaultPath+`"}`), 0o644); err != nil {
+		t.Fatalf("write declaration: %v", err)
+	}
+	transcript := filepath.Join(base, "transcript.jsonl")
+	if err := os.WriteFile(transcript, []byte(`{"name":"Skill","input":{"skill":"test-strategy"}}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	logPath := filepath.Join(base, "telemetry", "testing-gate.jsonl")
+	storedBinding(t, BindingsDir(logPath), "sess-unreadable", root, "docs/testing/scoped-plan.md", "run-t1")
+	payload := `{"session_id":"sess-unreadable","transcript_path":"` + transcript + `","cwd":"` + repo + `"}`
+	var stdout bytes.Buffer
+	if code := Run(strings.NewReader(payload), &stdout, logPath, auditNow); code != 0 {
+		t.Fatalf("Run exit = %d, want 0", code)
+	}
+	if stdout.String() != "" {
+		t.Fatalf("stdout = %q, want silence: an unreadable bound plan emits nothing", stdout.String())
+	}
+	row, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if !strings.Contains(string(row), `"skipped":"bound_plan_unreadable"`) {
+		t.Fatalf("log row = %s, want the stable skip code", row)
+	}
+	if strings.Contains(string(row), `"audited":true`) {
+		t.Fatalf("log row = %s, nothing was audited", row)
+	}
+	for _, rawPath := range []string{root, "scoped-plan.md"} {
+		if strings.Contains(string(row), rawPath) {
+			t.Fatalf("log row contains raw bound-plan path %q: %s", rawPath, row)
+		}
 	}
 }
 

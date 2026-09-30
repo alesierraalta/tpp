@@ -206,6 +206,9 @@ func openOrNil(d Deps, path string) io.ReadCloser {
 // other runs and would read as this session's debt or its all-clear.
 const SkippedRunUnbound = "session_run_unbound"
 
+// SkippedBoundPlanUnreadable records that the exact session-bound plan could not be read.
+const SkippedBoundPlanUnreadable = "bound_plan_unreadable"
+
 // Decide is the whole contract: audit the bound run when this session's own transcript evidences an
 // adversarial testing skill invocation, and stay silent otherwise. A working-tree entry or a fresh
 // source mtime never proves this stop's session authored a change — another session or a shell in
@@ -287,6 +290,7 @@ func audit(d Deps, root, rel, run string, res Result, entry *Entry) Result {
 	planPath := filepath.Join(root, rel)
 	body, err := readPlan(d, planPath)
 	if err != nil {
+		entry.Skipped = SkippedBoundPlanUnreadable
 		return res
 	}
 	gaps, err := plan.GapsForRun(body, run)

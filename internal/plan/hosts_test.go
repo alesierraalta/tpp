@@ -42,14 +42,17 @@ func TestShippedHostAdaptersAreUsable(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := string(oc)
-	for _, want := range []string{"session.idle", "tpp check", "exitCode"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("the opencode plugin must use %q", want)
+	// Fail-closed: with no session binding, an automatic repo-wide check has no
+	// session-scoped evidence behind it. The shipped plugin must not run one, and must not
+	// push a toast or a prompt at the user on its own.
+	for _, banned := range []string{"appendPrompt", "showToast", "tpp check"} {
+		if strings.Contains(body, banned) {
+			t.Fatalf("the opencode plugin must not contain %q: automatic notices are disabled", banned)
 		}
 	}
-	// A plugin that reacts to every event, or ignores the exit code, is noise.
-	if !strings.Contains(body, `event.type !== "session.idle"`) {
-		t.Fatal("the plugin must return early on any other event")
+	// The adapter export stays so an already-copied plugin file keeps loading as a plugin.
+	if !strings.Contains(body, "export const TPP") {
+		t.Fatal("the opencode plugin must keep exporting TPP")
 	}
 	readme, err := os.ReadFile(filepath.Join(root, "README.md"))
 	if err != nil {

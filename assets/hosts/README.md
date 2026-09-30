@@ -20,9 +20,15 @@ and Pi both work this way, and Pi's payload carries the same fields Claude's doe
 `pi/settings.stop-hook.json` into Pi's settings — Pi's is contract-read, not run here (see Verified
 below).
 
-**Plugins.** The host loads code and gives it an event bus. OpenCode works this way:
-`opencode/tpp.ts` subscribes to `session.idle`, runs `tpp check`, and on a non-zero
-exit shows a toast and appends the report to the prompt.
+**Plugins.** The host loads code and gives it an event bus. OpenCode works this way, but its
+automatic transport is disabled until session-scoped evidence is available: `opencode/tpp.ts`
+no longer runs a check on `session.idle`, because a repo-wide check with no session binding
+behind it fails closed. The file remains a harmless adapter export so an already-copied
+plugin keeps loading, and on its own it shows no notices. If you copied the old plugin into
+`.opencode/plugin/tpp.ts` or `~/.config/opencode/plugin/`, replace or remove that copy by
+hand—`tpp sync` installs skills but does not manage copied plugin files. Manual use is
+unaffected: run `tpp check` from a shell to see what the change still owes, plan gaps
+included.
 
 **Extensions.** The host loads an extension file and calls back into it. Pi works this way:
 `pi/tpp.ts` registers a native `/tpp` command (`check`, `feedback --summary`, `doctor`) that runs the
@@ -42,7 +48,7 @@ from a Makefile, a pre-push script, or CI.
 | Claude Code | Stop command hook | yes: wired, run, exit code checked by `tpp doctor` |
 | Anything with a shell | `tpp check` | yes |
 | Pi | native `/tpp` command via the extension (`sync --hosts pi` → `~/.pi/agent/extensions/tpp/index.ts`); Stop command hook, Claude-compatible payload | `/tpp` dispatch covered by `pi/tpp.test.mjs` (run in CI); Stop hook contract read from the pi-hooks package; not run here |
-| OpenCode | `session.idle` plugin event | contract read from the OpenCode plugin docs; not run here |
+| OpenCode | plugin event, disabled (adapter export only) | contract read from the OpenCode plugin docs; not run here |
 | Codex, Gemini CLI | not implemented | their payload and output schemas are not verified here |
 
 "Not run here" means exactly that: the shape comes from each project's own documentation, and

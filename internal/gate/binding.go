@@ -143,6 +143,14 @@ func SetBinding(dir string, b Binding) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
+	// A leaf that is already a symlink would make both the tightening chmod and the temp write
+	// below follow it into a directory outside the gate's own tree; reject it first. A dangling
+	// symlink never reaches here: MkdirAll refuses it.
+	if fi, err := os.Lstat(dir); err != nil {
+		return err
+	} else if fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("binding: %s is a symlink", dir)
+	}
 	// MkdirAll only applies 0700 when it creates the directory; a pre-existing looser one must be
 	// tightened here, before any write, so a binding is never stored in a directory others can read.
 	if err := os.Chmod(dir, 0o700); err != nil {

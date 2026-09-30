@@ -394,6 +394,54 @@ func TestSetBindingTightensAPreExistingLooseBindingsDir(t *testing.T) {
 	}
 }
 
+// A symlinked bindings leaf points at a directory the gate does not own: SetBinding must fail
+// closed before os.Chmod or os.CreateTemp can follow it, so the target keeps its mode and its
+// existing contents, and no binding materializes outside the gate's own tree.
+func TestSetBindingRejectsASymlinkedBindingsLeaf(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation is privileged on windows")
+	}
+	target := t.TempDir()
+	// MkdirTemp grants 0700; loosen it so a chmod-following write would visibly change the target.
+	if err := os.Chmod(target, 0o755); err != nil {
+		t.Fatalf("loosen target dir: %v", err)
+	}
+	seed := filepath.Join(target, "existing.txt")
+	if err := os.WriteFile(seed, []byte("keep"), 0o644); err != nil {
+		t.Fatalf("seed target file: %v", err)
+	}
+	logPath := filepath.Join(t.TempDir(), "telemetry", "testing-gate.jsonl")
+	dir := BindingsDir(logPath)
+	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+		t.Fatalf("pre-create telemetry dir: %v", err)
+	}
+	if err := os.Symlink(target, dir); err != nil {
+		t.Fatalf("symlink bindings leaf: %v", err)
+	}
+	b := Binding{Session: "sess-secret", Root: "/repo", PlanPath: "docs/testing/test-plan.md", Run: "run-t1"}
+	if err := SetBinding(dir, b); err == nil {
+		t.Fatal("SetBinding through a symlinked bindings leaf = nil, want an error")
+	}
+	di, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("stat target: %v", err)
+	}
+	if di.Mode().Perm() != 0o755 {
+		t.Fatalf("target dir mode = %v, want it untouched at 0755", di.Mode().Perm())
+	}
+	entries, err := os.ReadDir(target)
+	if err != nil {
+		t.Fatalf("read target dir: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "existing.txt" {
+		t.Fatalf("target holds %d entries, want only the pre-existing file (nothing written through the leaf)", len(entries))
+	}
+	raw, err := os.ReadFile(seed)
+	if err != nil || string(raw) != "keep" {
+		t.Fatalf("seed file = %q (%v), want it unchanged", raw, err)
+	}
+}
+
 // Concurrent binds from two sessions in one worktree race on the same directory: a bounded race
 // of SetBinding calls must leave one private file per session — no clobbered record, no leftover
 // partial write — so after the race each stop still audits exactly the plan its own binding names.

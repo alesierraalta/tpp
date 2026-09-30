@@ -193,7 +193,11 @@ func Run(stdin io.Reader, stdout io.Writer, logPath string, now time.Time) (code
 	if err != nil {
 		offerFeedback = false
 	}
-	res := decideForRun(in, RealDeps(now), offerFeedback)
+	deps := RealDeps(now)
+	// The stored-binding directory is derived from the same log path this hook writes, so what
+	// `tpp bind` stores beside the log and what Stop reads from it are one derivation.
+	deps.BindingDir = BindingsDir(logPath)
+	res := decideForRun(in, deps, offerFeedback)
 	if res.Entry != nil {
 		appendEntry(logPath, res.Entry)
 	}
@@ -223,6 +227,10 @@ func auditLine(res Result, offerFeedback ...bool) string {
 		suffix = " Want feedback on this run?"
 	}
 	switch {
+	case res.RunProblem != "":
+		// The bound run's scope could not be read: the operator hears the scoped problem itself,
+		// actionable in one line — never "owes nothing", which the unreadable scope cannot prove.
+		return "tpp: " + res.RunProblem + suffix
 	case res.Owed > 0 && res.Pending > 0:
 		return fmt.Sprintf("tpp: %d layer(s) assigned and never invoked, %d ranked target(s) still pending.%s", res.Owed, res.Pending, suffix)
 	case res.Owed > 0:

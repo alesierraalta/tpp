@@ -46,6 +46,9 @@ const usage = `usage: tpp <command> [flags]
 
 commands:
   gate     Stop hook: read the hook payload on stdin, decide, log, emit feedback
+  bind     store or remove this session's Stop-gate plan binding outside the repository
+           (bind --session <id> --path <plan> --run <slug> [--cwd <dir>] [--config-dir <dir>],
+            bind --unset --session <id> [--cwd <dir>] [--config-dir <dir>])
   setup    install and verify in one step: sync, run the doctor's checks, say whether the binary's
            directory is on PATH, and end on one line saying tpp is working (exit 0) or what is left
   sync     install the embedded skills into discovered hosts and wire Claude's Stop hook
@@ -155,6 +158,8 @@ func main() {
 	switch os.Args[1] {
 	case "gate":
 		os.Exit(runGate(os.Args[2:]))
+	case "bind":
+		os.Exit(runBind(os.Args[2:]))
 	case "setup":
 		os.Exit(runSetup(os.Args[2:]))
 	case "sync":
@@ -199,6 +204,72 @@ func runGate(args []string) int {
 		return 0 // a hook must never break the turn, even on a bad flag
 	}
 	return gate.Run(os.Stdin, os.Stdout, gate.DefaultLogPath(*configDir), time.Now())
+}
+
+// runBind writes or removes the file the Stop hook reads when the host environment carries no
+// binding: keyed outside the repository by canonical root and exact session, validated with the
+// same rules the gate applies on read. It never falls back to the worktree declaration, and the
+// session identity never reaches the terminal.
+func runBind(args []string) int {
+	fs := flag.NewFlagSet("bind", flag.ContinueOnError)
+	session := fs.String("session", "", "exact session ID the binding belongs to")
+	path := fs.String("path", "", "repository-relative plan path to audit")
+	run := fs.String("run", "", "run slug the audit is scoped to")
+	unset := fs.Bool("unset", false, "remove this session's binding instead of writing one")
+	cwd := fs.String("cwd", ".", "directory inside the worktree to bind")
+	configDir := fs.String("config-dir", "", "Claude config directory")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if strings.TrimSpace(*session) == "" {
+		fmt.Fprintln(os.Stderr, "bind: --session is required")
+		return 2
+	}
+	if !*unset {
+		if err := plan.ValidatePlanPath("--path", *path); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
+		if err := plan.ValidateRun("--run", *run); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
+	}
+	root, err := gitToplevel(*cwd)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "bind:", err)
+		return 2
+	}
+	// The same derivation `tpp gate` uses, so bind and Stop can never hold different directories.
+	dir := gate.BindingsDir(gate.DefaultLogPath(*configDir))
+	if *unset {
+		if err := gate.UnsetBinding(dir, *session, root); err != nil {
+			fmt.Fprintln(os.Stderr, "bind:", err)
+			return 1
+		}
+		fmt.Println("binding removed")
+		return 0
+	}
+	b := gate.Binding{Session: *session, Root: root, PlanPath: *path, Run: *run}
+	if err := gate.SetBinding(dir, b); err != nil {
+		fmt.Fprintln(os.Stderr, "bind:", err)
+		return 1
+	}
+	fmt.Printf("bound %s\n", *path)
+	return 0
+}
+
+// gitToplevel is the canonical root the gate will derive at stop time from the same directory,
+// so what bind stores and what the hook reads name one repository.
+func gitToplevel(dir string) (string, error) {
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	root := strings.TrimSpace(string(out))
+	if err != nil || root == "" {
+		return "", errors.New("--cwd is not inside a git worktree")
+	}
+	return root, nil
 }
 
 type statusFeature struct {

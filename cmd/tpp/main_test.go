@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -2176,5 +2177,109 @@ func TestSetupHookRequirementFollowsTheSelectedHost(t *testing.T) {
 	last := lastLine(out)
 	if !strings.HasPrefix(last, "tpp is installed and working: ") || !strings.Contains(last, "in codex") {
 		t.Fatalf("last line = %q, want the working line naming codex\n%s", last, out)
+	}
+}
+
+// `tpp bind` is the operator side of the stored binding: the same validations the gate reads, one
+// private hashed file per (root, session) outside the repository, and --unset removes only that
+// session's own key. Errors are bounded — nothing prints the session identity back.
+func TestBindCLIStoresAndUnsetsPerSessionBindings(t *testing.T) {
+	repo := t.TempDir()
+	if out, err := exec.Command("git", "init", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v %s", err, out)
+	}
+	nonRepo := t.TempDir()
+	base := t.TempDir()
+	t.Setenv("TESTING_GATE_LOG", filepath.Join(base, "telemetry", "testing-gate.jsonl"))
+	dir := filepath.Join(base, "telemetry", "bindings")
+
+	capture := func(args ...string) (int, string) {
+		t.Helper()
+		or, ow, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("stdout pipe: %v", err)
+		}
+		er, ew, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("stderr pipe: %v", err)
+		}
+		outOrig, errOrig := os.Stdout, os.Stderr
+		os.Stdout, os.Stderr = ow, ew
+		code := runBind(args)
+		_ = ow.Close()
+		_ = ew.Close()
+		os.Stdout, os.Stderr = outOrig, errOrig
+		stdout, _ := io.ReadAll(or)
+		stderr, _ := io.ReadAll(er)
+		return code, string(stdout) + string(stderr)
+	}
+
+	refusals := []struct {
+		name string
+		args []string
+	}{
+		{name: "no session", args: []string{"--path", "docs/testing/test-plan.md", "--run", "run-t1"}},
+		{name: "no path", args: []string{"--session", "sess-cli", "--run", "run-t1"}},
+		{name: "escaping path", args: []string{"--session", "sess-cli", "--path", "../escape.md", "--run", "run-t1"}},
+		{name: "bad run slug", args: []string{"--session", "sess-cli", "--path", "docs/testing/test-plan.md", "--run", "Bad_Slug!"}},
+		{name: "cwd outside a repository", args: []string{"--session", "sess-cli", "--path", "docs/testing/test-plan.md", "--run", "run-t1", "--cwd", nonRepo}},
+		{name: "unknown flag", args: []string{"--nope"}},
+	}
+	for _, tc := range refusals {
+		t.Run(tc.name, func(t *testing.T) {
+			code, out := capture(tc.args...)
+			if code != 2 {
+				t.Fatalf("exit = %d, want 2\n%s", code, out)
+			}
+			if strings.Contains(out, "sess-cli") {
+				t.Fatalf("error printed the session identity: %q", out)
+			}
+		})
+	}
+
+	if code, out := capture("--session", "sess-a", "--path", "docs/testing/test-plan.md", "--run", "run-t1", "--cwd", repo); code != 0 {
+		t.Fatalf("bind sess-a exit = %d\n%s", code, out)
+	}
+	if code, out := capture("--session", "sess-b", "--path", "docs/testing/other.md", "--run", "run-t2", "--cwd", repo); code != 0 {
+		t.Fatalf("bind sess-b exit = %d\n%s", code, out)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read binding dir: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("binding dir holds %d files, want one per session", len(entries))
+	}
+	bySession := map[string]string{}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), "sess-") {
+			t.Fatalf("file name %q carries a raw session ID", e.Name())
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatalf("read binding: %v", err)
+		}
+		for _, id := range []string{"sess-a", "sess-b"} {
+			if strings.Contains(string(raw), `"session_id":"`+id+`"`) {
+				bySession[id] = e.Name()
+			}
+		}
+	}
+	if len(bySession) != 2 {
+		t.Fatalf("stored sessions = %v, want both (root, session) keys present", bySession)
+	}
+
+	if code, out := capture("--session", "sess-a", "--unset", "--cwd", repo); code != 0 {
+		t.Fatalf("unset sess-a exit = %d\n%s", code, out)
+	}
+	entries, err = os.ReadDir(dir)
+	if err != nil || len(entries) != 1 || entries[0].Name() != bySession["sess-b"] {
+		t.Fatalf("after unset the dir holds %v (err %v), want only sess-b's own file", entries, err)
+	}
+	if code, out := capture("--session", "sess-a", "--unset", "--cwd", repo); code != 0 {
+		t.Fatalf("unset again exit = %d, want idempotent\n%s", code, out)
+	}
+	if entries, err = os.ReadDir(dir); err != nil || len(entries) != 1 {
+		t.Fatalf("after the second unset the dir holds %d entries (err %v), want 1", len(entries), err)
 	}
 }

@@ -1,6 +1,7 @@
 package gate
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -58,26 +59,26 @@ func TestReasonOmitsTheFeedbackOfferWhenDisabled(t *testing.T) {
 	}
 }
 
-// The two questions are exclusive: a session that never invoked the discipline gets the first
-// reminder, one that invoked it and left layers owed gets the audit, and a finished run gets
-// neither.
+// There is one question now: did this session's own transcript evidence an adversarial invocation?
+// A session that never invoked the discipline stays silent — the timestamp heuristic that used to
+// send a first reminder could not tell whose edit it was reading — one that invoked it and left
+// layers owed gets the audit, and a finished run gets the audit with the all-clear.
 func TestDecideAsksTheSecondQuestionWhenTheDisciplineRanAndStoppedHalfway(t *testing.T) {
-	planned := "## Layer matrix\n\n| Layer | Skill | Scope | Status |\n|---|---|---|---|\n" +
-		"| Security | `appsec-adversarial-auditor` | untrusted input | pending |\n" +
-		"| Critical e2e journeys | `real-run-validation` | checkout | done |\n\n" +
-		"## Ranked targets\n\n| Target | Verdict | Status |\n|---|---|---|\n| 1. token refresh | probe | done |\n"
-	swept := strings.Replace(planned, "| untrusted input | pending |", "| untrusted input | done |", 1)
+	planned := "## Layer matrix\n\n| Layer | Skill | Scope | Status | Run |\n|---|---|---|---|---|\n" +
+		"| Security | `appsec-adversarial-auditor` | untrusted input | pending | run-a |\n" +
+		"| Critical e2e journeys | `real-run-validation` | checkout | done | run-a |\n\n" +
+		"## Ranked targets\n\n| Target | Verdict | Status | Run |\n|---|---|---|---|\n| 1. token refresh | probe | done | run-a |\n"
+	swept := strings.Replace(planned, "| untrusted input | pending | run-a |", "| untrusted input | done | run-a |", 1)
 	invoked := stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
 	cases := []struct {
 		name       string
 		transcript string
 		plan       string
 		planErr    bool
-		wantFire   bool
 		wantAudit  bool
 		wantOwner  bool
 	}{
-		{name: "never invoked", plan: planned, wantFire: true},
+		{name: "never invoked", plan: planned},
 		{name: "invoked and halfway", transcript: invoked, plan: planned, wantAudit: true, wantOwner: true},
 		// The operator asked to be offered feedback at the end of a run, not only when it went
 		// badly: a clean run is the one worth grading before it becomes the habit.
@@ -89,9 +90,13 @@ func TestDecideAsksTheSecondQuestionWhenTheDisciplineRanAndStoppedHalfway(t *tes
 			r := auditRepo()
 			r.transcript = tc.transcript
 			r.plan, r.planMissing = tc.plan, tc.planErr
-			res := Decide(Input{TranscriptPath: "t"}, r.deps(auditNow))
-			if res.Fire != tc.wantFire {
-				t.Fatalf("fire = %v, want %v", res.Fire, tc.wantFire)
+			setBinding(t, "sess-audit", "/repo", plan.DefaultPath, "run-a")
+			res := Decide(Input{SessionID: "sess-audit", TranscriptPath: "t"}, r.deps(auditNow))
+			if res.Fire {
+				t.Fatalf("fire = true, the generic reminder must never trigger: %#v", res)
+			}
+			if !tc.wantAudit && res.Reason != "" {
+				t.Fatalf("a stop that did not audit must stay silent, got reason %q", res.Reason)
 			}
 			if res.Audit != tc.wantAudit {
 				t.Fatalf("audit = %v, want %v (%s)", res.Audit, tc.wantAudit, res.Reason)
@@ -122,17 +127,20 @@ func auditRepo() *fakeRepo {
 
 func TestDecideAuditsTheDeclaredPlanNotTheDefault(t *testing.T) {
 	const declared = "docs/testing/scoped-plan.md"
-	complete := "## Layer matrix\n\n| Layer | Skill | Scope | Status |\n|---|---|---|---|\n" +
-		"| Security | `appsec-adversarial-auditor` | input | done |\n\n" +
-		"## Ranked targets\n\n| Target | Verdict | Status |\n|---|---|---|\n| 1. auth | probe | done |\n"
+	complete := "## Layer matrix\n\n| Layer | Skill | Scope | Status | Run |\n|---|---|---|---|---|\n" +
+		"| Security | `appsec-adversarial-auditor` | input | done | run-a |\n\n" +
+		"## Ranked targets\n\n| Target | Verdict | Status | Run |\n|---|---|---|---|\n| 1. auth | probe | done | run-a |\n"
 	owed := strings.Replace(complete, "| Security | `appsec-adversarial-auditor` | input | done |", "| Security | `appsec-adversarial-auditor` | input | pending |", 1)
 	owed = strings.Replace(owed, "| 1. auth | probe | done |", "| 1. auth | probe | pending |", 1)
 	repo := auditRepo()
 	repo.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
-	repo.planConfig = `{"planPath":"` + declared + `"}`
+	// The declaration points at the default while the binding points at the declared plan, so a
+	// gate that still read the worktree-wide declaration audits the wrong file and fails here.
+	repo.planConfig = `{"planPath":"` + plan.DefaultPath + `"}`
 	repo.plans = map[string]string{plan.DefaultPath: complete, declared: owed}
 
-	res := Decide(Input{TranscriptPath: "t"}, repo.deps(auditNow))
+	setBinding(t, "sess-audit", "/repo", declared, "run-a")
+	res := Decide(Input{SessionID: "sess-audit", TranscriptPath: "t"}, repo.deps(auditNow))
 	if res.Fire || !res.Audit {
 		t.Fatalf("fire = %v, audit = %v, want fire false and audit true", res.Fire, res.Audit)
 	}
@@ -148,47 +156,50 @@ func TestDecideLogsThePlanItRead(t *testing.T) {
 	const declared = "docs/testing/scoped-plan.md"
 	repo := auditRepo()
 	repo.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
-	repo.planConfig = `{"planPath":"` + declared + `"}`
 	repo.planPath = declared
-	repo.plan = "## Layer matrix\n\n| Layer | Skill | Scope | Status |\n|---|---|---|---|\n| Security | `appsec-adversarial-auditor` | input | done |\n\n## Ranked targets\n\n| Target | Verdict | Status |\n|---|---|---|\n| 1. auth | probe | done |\n"
+	setBinding(t, "sess-audit", "/repo", declared, "run-a")
+	repo.plan = "## Layer matrix\n\n| Layer | Skill | Scope | Status | Run |\n|---|---|---|---|---|\n| Security | `appsec-adversarial-auditor` | input | done | run-a |\n\n## Ranked targets\n\n| Target | Verdict | Status | Run |\n|---|---|---|---|\n| 1. auth | probe | done | run-a |\n"
 
-	res := Decide(Input{TranscriptPath: "t"}, repo.deps(auditNow))
+	res := Decide(Input{SessionID: "sess-audit", TranscriptPath: "t"}, repo.deps(auditNow))
 	if res.Entry == nil || res.Entry.Plan != declared {
 		t.Fatalf("entry plan = %#v, want %q", res.Entry, declared)
 	}
 }
 
-func TestDecideReportsABrokenDeclaration(t *testing.T) {
+// A bound session's audit never consults the worktree-wide declaration, so a broken .tpp.json can
+// neither silence the audit nor redirect it: the binding is the only plan input the Stop has.
+func TestDecideIgnoresABrokenDeclarationWhenBound(t *testing.T) {
 	repo := auditRepo()
 	repo.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
 	repo.planConfig = `{`
-	repo.plan = "valid plan that must not be read"
+	repo.plan = "## Layer matrix\n\n| Layer | Skill | Scope | Status |\n|---|---|---|---|\n| Security | `appsec-adversarial-auditor` | input | pending |\n\n## Ranked targets\n\n| Target | Verdict | Status |\n|---|---|---|---|\n| 1. auth | probe | pending |\n"
 
-	res := Decide(Input{TranscriptPath: "t"}, repo.deps(auditNow))
-	if res.Fire || res.Audit {
-		t.Fatalf("result = %#v, want no fire and no audit: nothing was read", res)
+	setBinding(t, "sess-audit", "/repo", plan.DefaultPath, "run-a")
+	res := Decide(Input{SessionID: "sess-audit", TranscriptPath: "t"}, repo.deps(auditNow))
+	if res.Fire || !res.Audit {
+		t.Fatalf("result = %#v, want no fire and the bound audit to run", res)
 	}
-	// Silence was the defect: the operator never learned the audit was skipped while check failed closed.
-	for _, want := range []string{plan.ConfigName, "not audited"} {
-		if !strings.Contains(res.Problem, want) {
-			t.Fatalf("problem = %q, want it to carry %q", res.Problem, want)
-		}
+	if res.Problem != "" {
+		t.Fatalf("problem = %q, a bound audit never reads the declaration", res.Problem)
 	}
-	if res.Entry == nil || res.Entry.Skipped != "plan_config_invalid" {
-		t.Fatalf("entry = %#v, want plan_config_invalid", res.Entry)
+	if res.Entry == nil || res.Entry.Skipped != "" || res.Entry.Plan != plan.DefaultPath {
+		t.Fatalf("entry = %#v, want the bound plan and no skip", res.Entry)
 	}
 }
 
-func TestDecideStillFiresWhenTheDeclarationIsBroken(t *testing.T) {
+// An unbound stop gets nothing decided from source state: no binding means no plan and no run,
+// so the generic reminder has no honest trigger either. The stop stays silent and the telemetry row
+// says why — including on a non-adversarial turn with no adversarial skill in sight.
+func TestDecideStaysSilentWithoutABindingOnANonAdversarialTurn(t *testing.T) {
 	repo := auditRepo()
-	repo.planConfig = `{`
+	repo.transcript = stamped(auditStart, `{"input":{"file_path":"/x/.claude/skills/no-excess-tests/SKILL.md"}}`)
 
-	res := Decide(Input{TranscriptPath: "t"}, repo.deps(auditNow))
-	if !res.Fire || res.Audit {
-		t.Fatalf("fire = %v, audit = %v, want fire true and audit false", res.Fire, res.Audit)
+	res := Decide(Input{SessionID: "sess-audit", TranscriptPath: "t"}, repo.deps(auditNow))
+	if res.Fire || res.Audit || res.Reason != "" {
+		t.Fatalf("result = %#v, want silence: no fire, no audit, no reason", res)
 	}
-	if res.Entry == nil || res.Entry.Skipped != "" {
-		t.Fatalf("entry = %#v, want unchanged fire entry", res.Entry)
+	if res.Entry == nil || res.Entry.Skipped != "session_plan_unbound" {
+		t.Fatalf("entry = %#v, want the unbound skip reason recorded", res.Entry)
 	}
 }
 
@@ -274,18 +285,19 @@ func TestAuditLineNamesWhicheverHalfIsOwed(t *testing.T) {
 }
 
 // The counts come from the plan, not from parsing it twice: the audit that reaches Decide has to carry
-// what GapsIn found, and the reason it carries is the line-anchored report this test asserts on, so it
+// what GapsForRun found for the bound run, and the reason it carries is the line-anchored report this test asserts on, so it
 // cannot pass vacuously against the old shape.
 func TestDecideCarriesTheOwedCountsIntoTheAudit(t *testing.T) {
-	planned := "## Layer matrix\n\n| Layer | Skill | Scope | Status |\n|---|---|---|---|\n" +
-		"| Security | `appsec-adversarial-auditor` | untrusted input | pending |\n\n" +
-		"## Ranked targets\n\n| Target | Verdict | Status |\n|---|---|---|\n" +
-		"| 1. token refresh | probe | pending |\n" +
-		"| 2. slug rendering | probe | pending |\n"
+	planned := "## Layer matrix\n\n| Layer | Skill | Scope | Status | Run |\n|---|---|---|---|---|\n" +
+		"| Security | `appsec-adversarial-auditor` | untrusted input | pending | run-a |\n\n" +
+		"## Ranked targets\n\n| Target | Verdict | Status | Run |\n|---|---|---|---|\n" +
+		"| 1. token refresh | probe | pending | run-a |\n" +
+		"| 2. slug rendering | probe | pending | run-a |\n"
 	r := auditRepo()
 	r.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
 	r.plan = planned
-	res := Decide(Input{TranscriptPath: "t"}, r.deps(auditNow))
+	setBinding(t, "sess-audit", "/repo", plan.DefaultPath, "run-a")
+	res := Decide(Input{SessionID: "sess-audit", TranscriptPath: "t"}, r.deps(auditNow))
 	if !res.Audit {
 		t.Fatalf("the discipline ran and left breadth owed: %s", res.Reason)
 	}
@@ -309,14 +321,15 @@ func TestDecideCarriesTheOwedCountsIntoTheAudit(t *testing.T) {
 // With every layer swept and targets still pending, Any() is true and the audit fires: the operator
 // line has to name the targets rather than fall through to "owes nothing".
 func TestDecideAuditLineNamesPendingTargetsWhenNoLayerIsOwed(t *testing.T) {
-	planned := "## Layer matrix\n\n| Layer | Skill | Scope | Status |\n|---|---|---|---|\n" +
-		"| Security | `appsec-adversarial-auditor` | untrusted input | done |\n\n" +
-		"## Ranked targets\n\n| Target | Verdict | Status |\n|---|---|---|\n" +
-		"| 1. token refresh | probe | pending |\n"
+	planned := "## Layer matrix\n\n| Layer | Skill | Scope | Status | Run |\n|---|---|---|---|---|\n" +
+		"| Security | `appsec-adversarial-auditor` | untrusted input | done | run-a |\n\n" +
+		"## Ranked targets\n\n| Target | Verdict | Status | Run |\n|---|---|---|---|\n" +
+		"| 1. token refresh | probe | pending | run-a |\n"
 	r := auditRepo()
 	r.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
 	r.plan = planned
-	res := Decide(Input{TranscriptPath: "t"}, r.deps(auditNow))
+	setBinding(t, "sess-audit", "/repo", plan.DefaultPath, "run-a")
+	res := Decide(Input{SessionID: "sess-audit", TranscriptPath: "t"}, r.deps(auditNow))
 	if !res.Audit || res.Owed != 0 || res.Pending != 1 {
 		t.Fatalf("audit = %v, owed = %d, pending = %d, want an audit owing one target", res.Audit, res.Owed, res.Pending)
 	}
@@ -332,14 +345,15 @@ func TestDecideAuditLineNamesPendingTargetsWhenNoLayerIsOwed(t *testing.T) {
 
 // A finished run still says so, and a plan that owes nothing carries no counts.
 func TestDecideCarriesZeroCountsForAFinishedPlan(t *testing.T) {
-	planned := "## Layer matrix\n\n| Layer | Skill | Scope | Status |\n|---|---|---|---|\n" +
-		"| Security | `appsec-adversarial-auditor` | untrusted input | done |\n\n" +
-		"## Ranked targets\n\n| Target | Verdict | Status |\n|---|---|---|\n" +
-		"| 1. token refresh | probe | done |\n"
+	planned := "## Layer matrix\n\n| Layer | Skill | Scope | Status | Run |\n|---|---|---|---|---|\n" +
+		"| Security | `appsec-adversarial-auditor` | untrusted input | done | run-a |\n\n" +
+		"## Ranked targets\n\n| Target | Verdict | Status | Run |\n|---|---|---|---|\n" +
+		"| 1. token refresh | probe | done | run-a |\n"
 	r := auditRepo()
 	r.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
 	r.plan = planned
-	res := Decide(Input{TranscriptPath: "t"}, r.deps(auditNow))
+	setBinding(t, "sess-audit", "/repo", plan.DefaultPath, "run-a")
+	res := Decide(Input{SessionID: "sess-audit", TranscriptPath: "t"}, r.deps(auditNow))
 	if !res.Audit || res.Owed != 0 || res.Pending != 0 {
 		t.Fatalf("audit = %v, owed = %d, pending = %d, want a finished plan", res.Audit, res.Owed, res.Pending)
 	}
@@ -355,7 +369,8 @@ func TestDecideNamesWhatItCouldNotReadOrPlan(t *testing.T) {
 	r := auditRepo()
 	r.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
 	r.plan = "## Layer matrix\n\n| Layer | Skill | Scope | Status |\n|---|---|---|---|\n| Security | `appsec-adversarial-auditor` | x | done |\na sentence that closes the table\n| Persistence | `database-persistence-testing` | x | done |\n"
-	res := Decide(Input{TranscriptPath: "t"}, r.deps(auditNow))
+	setBinding(t, "sess-audit", "/repo", plan.DefaultPath, "run-a")
+	res := Decide(Input{SessionID: "sess-audit", TranscriptPath: "t"}, r.deps(auditNow))
 	if !res.Audit || !strings.Contains(res.Reason, "Layer matrix") {
 		t.Fatalf("audit = %v, the reason must name the unreadable table:\n%s", res.Audit, res.Reason)
 	}
@@ -364,7 +379,7 @@ func TestDecideNamesWhatItCouldNotReadOrPlan(t *testing.T) {
 	}
 	// A plan that never carried a layer matrix is the same false all-clear, reached the same way.
 	r.plan = "## Ranked targets\n\n| Target | Verdict | Status |\n|---|---|---|---|\n| 1. token refresh | probe | done |\n"
-	if res := Decide(Input{TranscriptPath: "t"}, r.deps(auditNow)); !res.Audit || strings.Contains(auditLine(res), "owes nothing") {
+	if res := Decide(Input{SessionID: "sess-audit", TranscriptPath: "t"}, r.deps(auditNow)); !res.Audit || strings.Contains(auditLine(res), "owes nothing") {
 		t.Fatalf("a plan with no layer matrix must not read as nothing owed: %s", res.Reason)
 	}
 }
@@ -375,7 +390,8 @@ func TestDecideReadsAMicroPlanAsCompleteWithoutClaimingEveryLayer(t *testing.T) 
 	r := auditRepo()
 	r.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
 	r.plan = microPlanDoc
-	res := Decide(Input{TranscriptPath: "t"}, r.deps(auditNow))
+	setBinding(t, "sess-audit", "/repo", plan.DefaultPath, "run-a")
+	res := Decide(Input{SessionID: "sess-audit", TranscriptPath: "t"}, r.deps(auditNow))
 	if !res.Audit || res.Unplanned {
 		t.Fatalf("audit = %v, unplanned = %v, want a complete micro plan:\n%s", res.Audit, res.Unplanned, res.Reason)
 	}
@@ -392,3 +408,163 @@ const microPlanDoc = "# Micro test plan\n\nMicro: internal/text/trim.go · touch
 	"## Evidence ledger\n\n| Id | Claim | Executed | Admit | Inputs and parameters | Observed | Digest | Normalize | Mode | Mutate | Expect | Mutation or negative control → result | Reproduction | Label |\n" +
 	"|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n" +
 	"| E1 | pinned | go test | go test ./internal/text | | ok | | | | strings.TrimSpace(s) => s @ internal/text/trim.go:7 | | edit → red | rerun | observado |\n"
+
+// The Stop audit is scoped to one run, so a binding that names no run gives the gate no scope to
+// read. It stays silent — no reason, no problem, and above all no counts borrowed from the whole
+// plan, whose rows belong to other runs — while the telemetry row says exactly why nothing was
+// audited. The whole-plan fallback is the defect this prevents: other runs' pending rows read as
+// this session's debt, other runs' finished rows as its all-clear.
+func TestDecideStaysSilentWhenTheBindingNamesNoRun(t *testing.T) {
+	r := auditRepo()
+	r.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
+	r.plan = "## Layer matrix\n\n| Layer | Skill | Scope | Status | Run |\n|---|---|---|---|---|\n" +
+		"| Security | `appsec-adversarial-auditor` | input | pending | run-a |\n\n" +
+		"## Ranked targets\n\n| Target | Verdict | Status | Run |\n|---|---|---|---|\n" +
+		"| 1. auth | probe | pending | run-a |\n"
+	setBinding(t, "sess-audit", "/repo", plan.DefaultPath)
+	res := Decide(Input{SessionID: "sess-audit", TranscriptPath: "t"}, r.deps(auditNow))
+	if res.Fire || res.Audit || res.Reason != "" || res.Problem != "" {
+		t.Fatalf("result = %#v, want silence: no fire, no audit, no reason, no problem", res)
+	}
+	if res.Owed != 0 || res.Pending != 0 {
+		t.Fatalf("owed = %d, pending = %d, want no counts: a binding without a run audits nothing", res.Owed, res.Pending)
+	}
+	if res.Entry == nil || res.Entry.Skipped != "session_run_unbound" || res.Entry.Audited {
+		t.Fatalf("entry = %#v, want skipped session_run_unbound with nothing audited", res.Entry)
+	}
+}
+
+// One worktree, two runs: the Stop audits only the rows the bound run owns. Another run's pending
+// rows are not this run's debt, and another run's settled rows are not this run's completion — the
+// counts and the reason must both come from the bound run alone.
+func TestDecideAuditsOnlyTheBoundRunAmongTwoRuns(t *testing.T) {
+	const twoRuns = "## Layer matrix\n\n| Layer | Skill | Scope | Status | Run |\n|---|---|---|---|---|\n" +
+		"| Security | `appsec-adversarial-auditor` | input | %s | run-a |\n" +
+		"| Persistence | `database-persistence-testing` | input | %s | run-b |\n\n" +
+		"## Ranked targets\n\n| Target | Verdict | Status | Run |\n|---|---|---|---|\n" +
+		"| 1. auth | probe | %s | run-a |\n" +
+		"| 2. billing | probe | %s | run-b |\n"
+	cases := []struct {
+		name        string
+		layerA      string
+		layerB      string
+		targetA     string
+		targetB     string
+		wantOwed    int
+		wantPending int
+		wantLine    string
+	}{
+		{
+			name:   "another run's pending rows are not this run's debt",
+			layerA: "done", layerB: "pending", targetA: "done", targetB: "pending",
+			wantOwed: 0, wantPending: 0, wantLine: "owes nothing",
+		},
+		{
+			name:   "only the bound run's rows count toward what is owed",
+			layerA: "pending", layerB: "pending", targetA: "done", targetB: "pending",
+			wantOwed: 1, wantPending: 0, wantLine: "1 layer(s) assigned and never invoked",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := auditRepo()
+			r.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
+			r.plan = fmt.Sprintf(twoRuns, tc.layerA, tc.layerB, tc.targetA, tc.targetB)
+			setBinding(t, "sess-audit", "/repo", plan.DefaultPath, "run-a")
+			res := Decide(Input{SessionID: "sess-audit", TranscriptPath: "t"}, r.deps(auditNow))
+			if !res.Audit {
+				t.Fatalf("audit = false (%s), want the bound run audited", res.Reason)
+			}
+			if res.Owed != tc.wantOwed || res.Pending != tc.wantPending {
+				t.Fatalf("owed = %d, pending = %d, want %d and %d from run-a's rows alone", res.Owed, res.Pending, tc.wantOwed, tc.wantPending)
+			}
+			for _, leaked := range []string{"Persistence", "2. billing"} {
+				if strings.Contains(res.Reason, leaked) {
+					t.Fatalf("reason prints run-b's row %q: %s", leaked, res.Reason)
+				}
+			}
+			if line := auditLine(res); !strings.Contains(line, tc.wantLine) {
+				t.Fatalf("auditLine = %q, want %q", line, tc.wantLine)
+			}
+		})
+	}
+}
+
+// A scope the plan cannot answer for — a run no row carries, a table with no readable Run column —
+// is reported as itself. The finished rows of other runs are never borrowed as this run's
+// all-clear: the operator line names the run problem actionably instead of claiming the plan owes
+// nothing, and the reason carries the scoped problem without printing other runs' rows.
+func TestDecideReportsTheRunScopeProblemInsteadOfOwesNothing(t *testing.T) {
+	settledOtherRun := "## Layer matrix\n\n| Layer | Skill | Scope | Status | Run |\n|---|---|---|---|---|\n" +
+		"| Security | `appsec-adversarial-auditor` | input | done | run-b |\n\n" +
+		"## Ranked targets\n\n| Target | Verdict | Status | Run |\n|---|---|---|---|\n" +
+		"| 1. auth | probe | done | run-b |\n"
+	noRunColumn := "## Layer matrix\n\n| Layer | Skill | Scope | Status |\n|---|---|---|---|\n" +
+		"| Security | `appsec-adversarial-auditor` | input | done |\n\n" +
+		"## Ranked targets\n\n| Target | Verdict | Status |\n|---|---|---|\n" +
+		"| 1. auth | probe | done |\n"
+	cases := []struct {
+		name       string
+		plan       string
+		wantLine   []string
+		wantReason []string
+	}{
+		{
+			name:       "a run no row carries",
+			plan:       settledOtherRun,
+			wantLine:   []string{`carries run "run-x"`, "gaps --all"},
+			wantReason: []string{`no row carries run "run-x"`},
+		},
+		{
+			name:       "a table with no Run column",
+			plan:       noRunColumn,
+			wantLine:   []string{"Run column", "tpp plan upgrade"},
+			wantReason: []string{"Run column"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := auditRepo()
+			r.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
+			r.plan = tc.plan
+			setBinding(t, "sess-audit", "/repo", plan.DefaultPath, "run-x")
+			res := Decide(Input{SessionID: "sess-audit", TranscriptPath: "t"}, r.deps(auditNow))
+			if !res.Audit {
+				t.Fatalf("audit = false (%s), the scope problem must be reported as an audit result", res.Reason)
+			}
+			line := auditLine(res)
+			if strings.Contains(line, "owes nothing") {
+				t.Fatalf("auditLine = %q, an unreadable scope is not nothing owed", line)
+			}
+			for _, want := range tc.wantLine {
+				if !strings.Contains(line, want) {
+					t.Fatalf("auditLine = %q, missing the actionable %q", line, want)
+				}
+			}
+			for _, want := range tc.wantReason {
+				if !strings.Contains(res.Reason, want) {
+					t.Fatalf("reason = %s, missing %q", res.Reason, want)
+				}
+			}
+		})
+	}
+}
+
+// The operator line renders the decision struct: a run-scoped audit whose scope the plan could not
+// answer for reports that scoped problem — actionable, one line, offer included — instead of
+// falling through to the all-clear claim the zero counts cannot support.
+func TestAuditLineNamesTheRunProblemInsteadOfOwesNothing(t *testing.T) {
+	res := Result{Audit: true, Reason: "x", RunProblem: `no row in docs/testing/test-plan.md carries run "run-x": tpp plan gaps --all shows every row`}
+	line := auditLine(res)
+	if strings.Contains(line, "owes nothing") {
+		t.Fatalf("auditLine = %q, an unreadable run scope is not nothing owed", line)
+	}
+	for _, want := range []string{`carries run "run-x"`, "gaps --all", "Want feedback on this run?"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("auditLine = %q, missing %q", line, want)
+		}
+	}
+	if strings.Contains(line, "\n") {
+		t.Fatalf("the operator line is one line: %q", line)
+	}
+}

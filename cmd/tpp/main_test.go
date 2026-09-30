@@ -691,6 +691,203 @@ func TestFeedbackCLI(t *testing.T) {
 	}
 }
 
+func TestFeedbackPendingCLIReviewLifecycle(t *testing.T) {
+	bin := buildCLI(t)
+	home := t.TempDir()
+	configDir := t.TempDir()
+	run := func(args ...string) (string, int) {
+		t.Helper()
+		return runCLIWithHomeEnv(t, home, bin, args...)
+	}
+
+	if out, code := run("feature", "enable", "feedback"); code != 0 {
+		t.Fatalf("enable feedback exit = %d\n%s", code, out)
+	}
+
+	type reportFixture struct {
+		ts, repo, plan, skill, build string
+		paid, cost, reason, verdict  string
+		guess, freeform              string
+	}
+	writeReport := func(r reportFixture) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "report.md")
+		body := strings.Join([]string{
+			"ts: " + r.ts,
+			"repo: " + r.repo,
+			"plan: " + r.plan,
+			"skill: " + r.skill,
+			"build: " + r.build,
+			"paid: " + r.paid,
+			"cost: " + r.cost,
+			"reason: " + r.reason,
+			"verdict: " + r.verdict,
+			"guess: " + r.guess,
+			"freeform: " + r.freeform,
+		}, "\n") + "\n"
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		out, code := run("feedback", "--config-dir", configDir, "--file", path)
+		if code != 0 {
+			t.Fatalf("submit feedback exit = %d\n%s", code, out)
+		}
+		return path
+	}
+	fixture := func(id string) reportFixture {
+		return reportFixture{
+			ts: "2026-09-10T12:00:00Z", repo: "/work/repo-" + id, plan: "docs/testing/" + id + ".md",
+			skill: "test-strategy 0.3.11", build: "build-" + id, paid: "paid-" + id,
+			cost: "cost-" + id, reason: "reason-" + id, verdict: "paid",
+			guess: "guess-" + id, freeform: "freeform-" + id,
+		}
+	}
+	assertFields := func(out string, r reportFixture) {
+		t.Helper()
+		for _, field := range []struct{ name, value string }{
+			{"ts", r.ts}, {"repo", r.repo}, {"plan", r.plan}, {"skill", r.skill}, {"build", r.build},
+			{"paid", r.paid}, {"cost", r.cost}, {"reason", r.reason}, {"verdict", r.verdict},
+			{"guess", r.guess}, {"freeform", r.freeform},
+		} {
+			if !strings.Contains(out, field.name+": "+field.value) {
+				t.Errorf("pending report missing %s field %q:\n%s", field.name, field.value, out)
+			}
+		}
+	}
+	pendingToken := func(out string) string {
+		t.Helper()
+		const prefix = "review token: "
+		var token string
+		for _, line := range strings.Split(out, "\n") {
+			if strings.HasPrefix(line, prefix) {
+				if token != "" {
+					t.Fatalf("pending report printed more than one review token:\n%s", out)
+				}
+				token = strings.TrimPrefix(line, prefix)
+				if token == "" || strings.TrimSpace(token) != token {
+					t.Fatalf("invalid review token line %q", line)
+				}
+			}
+		}
+		if token == "" || !strings.Contains(out, prefix+token) {
+			t.Fatalf("pending report missing exact %q line:\n%s", prefix+token, out)
+		}
+		return token
+	}
+
+	historical := []reportFixture{fixture("historical-one"), fixture("historical-two")}
+	for _, report := range historical {
+		writeReport(report)
+	}
+	out, code := run("feedback", "--config-dir", configDir, "--pending")
+	if code != 0 {
+		t.Fatalf("initial pending baseline exit = %d\n%s", code, out)
+	}
+	for _, report := range historical {
+		for _, marker := range []string{report.repo, report.plan, report.paid, report.freeform} {
+			if strings.Contains(out, marker) {
+				t.Errorf("initial --pending printed historical report marker %q:\n%s", marker, out)
+			}
+		}
+	}
+
+	out, code = run("feedback", "--config-dir", configDir, "--summary")
+	if code != 0 || !strings.Contains(out, "run feedback: 2 report(s)") {
+		t.Fatalf("summary after baseline = %d\n%s", code, out)
+	}
+
+	first := fixture("pending-one")
+	firstFile := writeReport(first)
+	out, code = run("feedback", "--config-dir", configDir, "--summary")
+	if code != 0 || !strings.Contains(out, "run feedback: 3 report(s)") {
+		t.Fatalf("all-history summary after append = %d\n%s", code, out)
+	}
+	out, code = run("feedback", "--config-dir", configDir, "--pending")
+	if code != 0 {
+		t.Fatalf("pending after summary exit = %d\n%s", code, out)
+	}
+	assertFields(out, first)
+	firstToken := pendingToken(out)
+
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{name: "pending with summary", args: []string{"--pending", "--summary"}},
+		{name: "pending with file", args: []string{"--pending", "--file", firstFile}},
+		{name: "pending with acknowledgement", args: []string{"--pending", "--mark-reviewed", firstToken}},
+		{name: "acknowledgement with summary", args: []string{"--mark-reviewed", firstToken, "--summary"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := append([]string{"feedback", "--config-dir", configDir}, tc.args...)
+			out, code := run(args...)
+			if code != 2 {
+				t.Fatalf("incompatible actions exit = %d, want 2\n%s", code, out)
+			}
+		})
+	}
+
+	late := fixture("pending-two")
+	writeReport(late)
+	for _, args := range [][]string{
+		{"feedback", "--config-dir", configDir, "--mark-reviewed", firstToken},
+		{"feedback", "--config-dir", configDir, "--mark-reviewed", firstToken},
+	} {
+		if out, code := run(args...); code != 0 {
+			t.Fatalf("acknowledge/replay token exit = %d\n%s", code, out)
+		}
+	}
+
+	out, code = run("feedback", "--config-dir", configDir, "--pending")
+	if code != 0 {
+		t.Fatalf("pending after prefix acknowledgement exit = %d\n%s", code, out)
+	}
+	assertFields(out, late)
+	for _, marker := range []string{first.repo, first.plan, first.paid, first.freeform} {
+		if strings.Contains(out, marker) {
+			t.Errorf("acknowledged report still pending as %q:\n%s", marker, out)
+		}
+	}
+	lateToken := pendingToken(out)
+	if lateToken == firstToken {
+		t.Fatalf("token after later append = %q, want a new prefix token", lateToken)
+	}
+	if out, code := run("feedback", "--config-dir", configDir, "--mark-reviewed", lateToken); code != 0 {
+		t.Fatalf("final acknowledgement exit = %d\n%s", code, out)
+	}
+
+	out, code = run("feedback", "--config-dir", configDir, "--pending")
+	if code != 0 {
+		t.Fatalf("pending after final acknowledgement exit = %d\n%s", code, out)
+	}
+	for _, marker := range []string{first.repo, first.plan, first.paid, first.freeform, late.repo, late.plan, late.paid, late.freeform, "review token: "} {
+		if strings.Contains(out, marker) {
+			t.Errorf("pending queue was not empty; found %q:\n%s", marker, out)
+		}
+	}
+}
+
+func TestTopLevelSynopsisListsFeedbackReviewActions(t *testing.T) {
+	bin := buildCLI(t)
+	home := t.TempDir()
+	out, code := runCLIWithHomeEnv(t, home, bin)
+	if code != 2 {
+		t.Fatalf("tpp without a command exit = %d, want 2\n%s", code, out)
+	}
+	var feedbackSynopsis string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "feedback [") {
+			feedbackSynopsis = line
+			break
+		}
+	}
+	for _, want := range []string{"--pending", "--mark-reviewed <token>"} {
+		if !strings.Contains(feedbackSynopsis, want) {
+			t.Errorf("feedback synopsis missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestFeedbackCLISanitizesPersistedSecretsAndFailsClosed(t *testing.T) {
 	bin := buildCLI(t)
 	configDir := t.TempDir()

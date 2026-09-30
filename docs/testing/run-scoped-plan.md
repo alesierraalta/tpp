@@ -102,6 +102,32 @@ so the log answers "which run did the gate audit" the same way the declaration c
 "which plan did the gate read". A run whose rows are all swept and closed reports nothing owed, and
 the unscoped-rows line rides with every verdict so a plan is never presented as smaller than it is.
 
+### The session binding
+
+The Stop audit is opt-in per chat: without an explicit binding the gate sends no plan notices at
+all — a working-tree entry or a fresh mtime never proves this session authored a change. The
+binding is what connects a chat to the (plan, run) scope above:
+
+```sh
+tpp bind --session <host session ID> --path docs/testing/test-plan.md --run <slug>
+tpp bind --unset --session <host session ID>
+```
+
+- The record lives outside the repository beside the gate log: a 0700 directory holding one 0600
+  file per (canonical worktree root, exact session), named by a hash — no raw session ID in the tree.
+- The binding is per session and per worktree: two chats in one checkout bind independently and each
+  audits its own plan and run; neither inherits the other's record. The worktree declaration still
+  resolves `--run` for `check` and `plan *`, but it is never a Stop fallback.
+- A binding with no valid run logs `session_run_unbound` instead of auditing the whole document —
+  the exact failure this proposal exists to prevent.
+- Records persist until `tpp bind --unset`, so retire them with their session or worktree. Keep
+  `TESTING_GATE_LOG` absolute: `bind` and Stop derive the binding directory from the log path, and
+  a relative path would resolve against each process's working directory, so the binding would
+  never be found.
+- The binding scopes plan auditing only. When the host exposes no session ID — or when sessions run
+  concurrently — isolate each chat in its own worktree and use `tpp check` / `tpp plan gaps` there:
+  sharing one working tree still races on source edits, binding or not.
+
 ## The skill
 
 - The state table gains one row: the plan exists and the active run's layers are all `pending` with no

@@ -54,17 +54,39 @@ flowchart TD
     optout -- yes --> quiet
     optout -- no --> loop{Turn already continuing<br/>because of a Stop hook?}
     loop -- yes --> quiet
-    loop -- no --> changed{Production source changed<br/>since the session started?}
-    changed -- no --> quiet
-    changed -- yes --> ran{test-strategy or exploit-testing<br/>actually invoked?}
-    ran -- no --> ask1([Remind: run the testing discipline<br/>and name the changed files])
-    ran -- yes --> owed{Does the plan still owe<br/>layers or ranked targets?}
+    loop -- no --> bound{This session bound to a plan<br/>and run with tpp bind?}
+    bound -- no --> unbound([Stay silent;<br/>the log records session_plan_unbound])
+    bound -- yes --> ran{test-strategy or exploit-testing<br/>invoked in this session's transcript?}
+    ran -- no --> quiet
+    ran -- yes --> owed{Does the bound plan still owe<br/>layers or ranked targets?}
     owed -- no --> done([Say the plan owes nothing])
     owed -- yes --> ask2([Name the surfaces left unexamined<br/>and offer feedback on the run])
 ```
 
-It is a reminder, never an approval gate: every path exits 0, and each decision is one line in the
-telemetry log.
+Nothing fires from a file's mtime or another chat's worktree: without an explicit `tpp bind` for
+this session, the Stop sends no plan notice at all. It is a reminder, never an approval gate: every
+path exits 0, and each decision is one line in the telemetry log.
+
+### Plan audits are opt-in, per session
+
+The Stop hook sends no plan notices across chats by default. No working-tree entry, no fresh source
+mtime, and no worktree-wide `.tpp.json` declaration proves this session authored a change — so an
+unbound stop audits nothing and the log says why (`session_plan_unbound`). Automatic auditing
+starts only when this session is bound, from inside the worktree where it runs:
+
+```sh
+tpp bind --session <host session ID> --path docs/testing/test-plan.md --run <slug>
+tpp bind --unset --session <host session ID>    # remove the record when the session ends
+```
+
+| Topic | Decision |
+|---|---|
+| The record | outside the repository, beside the gate log: a `bindings/` directory at 0700 holding one 0600 file per pair of canonical worktree root and exact session ID, named by a hash — no raw session ID in a filename |
+| What the Stop gate reads | only this session's binding, from the environment or that stored file; when both exist they must agree or the gate audits nothing. `.tpp.json`'s `planPath` is never a Stop fallback — it still drives `tpp check` and every `plan *` command, which need no session at all |
+| Scope of one record | one exact session in one worktree: two sessions in the same checkout bind independently and each audits its own plan and run; a record never applies to another session or another checkout |
+| Stale records | nothing removes a record implicitly; `tpp bind --unset --session <id>` is the housekeeping when a session or worktree retires |
+| `TESTING_GATE_LOG` | keep it absolute: `bind` and the Stop hook derive the binding directory from the log path, and a relative path resolves against each process's working directory — bind and Stop would then look in different places and find nothing |
+| Concurrent sessions | the binding scopes plan auditing, not source edits: two sessions sharing one working tree still race on files. When the host exposes no session ID, give each chat its own worktree and rely on `tpp check` / `tpp plan gaps` there |
 
 ### The testing flow a model runs
 
@@ -186,16 +208,16 @@ tpp doctor    # verifies the install and lists optional capabilities
 ```
 
 To prove the hook answers without waiting for a real session, hand the gate the payload its host would.
-In a throwaway git repository with a committed file, a transcript whose first timestamp precedes the
-change, and a touched production source file:
+In a throwaway git repository:
 
 ```sh
 printf '%s' "{\"session_id\":\"install-check\",\"transcript_path\":\"$tmp/transcript.jsonl\",\"cwd\":\"$tmp/repo\",\"hook_event_name\":\"Stop\",\"stop_hook_active\":false}" \
   | TESTING_GATE_LOG="$tmp/gate.jsonl" tpp gate
 ```
 
-It exits 0, prints a Stop payload naming the changed file, and leaves one line in `$tmp/gate.jsonl`
-reading `"fired":true`. The gate always exits 0: it grades the turn and never breaks it.
+It exits 0 and leaves one line in `$tmp/gate.jsonl` reading `"skipped":"session_plan_unbound"`: with
+no `tpp bind` for that session the gate audits nothing and prints no Stop payload — the answer every
+unbound session gets. The gate always exits 0: it grades the turn and never breaks it.
 
 `sync` installs the embedded skills into every host it finds: `~/.claude/skills`,
 `~/.config/opencode/skills`, `~/.gemini/skills`, and `~/.codex/skills`. Discovery never offers Pi —
@@ -269,7 +291,8 @@ Commands table below.
 
 | Command | What it does |
 |---|---|
-| `tpp gate` | The Stop hook. Reads the hook payload on stdin, decides, logs one line, and emits Stop feedback when a session changed production source without loading the adversarial testing discipline. Always exits 0. |
+| `tpp gate` | The Stop hook. Reads the hook payload on stdin, logs one line, and audits the plan and run named by this session's binding — stays silent without an exact binding. Always exits 0. |
+| `tpp bind --session <id> --path <plan> --run <slug>` / `tpp bind --unset --session <id>` | Stores or removes this session's Stop-gate binding outside the repository: a 0700 directory beside the gate log, one 0600 file per (canonical worktree root, exact session), named by a hash. |
 | `tpp setup [--hosts <a,b>] [--config-dir <dir>] [--mode <m>]` | Installs and verifies in one step: the same sync as `tpp sync`, the same checks as `tpp doctor` on the directory it wrote, and a PATH check that prints the `export PATH=...` line when the binary's directory is missing. `--hosts` accepts only the discovered skill hosts — `pi` is a usage error here (exit 2); only `sync` accepts it. Ends on `tpp is installed and working: ...` with exit 0, or exits with sync's code, 2 for a refused flag value, or 1 (`setup: not finished: ...`). |
 | `tpp sync [--dry-run] [--force] [--hosts <a,b>]` | Installs the embedded skills into discovered hosts and wires Claude's Stop hook. `--dry-run` prints the plan and writes nothing; `--force` replaces modified managed files after snapshotting them. `--hosts` narrows to the named hosts; naming `pi` is the only way the Pi extension is installed (see [The Pi extension](#the-pi-extension-opt-in)) and installs only that file. Idempotent. |
 | `tpp doctor [--mode <m>] [--config-dir <dir>] [--json]` | Reports installed skills (and whether they drift from the embedded version), whether the hook is wired, and which optional tools are on PATH with what degrades without each — against the selected Claude config directory, not Pi extension health. `--mode` per [Modes](#modes-setup-and-doctor-share---mode-autostandalonegentle); `--json` for machines. Exit 1 when git, a skill, or the hook is missing. |
@@ -288,20 +311,22 @@ Commands table below.
 
 ## How the gate decides
 
-At the end of every turn the gate fires only when all of these hold:
+At the end of every turn the gate audits only when all of these hold:
 
 - the working directory is inside a git repository with at most 20 000 status entries (a home
   directory has hundreds of thousands; a project never does);
-- at least one production source file changed after the session started, where the session start
-  is the first `timestamp` in the session transcript and production source means a source
-  extension outside test, fixture, vendored, build, and Claude configuration trees;
-- neither `test-strategy` nor `exploit-testing` was actually invoked in the session (a name in the
-  available-skills listing does not count; a Skill call or a read of its `SKILL.md` does);
 - the repository has no `.no-testing-gate` file at its root;
-- the turn is not already continuing because of a previous Stop hook.
+- the turn is not already continuing because of a previous Stop hook;
+- this session carries an exact binding — `tpp bind`'s stored record or the binding environment —
+  naming this session, this worktree, a plan and a run; the worktree's `.tpp.json` declaration, a
+  working-tree entry and a fresh source mtime are never a substitute;
+- `test-strategy` or `exploit-testing` was actually invoked in this session (a name in the
+  available-skills listing does not count; a Skill call or a read of its `SKILL.md` does).
 
-When it fires, the feedback names the files and asks for `test-strategy` ("haz el testing").
-It is a reminder, not an approval gate.
+Without the binding the stop is silence with `session_plan_unbound` in the telemetry: the gate
+never derives authorship from mtimes and never asks another chat's session to run the discipline.
+When the audit runs, the feedback names the surfaces the bound run left unexamined. It is a
+reminder, not an approval gate.
 
 Telemetry: every decision appends one JSON line to `~/.claude/telemetry/testing-gate.jsonl`
 (override with `TESTING_GATE_LOG`), so the invocation rate is measurable over time. Its `repo`, `session`
@@ -355,7 +380,7 @@ For both `check` and `plan`, a relative `--path` is resolved against the worktre
 `--path` is taken as given, except in `check`, which refuses it as a usage error. This is the same
 relative resolution and containment rule used for the `planPath` declaration in `.tpp.json`.
 
-The effective plan path follows one precedence rule: an explicit `--path` wins, then `planPath` in
+For manual `tpp check` and `tpp plan *` commands, an explicit `--path` wins, then `planPath` in
 `.tpp.json` at the worktree root, then `docs/testing/test-plan.md`. Declare a scoped plan like
 this:
 
@@ -363,8 +388,9 @@ this:
 {"planPath": "docs/testing/test-plan-redis-stream-pool.md"}
 ```
 
-A malformed, unreadable or unusable declaration fails closed; it never silently falls back to the
-default. `tpp check`, the Stop-hook gate and every `plan *` command honor the same declaration.
+A malformed, unreadable or unusable declaration fails closed for these manual commands; it never
+silently falls back to the default. The Stop-hook gate ignores `.tpp.json`: it audits only the plan
+and run bound to the exact session, and stays silent without a valid binding.
 
 ```
 tpp plan init                # write the skeleton, tables and all; never overwrites silently
@@ -414,8 +440,9 @@ command has been run and its exit code checked, not when its configuration file 
 
 ## The two questions at the Stop
 
-The gate asks one question when a session changed production source and never loaded the
-discipline: run it. It asks a different one when the discipline ran and stopped halfway.
+The gate asks one question, and only for a session explicitly bound to a plan: the discipline ran
+and stopped halfway. A session that never loaded it, or carries no binding, hears nothing from the
+Stop; `tpp check` is the answer to "what does this repository owe" that needs no session at all.
 
 Covering a diff and reporting as though the surface were covered is the failure that survives
 every green check: the depth work succeeds, the breadth work is never started, and the summary

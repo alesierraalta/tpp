@@ -2,7 +2,6 @@ package gate
 
 import (
 	"bufio"
-	"encoding/json"
 	"github.com/alesierraalta/tpp/internal/plan"
 	"io"
 	"os"
@@ -11,16 +10,6 @@ import (
 	"strings"
 	"time"
 )
-
-// A home directory shows up as a git repository with hundreds of thousands of untracked
-// entries; a project never does. Above this many entries the checkout is not a project.
-const MaxStatusEntries = 20000
-
-// Window used when the transcript carries no timestamp: wide enough to cover any session.
-const wideWindow = 8 * time.Hour
-
-// Early transcript lines lack a timestamp; scanning further than this is not a session start.
-const maxTimestampScan = 500
 
 var Skills = []string{"test-strategy", "exploit-testing", "no-excess-tests", "real-run-validation"}
 
@@ -59,27 +48,31 @@ type Deps struct {
 	ReadPlan       func(path string) (string, error)
 	Now            time.Time
 	WorkDir        string
+	// BindingDir is where `tpp bind` stores per-session bindings, wired by Run from the log path.
+	// Empty keeps the environment-only contract, which is what a unit Deps exercises.
+	BindingDir string
 }
 
 // Entry is one logged decision; skills_loaded is never null so the log stays queryable.
 type Entry struct {
-	TS            string   `json:"ts"`
-	Session       string   `json:"session"`
-	Repo          string   `json:"repo"`
-	ChangedSource int      `json:"changed_source"`
-	SkillsLoaded  []string `json:"skills_loaded"`
-	Audited       bool     `json:"audited,omitempty"`
-	Fired         bool     `json:"fired"`
-	Skipped       string   `json:"skipped,omitempty"`
-	OptedOut      bool     `json:"opted_out,omitempty"`
-	Plan          string   `json:"plan,omitempty"`
+	TS           string   `json:"ts"`
+	Session      string   `json:"session"`
+	Repo         string   `json:"repo"`
+	SkillsLoaded []string `json:"skills_loaded"`
+	Audited      bool     `json:"audited,omitempty"`
+	Fired        bool     `json:"fired"`
+	Skipped      string   `json:"skipped,omitempty"`
+	OptedOut     bool     `json:"opted_out,omitempty"`
+	Plan         string   `json:"plan,omitempty"`
 }
 
 type Result struct {
+	// Fire is the generic reminder this Stop no longer sends: a working-tree entry or a fresh
+	// source mtime never proves this session authored a change, so nothing in Decide can set it.
+	// The field and its emit line remain part of the hook's output contract.
 	Fire   bool
 	Audit  bool // the discipline ran and left breadth owed; a different question, same Stop
 	Reason string
-	Files  []string
 	Entry  *Entry
 	// Owed and Pending are the decision itself, structured: layers assigned and never invoked, and
 	// ranked targets still pending. The operator line reads them instead of counting phrases inside
@@ -96,6 +89,11 @@ type Result struct {
 	// Problem is a repository state the gate could not act on: a plan declaration it cannot read. It is
 	// not an audit — nothing was read — and it is never silence: the model and the operator both hear it.
 	Problem string
+	// RunProblem is why the bound run's scope could not be audited: a run no row in the plan carries,
+	// or a table whose Run column cannot be read. The operator line reports it in place of the counts,
+	// because no count over that scope is honest while the scope itself is unreadable — and the other
+	// runs' rows it would have to borrow to say "owes nothing" are not this run's business.
+	RunProblem string
 }
 
 // IsProductionSource decides what the gate protects: source by extension, outside test,
@@ -154,36 +152,6 @@ func eachLine(r io.Reader, fn func(line string) bool) {
 	}
 }
 
-// SessionStart is the first transcript timestamp; ctime is never used because the transcript
-// is appended right up to the Stop, which would make "now" the start and silence the gate.
-func SessionStart(r io.Reader, now time.Time) time.Time {
-	start := now.Add(-wideWindow)
-	if r == nil {
-		return start
-	}
-	scanned := 0
-	eachLine(r, func(line string) bool {
-		scanned++
-		if scanned > maxTimestampScan {
-			return false
-		}
-		var head struct {
-			Timestamp string `json:"timestamp"`
-		}
-		if json.Unmarshal([]byte(line), &head) != nil || head.Timestamp == "" {
-			return true
-		}
-		for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
-			if ts, err := time.Parse(layout, head.Timestamp); err == nil {
-				start = ts
-				return false
-			}
-		}
-		return true
-	})
-	return start
-}
-
 // SkillsLoaded counts a skill only on a real invocation: a Skill tool call or a read of its
 // SKILL.md. Its name in the available-skills listing does not count.
 func SkillsLoaded(r io.Reader) []string {
@@ -210,50 +178,6 @@ func SkillsLoaded(r io.Reader) []string {
 	return found
 }
 
-func BuildReason(files []string) string {
-	shown := make([]string, 0, 6)
-	for i, f := range files {
-		if i == 6 {
-			break
-		}
-		shown = append(shown, "  "+f)
-	}
-	list := strings.Join(shown, "\n")
-	if len(files) > 6 {
-		list += "\n  ... and " + itoa(len(files)-6) + " more"
-	}
-	return strings.Join([]string{
-		"This session changed " + itoa(len(files)) + " production source file(s) without loading the adversarial testing discipline:",
-		list,
-		"",
-		"Running the existing suite only asks whether the code does what you expect. Before reporting this",
-		"done, invoke `test-strategy` (\"haz el testing\") so the change gets its contract classes, the",
-		"inputs nobody expects, and a probe proven able to go red. If the change genuinely does not warrant",
-		"it (generated code, a pure rename, a revert), say so in one line and finish.",
-		"",
-		"This is a reminder, not an approval gate. Silence it for this repository with a .no-testing-gate file.",
-	}, "\n")
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	var b []byte
-	for n > 0 {
-		b = append([]byte{byte('0' + n%10)}, b...)
-		n /= 10
-	}
-	if neg {
-		b = append([]byte{'-'}, b...)
-	}
-	return string(b)
-}
-
 func isAdversarial(loaded []string) bool {
 	for _, name := range loaded {
 		for _, adv := range Adversarial {
@@ -276,9 +200,17 @@ func openOrNil(d Deps, path string) io.ReadCloser {
 	return rc
 }
 
-// Decide is the whole contract: fire when this session changed production source, no
-// adversarial skill was invoked, the repository did not opt out, and the turn is not already
-// continuing because of a previous Stop block.
+// SkippedRunUnbound is the telemetry reason for a stop whose binding carried no valid run. The
+// audit reads one run's rows, so without a run there is no scope to read: the gate stays silent
+// with this reason in the log instead of falling back to the whole plan, whose rows belong to
+// other runs and would read as this session's debt or its all-clear.
+const SkippedRunUnbound = "session_run_unbound"
+
+// Decide is the whole contract: audit the bound run when this session's own transcript evidences an
+// adversarial testing skill invocation, and stay silent otherwise. A working-tree entry or a fresh
+// source mtime never proves this stop's session authored a change — another session or a shell in
+// the same checkout writes both — so there is no reminder to send without a binding, a run, and the
+// invocation in the transcript.
 func Decide(in Input, d Deps) Result {
 	if in.StopHookActive {
 		// The host sets this flag when the Stop hook already ran for this stop, and that run wrote its own
@@ -291,7 +223,6 @@ func Decide(in Input, d Deps) Result {
 	if cwd == "" {
 		cwd = d.WorkDir
 	}
-	since := sessionStart(d, in.TranscriptPath)
 	root, ok := repoRoot(d, cwd)
 	if !ok {
 		return Result{}
@@ -302,62 +233,38 @@ func Decide(in Input, d Deps) Result {
 		Repo:         filepath.Base(root),
 		SkillsLoaded: []string{},
 	}
-	rel, cfgErr := plan.ResolvePath(root, func(path string) (string, error) {
-		return readPlan(d, path)
-	})
-	if cfgErr == nil {
-		entry.Plan = rel
-	}
-	entries, ok := statusEntries(d, root, entry)
-	if !ok {
-		return Result{Entry: entry}
-	}
-	files := changedSources(d, root, entries, since)
-	entry.ChangedSource = len(files)
+	// The repository's own opt-out silences every stop in it, bound or not, before any binding is read.
 	if _, err := d.Stat(filepath.Join(root, ".no-testing-gate")); err == nil {
 		entry.OptedOut = true
+		return Result{Entry: entry}
 	}
-	judged, ran := judgedBy(d, in, files, entry)
-	fire := judged && !ran
-	entry.Fired = fire
-	res := Result{Fire: fire, Files: files, Entry: entry}
-	if fire {
-		res.Reason = BuildReason(files)
-		return res
+	// The plan comes only from this session's explicit binding — environment or stored file, each
+	// exact — and never the worktree-wide declaration, so two sessions in one worktree each audit
+	// their own plan. Without a binding the stop audits nothing and says so, whatever the tree shows.
+	binding, bound := sessionBinding(in.SessionID, root, d.BindingDir)
+	if !bound {
+		entry.Skipped = SkippedUnbound
+		return Result{Entry: entry}
 	}
-	// The discipline ran, and the second question is whether it ran all the way.
-	if judged && ran {
-		return audit(d, root, rel, cfgErr, res, entry)
+	entry.Plan = binding.PlanPath
+	// The audit is scoped to one run, so the binding has to carry one: a missing or invalid run
+	// has no scope to audit, and silence with the reason logged is the only honest answer — a
+	// whole-plan fallback would speak for rows the binding never claimed.
+	if err := plan.ValidateRun(BindingEnv, binding.Run); err != nil {
+		entry.Skipped = SkippedRunUnbound
+		return Result{Entry: entry}
 	}
-	// Nothing was judged, so there is nothing to fire and nothing to audit; the entry still records
-	// the stop.
-	return res
-}
-
-// judgedBy reports whether this stop had anything to judge and whether the adversarial skills ran for it. A stop
-// with no changed source, or one that opted out, has nothing to judge: it neither fires nor audits, and the two
-// questions stay separate because "nothing changed" is not "the discipline ran".
-func judgedBy(d Deps, in Input, files []string, entry *Entry) (judged, ran bool) {
-	if len(files) == 0 || entry.OptedOut {
-		return false, false
-	}
+	// The only evidence this gate trusts that the discipline ran is this session's own transcript.
 	if rc := openOrNil(d, in.TranscriptPath); rc != nil {
 		entry.SkillsLoaded = SkillsLoaded(rc)
 		rc.Close()
 	}
-	return true, isAdversarial(entry.SkillsLoaded)
-}
-
-// sessionStart is the window the run is measured against: the session's own start when its transcript can be
-// read, and a wide window back from now when it cannot. A transcript that is missing or unreadable is the
-// ordinary case outside a host that keeps one, so it is not an error.
-func sessionStart(d Deps, transcriptPath string) time.Time {
-	since := d.Now.Add(-wideWindow)
-	if rc := openOrNil(d, transcriptPath); rc != nil {
-		since = SessionStart(rc, d.Now)
-		rc.Close()
+	if !isAdversarial(entry.SkillsLoaded) {
+		// Nothing in this session invoked the discipline, so there is nothing to audit, and no
+		// source change this stop can be proven to own: silence, with the row saying what was loaded.
+		return Result{Entry: entry}
 	}
-	return since
+	return audit(d, root, binding.PlanPath, binding.Run, Result{Entry: entry}, entry)
 }
 
 // repoRoot is the repository the run happened in. A directory that is not one, or a git that cannot answer,
@@ -371,70 +278,42 @@ func repoRoot(d Deps, cwd string) (string, bool) {
 	return root, true
 }
 
-// statusEntries reads what the repository says changed, and refuses a stop whose status is too large to judge:
-// the count would be a guess, and the entry records the skip instead.
-func statusEntries(d Deps, root string, entry *Entry) ([]string, bool) {
-	out, err := d.Git(root, "status", "--porcelain", "-z", "-uall")
-	if err != nil {
-		entry.Skipped = "git_status_failed"
-		return nil, false
-	}
-	entries := ParsePorcelain(out)
-	if len(entries) > MaxStatusEntries {
-		entry.Skipped = "too_many_entries"
-		return nil, false
-	}
-	return entries, true
-}
-
-// changedSources keeps the production files this run touched since the window opened: each path counted once,
-// and a path whose metadata cannot be read left out rather than assumed changed.
-func changedSources(d Deps, root string, entries []string, since time.Time) []string {
-	files := []string{}
-	seen := map[string]bool{}
-	for _, p := range entries {
-		if !IsProductionSource(p) || seen[p] {
-			continue
-		}
-		info, err := d.Stat(filepath.Join(root, p))
-		if err != nil {
-			continue
-		}
-		if !info.ModTime().Before(since) {
-			seen[p] = true
-			files = append(files, p)
-		}
-	}
-	return files
-}
-
-// audit asks the second question: the discipline ran, but did it run all the way? A layer assigned and never
+// audit asks whether the discipline ran all the way: a layer assigned and never
 // invoked leaves the report reading as coverage of a surface nobody examined, so the plan's breadth counters
-// are read back and one of three reasons is attached — what is owed, what the plan could not be read for, or
-// that it is complete.
-func audit(d Deps, root, rel string, cfgErr error, res Result, entry *Entry) Result {
-	if cfgErr != nil {
-		entry.Skipped = "plan_config_invalid"
-		res.Problem = BuildDeclarationProblem(cfgErr)
+// are read back and one of three reasons is attached — what is owed, what could not be read in the plan, or
+// that it is complete. The plan path and run arrive from the session's binding; the counters are scoped to
+// that run alone, and a scope the plan cannot answer for is reported as itself through RunProblem.
+func audit(d Deps, root, rel, run string, res Result, entry *Entry) Result {
+	planPath := filepath.Join(root, rel)
+	body, err := readPlan(d, planPath)
+	if err != nil {
 		return res
 	}
-	planPath := filepath.Join(root, rel)
-	if body, err := readPlan(d, planPath); err == nil {
-		if gaps, err := plan.GapsIn(body); err == nil {
-			res.Audit = true
-			entry.Audited = true
-			res.Owed, res.Pending = len(gaps.UnsweptLayers), len(gaps.PendingTargets)
-			res.Unreadable, res.Unplanned = len(gaps.InterruptedTables), gaps.NoLayerMatrix
-			res.Micro = gaps.Micro != ""
-			switch {
-			case gaps.Any():
-				res.Reason = BuildAuditReason(rel, gaps.Report())
-			case res.Micro:
-				res.Reason = BuildMicroCompleteReason(rel)
-			default:
-				res.Reason = BuildCompleteReason(rel)
-			}
-		}
+	gaps, err := plan.GapsForRun(body, run)
+	if err != nil {
+		return res
+	}
+	res.Audit = true
+	entry.Audited = true
+	res.Owed, res.Pending = len(gaps.UnsweptLayers), len(gaps.PendingTargets)
+	res.Unreadable, res.Unplanned = len(gaps.InterruptedTables), gaps.NoLayerMatrix
+	res.Micro = gaps.Micro != ""
+	// A run no row carries, or a table whose Run column cannot be read, fails closed as a scoped
+	// problem: the counts above are not an all-clear, and the rows of other runs are never printed
+	// here as this run's debt or its proof of completion.
+	switch {
+	case len(gaps.RunProblems) > 0:
+		res.RunProblem = strings.Join(gaps.RunProblems, "; ")
+	case gaps.RunMissing:
+		res.RunProblem = "no row in " + rel + " carries run \"" + run + "\": tpp plan gaps --all shows every row"
+	}
+	switch {
+	case gaps.Any():
+		res.Reason = BuildAuditReason(rel, gaps.Report())
+	case res.Micro:
+		res.Reason = BuildMicroCompleteReason(rel)
+	default:
+		res.Reason = BuildCompleteReason(rel)
 	}
 	return res
 }

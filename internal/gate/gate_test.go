@@ -2,7 +2,6 @@ package gate
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -177,41 +176,6 @@ func TestIsProductionSource(t *testing.T) {
 	}
 }
 
-func TestSessionStart(t *testing.T) {
-	now := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
-	a := now.Add(-90 * time.Second)
-	b := now.Add(-30 * time.Second)
-	cases := []struct {
-		name  string
-		lines string
-		want  time.Time
-	}{
-		{"first timestamped line wins", "garbage\n{\"type\":\"x\"}\n" + stamped(a) + stamped(b), a},
-		{"no timestamp falls back to the wide window", "{\"type\":\"x\"}\n{}\n", now.Add(-wideWindow)},
-		{"unparseable timestamp is skipped", "{\"timestamp\":\"yesterday\"}\n" + stamped(b), b},
-		{"empty input falls back", "", now.Add(-wideWindow)},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := SessionStart(strings.NewReader(tc.lines), now)
-			if !got.Equal(tc.want) {
-				t.Fatalf("got %v, want %v", got, tc.want)
-			}
-		})
-	}
-	t.Run("a timestamp past the scan cap is not the session start", func(t *testing.T) {
-		lines := strings.Repeat("{}\n", maxTimestampScan) + stamped(a)
-		if got := SessionStart(strings.NewReader(lines), now); !got.Equal(now.Add(-wideWindow)) {
-			t.Fatalf("got %v, want fallback", got)
-		}
-	})
-	t.Run("nil reader falls back", func(t *testing.T) {
-		if got := SessionStart(nil, now); !got.Equal(now.Add(-wideWindow)) {
-			t.Fatalf("got %v", got)
-		}
-	})
-}
-
 func TestSkillsLoaded(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -237,30 +201,6 @@ func TestSkillsLoaded(t *testing.T) {
 	}
 }
 
-func TestBuildReason(t *testing.T) {
-	t.Run("six files shown then the rest counted", func(t *testing.T) {
-		files := []string{"a.ts", "b.ts", "c.ts", "d.ts", "e.ts", "f.ts", "g.ts", "h.ts"}
-		r := BuildReason(files)
-		for _, f := range files[:6] {
-			if !strings.Contains(r, "  "+f) {
-				t.Fatalf("missing %s", f)
-			}
-		}
-		if strings.Contains(r, "g.ts") || !strings.Contains(r, "... and 2 more") {
-			t.Fatalf("overflow not summarised: %q", r)
-		}
-		if !strings.Contains(r, "changed 8 production source file(s)") {
-			t.Fatalf("count missing: %q", r)
-		}
-	})
-	t.Run("one file, no overflow line", func(t *testing.T) {
-		r := BuildReason([]string{"src/a.ts"})
-		if strings.Contains(r, "more") || !strings.Contains(r, ".no-testing-gate") {
-			t.Fatalf("unexpected reason: %q", r)
-		}
-	})
-}
-
 func TestDecide(t *testing.T) {
 	now := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
 	start := now.Add(-60 * time.Second)
@@ -274,71 +214,59 @@ func TestDecide(t *testing.T) {
 			transcript: stamped(start),
 		}
 	}
-	manyEntries := func(n int) string {
-		parts := make([]string, 0, n)
-		parts = append(parts, " M src/a.ts")
-		for i := 1; i < n; i++ {
-			parts = append(parts, fmt.Sprintf("?? junk/f%d.txt", i))
-		}
-		return porcelain(parts...)
-	}
-
 	cases := []struct {
-		name    string
-		in      Input
-		repo    func() *fakeRepo
-		fire    bool
-		files   []string
-		skipped string
-		optOut  bool
-		loaded  []string
-		noEntry bool
+		name     string
+		in       Input
+		repo     func() *fakeRepo
+		bind     bool
+		audit    bool
+		skipped  string
+		optOut   bool
+		loaded   []string
+		wantPlan string
+		noEntry  bool
 	}{
 		{name: "loop guard wins over everything", in: Input{StopHookActive: true, TranscriptPath: "t"}, repo: base, noEntry: true},
 		{name: "not a repository: silent, no log", in: Input{TranscriptPath: "t"}, repo: func() *fakeRepo { r := base(); r.rootErr = errors.New("not a git repository"); return r }, noEntry: true},
-		{name: "git status failure is logged as skipped", in: Input{TranscriptPath: "t"}, repo: func() *fakeRepo { r := base(); r.statusErr = errors.New("boom"); return r }, skipped: "git_status_failed"},
-		{name: "too many entries is not a project", in: Input{TranscriptPath: "t"}, repo: func() *fakeRepo { r := base(); r.status = manyEntries(MaxStatusEntries + 1); return r }, skipped: "too_many_entries"},
-		{name: "exactly the cap is still a project", in: Input{TranscriptPath: "t"}, repo: func() *fakeRepo { r := base(); r.status = manyEntries(MaxStatusEntries); return r }, fire: true, files: []string{"src/a.ts"}},
-		{name: "zero changed files: silent but logged", in: Input{TranscriptPath: "t"}, repo: func() *fakeRepo { r := base(); r.status = ""; return r }, files: []string{}},
-		{name: "changed source and no skill: fire naming every file", in: Input{TranscriptPath: "t"}, repo: func() *fakeRepo {
+		{name: "an unbound stop records its reason even when the worktree shows no change", in: Input{TranscriptPath: "t"}, repo: func() *fakeRepo { r := base(); r.status = ""; return r }, skipped: "session_plan_unbound"},
+		{name: "another session's fresh edits never speak for an unbound stop", in: Input{SessionID: "sess-decide", TranscriptPath: "t"}, repo: func() *fakeRepo {
 			r := base()
-			r.status = porcelain(" M src/a.ts", "?? src/b.ts", "?? README.md")
+			r.status = porcelain(" M src/a.ts", " M src/b.ts")
 			r.files["src/b.ts"] = fresh
-			r.files["README.md"] = fresh
 			return r
-		}, fire: true, files: []string{"src/a.ts", "src/b.ts"}},
-		{name: "adversarial skill loaded: silent with the skill logged", in: Input{TranscriptPath: "t"}, repo: func() *fakeRepo {
-			r := base()
-			r.transcript = stamped(start, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
-			return r
-		}, files: []string{"src/a.ts"}, loaded: []string{"test-strategy"}},
-		{name: "a non-adversarial sibling alone does not silence", in: Input{TranscriptPath: "t"}, repo: func() *fakeRepo {
+		}, skipped: "session_plan_unbound"},
+		{name: "a bound stop with no adversarial invocation is silent whatever the timestamps say", bind: true, in: Input{SessionID: "sess-decide", TranscriptPath: "t"}, repo: func() *fakeRepo {
 			r := base()
 			r.transcript = stamped(start, `{"input":{"file_path":"/x/.claude/skills/no-excess-tests/SKILL.md"}}`)
 			return r
-		}, fire: true, files: []string{"src/a.ts"}, loaded: []string{"no-excess-tests"}},
-		{name: "opt-out at the root silences a cwd in a subdirectory", in: Input{TranscriptPath: "t", Cwd: root + "/sub/dir"}, repo: func() *fakeRepo { r := base(); r.optOut = true; return r }, files: []string{"src/a.ts"}, optOut: true},
-		{name: "mtime exactly at the session start counts", in: Input{TranscriptPath: "t"}, repo: func() *fakeRepo { r := base(); r.files["src/a.ts"] = start; return r }, fire: true, files: []string{"src/a.ts"}},
-		{name: "mtime one second before the session start does not count", in: Input{TranscriptPath: "t"}, repo: func() *fakeRepo { r := base(); r.files["src/a.ts"] = start.Add(-time.Second); return r }, files: []string{}},
-		{name: "missing transcript: a file from one hour ago is inside the wide window", in: Input{TranscriptPath: "t"}, repo: func() *fakeRepo {
+		}, loaded: []string{"no-excess-tests"}, wantPlan: plan.DefaultPath},
+		{name: "the bound audit does not require git status", bind: true, in: Input{SessionID: "sess-decide", TranscriptPath: "t"}, repo: func() *fakeRepo {
+			r := base()
+			r.statusErr = errors.New("boom")
+			r.transcript = stamped(start, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
+			r.plan = "## Layer matrix\n\n| Layer | Skill | Scope | Status | Run |\n|---|---|---|---|---|\n" +
+				"| Security | `appsec-adversarial-auditor` | input | pending | run-t1 |\n\n" +
+				"## Ranked targets\n\n| Target | Verdict | Status | Run |\n|---|---|---|---|---|\n" +
+				"| 1. auth | probe | pending | run-t1 |\n"
+			return r
+		}, audit: true, loaded: []string{"test-strategy"}, wantPlan: plan.DefaultPath},
+		{name: "opt-out at the root silences a cwd in a subdirectory before any binding is read", in: Input{TranscriptPath: "t", Cwd: root + "/sub/dir"}, repo: func() *fakeRepo { r := base(); r.optOut = true; return r }, optOut: true},
+		{name: "a bound stop whose transcript cannot be read audits nothing", bind: true, in: Input{SessionID: "sess-decide", TranscriptPath: "t"}, repo: func() *fakeRepo {
 			r := base()
 			r.transcriptMissing = true
-			r.files["src/a.ts"] = now.Add(-time.Hour)
 			return r
-		}, fire: true, files: []string{"src/a.ts"}},
-		{name: "missing transcript: a file from nine hours ago is outside it", in: Input{TranscriptPath: "t"}, repo: func() *fakeRepo {
-			r := base()
-			r.transcriptMissing = true
-			r.files["src/a.ts"] = now.Add(-9 * time.Hour)
-			return r
-		}, files: []string{}},
-		{name: "empty cwd falls back to the working directory", in: Input{TranscriptPath: "t"}, repo: base, fire: true, files: []string{"src/a.ts"}},
+		}, loaded: []string{}, wantPlan: plan.DefaultPath},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.bind {
+				setBinding(t, "sess-decide", root, plan.DefaultPath, "run-t1")
+			}
 			res := Decide(tc.in, tc.repo().deps(now))
-			if res.Fire != tc.fire {
-				t.Fatalf("fire=%v, want %v (entry %+v)", res.Fire, tc.fire, res.Entry)
+			// No timestamp and no working-tree entry proves this stop's session authored a change,
+			// so the generic reminder never has an honest trigger.
+			if res.Fire {
+				t.Fatalf("fire = true, the generic reminder must never trigger (entry %+v)", res.Entry)
 			}
 			if tc.noEntry {
 				if res.Entry != nil {
@@ -349,40 +277,130 @@ func TestDecide(t *testing.T) {
 			if res.Entry == nil {
 				t.Fatalf("expected a log entry")
 			}
+			if res.Entry.Fired {
+				t.Fatalf("logged fired = true, the entry must not claim a fire: %+v", res.Entry)
+			}
+			if res.Audit != tc.audit {
+				t.Fatalf("audit = %v, want %v (entry %+v, reason %q)", res.Audit, tc.audit, res.Entry, res.Reason)
+			}
 			if res.Entry.Skipped != tc.skipped {
-				t.Fatalf("skipped=%q, want %q", res.Entry.Skipped, tc.skipped)
-			}
-			if tc.skipped != "" {
-				return
-			}
-			if !reflect.DeepEqual(res.Files, tc.files) {
-				t.Fatalf("files=%q, want %q", res.Files, tc.files)
-			}
-			if res.Entry.ChangedSource != len(tc.files) {
-				t.Fatalf("changed_source=%d, want %d", res.Entry.ChangedSource, len(tc.files))
+				t.Fatalf("skipped = %q, want %q", res.Entry.Skipped, tc.skipped)
 			}
 			if res.Entry.OptedOut != tc.optOut {
-				t.Fatalf("opted_out=%v, want %v", res.Entry.OptedOut, tc.optOut)
+				t.Fatalf("opted_out = %v, want %v", res.Entry.OptedOut, tc.optOut)
+			}
+			if res.Entry.Plan != tc.wantPlan {
+				t.Fatalf("plan = %q, want %q", res.Entry.Plan, tc.wantPlan)
 			}
 			wantLoaded := tc.loaded
 			if wantLoaded == nil {
 				wantLoaded = []string{}
 			}
 			if !reflect.DeepEqual(res.Entry.SkillsLoaded, wantLoaded) {
-				t.Fatalf("skills_loaded=%q, want %q", res.Entry.SkillsLoaded, wantLoaded)
+				t.Fatalf("skills_loaded = %q, want %q", res.Entry.SkillsLoaded, wantLoaded)
 			}
-			if res.Entry.Fired != tc.fire {
-				t.Fatalf("logged fired=%v, want %v", res.Entry.Fired, tc.fire)
-			}
-			if tc.fire {
-				for _, f := range tc.files {
-					if !strings.Contains(res.Reason, "  "+f) {
-						t.Fatalf("reason does not name %s: %q", f, res.Reason)
-					}
-				}
-			} else if res.Reason != "" {
-				t.Fatalf("silent decision must carry no reason")
+			if !tc.audit && res.Reason != "" {
+				t.Fatalf("a silent decision must carry no reason, got %q", res.Reason)
 			}
 		})
 	}
+}
+
+// Two sessions share one checkout: session B's edits and a shell-generated file land while session
+// A's stop runs. Neither a fresh mtime nor a working-tree entry says who wrote them, so the stop's
+// only evidence about A is A's own binding and A's own transcript — nothing else decides whether A
+// hears anything, and only A's bound run is ever audited.
+func TestStopGateDoesNotAttributeAnotherSessionsEditsToThisStop(t *testing.T) {
+	now := time.Date(2026, 9, 11, 12, 0, 0, 0, time.UTC)
+	started := now.Add(-time.Hour)
+	root := "/repo"
+	twoRunPlan := "## Layer matrix\n\n| Layer | Skill | Scope | Status | Run |\n|---|---|---|---|---|\n" +
+		"| Security | `appsec-adversarial-auditor` | input | pending | run-a |\n" +
+		"| Persistence | `database-persistence-testing` | input | done | run-b |\n\n" +
+		"## Ranked targets\n\n| Target | Verdict | Status | Run |\n|---|---|---|---|---|\n" +
+		"| 1. auth | probe | pending | run-a |\n" +
+		"| 2. billing | probe | done | run-b |\n"
+	// Session B wrote these while A's turn ran: uncommitted entries and a shell-generated file with
+	// fresh metadata, all real and none attributable to A.
+	repoWithBothSessions := func() *fakeRepo {
+		return &fakeRepo{
+			root:   root,
+			status: porcelain(" M src/app.js", "?? src/from-b-shell.ts"),
+			files: map[string]time.Time{
+				"src/app.js":          now.Add(30 * time.Second),
+				"src/from-b-shell.ts": now.Add(45 * time.Second),
+			},
+			transcript: stamped(started),
+		}
+	}
+
+	t.Run("A is not bound: B's edits are never A's notice", func(t *testing.T) {
+		t.Setenv(BindingEnv, "")
+		res := Decide(Input{SessionID: "sess-a", TranscriptPath: "t"}, repoWithBothSessions().deps(now))
+		if res.Fire || res.Audit || res.Reason != "" {
+			t.Fatalf("result = %#v, want silence for an unbound stop", res)
+		}
+		if res.Entry == nil || res.Entry.Skipped != "session_plan_unbound" {
+			t.Fatalf("entry = %#v, want the unbound skip reason recorded", res.Entry)
+		}
+	})
+
+	t.Run("A is bound but its transcript never invoked a testing skill", func(t *testing.T) {
+		setBinding(t, "sess-a", root, plan.DefaultPath, "run-a")
+		repo := repoWithBothSessions()
+		repo.transcript = stamped(started, `{"input":{"file_path":"/x/.claude/skills/no-excess-tests/SKILL.md"}}`)
+		res := Decide(Input{SessionID: "sess-a", TranscriptPath: "t"}, repo.deps(now))
+		if res.Fire || res.Audit || res.Reason != "" {
+			t.Fatalf("result = %#v, want silence without an adversarial invocation", res)
+		}
+		if res.Entry == nil || res.Entry.Skipped != "" || res.Entry.Plan != plan.DefaultPath {
+			t.Fatalf("entry = %#v, want the bound plan recorded and no skip", res.Entry)
+		}
+	})
+
+	t.Run("A is bound and invoked the skill: only A's run is audited", func(t *testing.T) {
+		setBinding(t, "sess-a", root, plan.DefaultPath, "run-a")
+		repo := repoWithBothSessions()
+		repo.transcript = stamped(started, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
+		repo.plan = twoRunPlan
+		res := Decide(Input{SessionID: "sess-a", TranscriptPath: "t"}, repo.deps(now))
+		if res.Fire {
+			t.Fatalf("fire = true, an audited stop must not also claim an unattributed change")
+		}
+		if !res.Audit {
+			t.Fatalf("audit = false (%s), the bound session's own run must be audited", res.Reason)
+		}
+		if res.Owed != 1 || res.Pending != 1 {
+			t.Fatalf("owed = %d, pending = %d, want A's run-a alone (1, 1); B's run must not contribute", res.Owed, res.Pending)
+		}
+		if res.Entry == nil || res.Entry.Skipped != "" || res.Entry.Plan != plan.DefaultPath {
+			t.Fatalf("entry = %#v, want the bound plan audited without a skip", res.Entry)
+		}
+	})
+
+	t.Run("shell-generated changes cannot be attributed by mtime", func(t *testing.T) {
+		mtimes := []struct {
+			name string
+			mod  time.Time
+		}{
+			{"mtime exactly at the session start", started},
+			{"mtime one second before the session start", started.Add(-time.Second)},
+			{"mtime fresh after the session started", now.Add(time.Minute)},
+			{"mtime written by a shell in the future", now.Add(time.Hour)},
+		}
+		for _, mt := range mtimes {
+			t.Run(mt.name, func(t *testing.T) {
+				t.Setenv(BindingEnv, "")
+				repo := repoWithBothSessions()
+				repo.files["src/from-b-shell.ts"] = mt.mod
+				res := Decide(Input{SessionID: "sess-a", TranscriptPath: "t"}, repo.deps(now))
+				if res.Fire {
+					t.Fatalf("fire = true, mtime %v is not proof this session authored the change", mt.mod)
+				}
+				if res.Entry == nil || res.Entry.Skipped != "session_plan_unbound" {
+					t.Fatalf("entry = %#v, want the unbound skip reason recorded", res.Entry)
+				}
+			})
+		}
+	})
 }

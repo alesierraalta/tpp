@@ -277,15 +277,21 @@ ones win when both are present:
 
 Keep the local state at `<config root>/state.json`; the default is `~/.config/tpp/state.json`,
 and `TPP_HOME` overrides it. It records installed hosts, components, and files. Keep it local-only.
-Classify paths as managed (installed by tpp), modified-by-the-user (never overwrite without
+Feedback reports and their private review-cursor sidecar live under the selected
+`<config-dir>/telemetry` (default `~/.claude/telemetry`); `--config-dir` selects this store, separately
+from TPP_HOME's local installation state. Classify paths as managed (installed by tpp), modified-by-the-user (never overwrite without
 `--force`; always snapshot first), or foreign (never write or delete). Store backups at
 `<config root>/backups/<timestamp>/{manifest.json, files/…}`.
 
 Opt into feedback with `tpp feature enable feedback`. Use `--preview` to see one anonymized
-record and the two local-only files never publishable. While feedback is off, `feedback --file`
-refuses and the Stop hook stops offering it. The interactive TUI now exists as `tpp tui`,
-and the lifecycle commands `update`, `uninstall`, `restore`, and `repair` are documented in the
-Commands table below.
+record and the two local-only files never publishable. While feedback is off, `tpp feedback --file`
+refuses and the Stop hook stops offering it. The first `tpp feedback --pending` establishes a baseline
+now at that exact report snapshot, so existing reports are not treated as pending. Later calls show
+appended reports and one exact snapshot token; review the full batch before acknowledging that token
+with `tpp feedback --mark-reviewed <token>`. Reports appended after that snapshot remain pending.
+`tpp feedback --summary` is all-history and cursor-neutral. The
+interactive TUI now exists as `tpp tui`, and the lifecycle commands `update`, `uninstall`, `restore`,
+and `repair` are documented in the Commands table below.
 
 ## Commands
 
@@ -298,6 +304,7 @@ Commands table below.
 | `tpp doctor [--mode <m>] [--config-dir <dir>] [--json]` | Reports installed skills (and whether they drift from the embedded version), whether the hook is wired, and which optional tools are on PATH with what degrades without each — against the selected Claude config directory, not Pi extension health. `--mode` per [Modes](#modes-setup-and-doctor-share---mode-autostandalonegentle); `--json` for machines. Exit 1 when git, a skill, or the hook is missing. |
 | `tpp status [--json]` | Reports local installation state, features, and available version — the cached result after `update` has checked, or `unknown (no update check yet)` before the first check. |
 | `tpp feature list\|enable\|disable <id> [--preview]` | Lists or toggles optional features; preview without changing state. |
+| `tpp feedback [--template | --file <path> | --summary | --pending | --mark-reviewed <token>] [--config-dir <dir>]` | Records or reads local run feedback. `--summary` is all-history and cursor-neutral. The first `--pending` call establishes a baseline now at the current snapshot; later calls print pending reports, the snapshot total, and one exact snapshot token. Review the full batch before acknowledging that token; reports appended after that snapshot remain pending. The cursor is a private sidecar under the selected feedback telemetry directory. |
 | `tpp tui` | Interactive menu over the status report, feature toggles (list, enable/disable, preview), and the sync dry-run plan. Needs an interactive terminal on Linux or macOS; elsewhere it refuses and points at `status`, `feature`, and `sync --dry-run`. |
 | `tpp update [--check]` | Checks the Go module proxy for a newer release and installs it with `go install github.com/alesierraalta/tpp/cmd/tpp@<tag>` (prints the command when `go` is absent); `--check` only refreshes the offline cache. |
 | `tpp uninstall [--dry-run] [--orphans] [--force] [--config-dir <dir>]` | Removes managed assets and unwires the Stop hook; never touches foreign files. Modified content needs `--force` (snapshot first); `--orphans` also removes assets the manifest no longer ships; `--dry-run` writes nothing. |

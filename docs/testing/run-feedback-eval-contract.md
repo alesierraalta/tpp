@@ -1,7 +1,6 @@
 # Testing, Evals, and Feedback: shared beta contract
 
-**Status: proposed agreement; not implemented.** This is the minimum shared contract before parallel Testing, Evals, and Feedback work. It distinguishes available capabilities from proposed beta
-obligations; Learning Loop is a later consumer, not part of this PR.
+**Status: proposed agreement.** This is the minimum shared contract before parallel Testing, Evals, and Feedback work. It distinguishes available capabilities from proposed beta obligations; the TPP feedback review lifecycle below is available, while Learning Loop remains a later consumer, not part of this PR.
 
 ## Milestones and scope
 
@@ -13,8 +12,7 @@ obligations; Learning Loop is a later consumer, not part of this PR.
 This document adds no framework, schema, API, hook, Pi integration, RAG, reinforcement-learning,
 or global score. It does not implement the beta flow.
 
-**Available now:** `rdd-plus feedback` template/file/summary CLI, strict parser, JSONL ledger, markdown mirror,
-and benchmark corpus/artifacts.
+**Available now:** `tpp feedback` template/file/summary/pending/mark-reviewed CLI, strict parser, JSONL ledger, private review-cursor sidecar, markdown mirror, and benchmark corpus/artifacts.
 **Proposed beta obligations:** the shared identity/readiness rule, Testing report, executor-context Feedback,
 and Evals coordination below.
 
@@ -79,16 +77,17 @@ Reuse the existing fields: `ts`, `repo`, `plan`, `skill`, `build`, `paid`, `cost
 The existing top-level CLI placement is:
 
 ```text
-rdd-plus feedback --template [--plan <path>] [--config-dir <dir>]
-rdd-plus feedback --file <path> [--plan <path>] [--config-dir <dir>]
-rdd-plus feedback --summary [--config-dir <dir>]
+tpp feedback --template [--plan <path>] [--config-dir <dir>]
+tpp feedback --file <path> [--plan <path>] [--config-dir <dir>]
+tpp feedback --summary [--config-dir <dir>]
+tpp feedback --pending [--config-dir <dir>]
+tpp feedback --mark-reviewed <token> [--config-dir <dir>]
 ```
 
 With no flags, the command uses the same readback path as `--summary`; `--template` prints only and `--file` records.
-`--template`, `--file`, `--plan`, `--config-dir`, and `--summary` are flags of the top-level
-`feedback` subcommand; this contract does not propose another placement. Reports are persisted at
-`<config-dir>/telemetry/run-feedback.jsonl` with the existing markdown mirror
-`<config-dir>/telemetry/run-feedback.md`. The parser rejects unknown keys.
+These are flags of the top-level `feedback` subcommand; the placement is `tpp feedback`, not a nested command. Reports are persisted at `<config-dir>/telemetry/run-feedback.jsonl` with the existing markdown mirror `<config-dir>/telemetry/run-feedback.md`; `--config-dir` selects that store (default `~/.claude`), independently of `TPP_HOME`, which controls TPP's local installation state. The review cursor is a private local sidecar in the same telemetry directory, not a report or external telemetry. The parser rejects unknown keys.
+
+`--summary` always reads the all-history summary and is cursor-neutral: it never initializes or moves the review cursor. On its first `--pending` invocation, TPP establishes a baseline now at the exact report snapshot: reports already present are counted but not returned for review. Later `--pending` calls return every report appended after the last acknowledged prefix, the total report count from that same snapshot, and one exact snapshot token. Review the full batch before running `tpp feedback --mark-reviewed <token>` with that exact token. The acknowledgment applies only through the token's snapshot; reports appended after that snapshot remain pending. A pending call with no new reports says so and does not offer an acknowledgment token.
 
 If storage fails, disclose the failure. Do not blindly retry when a partial write is uncertain.
 Do not load the entire history into every prompt. Later conversations read the project records with
@@ -115,7 +114,7 @@ Execution label `beta-contract-example`; project/root `/worktree/example`; base 
 persisted feedback file remains the existing shape; `freeform` links its report and candidate:
 
 ```text
-# Existing rdd-plus feedback format (all required fields are present)
+# Existing tpp feedback format (all required fields are present)
 ts: 2026-01-01T00:00:00Z
 repo: /worktree/example
 plan: docs/testing/test-plan.md

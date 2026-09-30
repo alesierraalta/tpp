@@ -46,6 +46,9 @@ func Run(cwd string, d Deps) Result {
 		return Result{Text: "not a git repository: nothing to check"}
 	}
 	planRelPath := d.PlanPath
+	// declaredRun scopes the verdict to the run the declaration selected; it stays empty when the
+	// caller named a path explicitly, and manual check keeps its legacy whole-plan reading then.
+	declaredRun := ""
 	if planRelPath != "" {
 		if err := plan.ValidatePlanPath("--path", planRelPath); err != nil {
 			return Result{Exit: 1, Text: err.Error()}
@@ -53,7 +56,7 @@ func Run(cwd string, d Deps) Result {
 		planRelPath = filepath.Clean(planRelPath)
 	} else {
 		var cfgErr error
-		planRelPath, cfgErr = plan.ResolvePath(root, d.ReadFile)
+		planRelPath, declaredRun, cfgErr = plan.Resolve(root, d.ReadFile)
 		if cfgErr != nil {
 			return Result{Exit: 1, Text: "the plan declaration could not be read: " + cfgErr.Error()}
 		}
@@ -85,7 +88,11 @@ func Run(cwd string, d Deps) Result {
 		return Result{Exit: 1, Files: files, Text: warn + changedLine(files) +
 			"\nthere is no test plan at " + planRelPath + ": run the testing discipline, or write down why this change does not warrant it"}
 	}
-	gaps, err := plan.GapsIn(body)
+	// The verdict is scoped to the declared run when one is declared: GapsForRun counts only the
+	// rows that run owns, so another run's pending rows are never this run's debt and another run's
+	// finished rows are never this run's proof of completion. With no run declared the run is empty
+	// and every row counts, the legacy whole-plan reading the manual command has always had.
+	gaps, err := plan.GapsForRun(body, declaredRun)
 	if err != nil {
 		return Result{Exit: 1, Files: files, Text: warn + changedLine(files) + "\nthe plan could not be read: " + err.Error()}
 	}
@@ -93,7 +100,11 @@ func Run(cwd string, d Deps) Result {
 		return Result{Files: files, Text: warn + changedLine(files) + "\n" + planRelPath + " owes nothing: it is a micro plan for one small function, which owes no layer sweep"}
 	}
 	if !gaps.Any() {
-		return Result{Files: files, Text: warn + changedLine(files) + "\n" + planRelPath + " owes nothing: every assigned layer was swept and every ranked target is done"}
+		owes := planRelPath + " owes nothing"
+		if declaredRun != "" {
+			owes += " for run " + declaredRun
+		}
+		return Result{Files: files, Text: warn + changedLine(files) + "\n" + owes + ": every assigned layer was swept and every ranked target is done"}
 	}
 	return Result{Exit: 1, Files: files, Text: warn + changedLine(files) + "\n" + gaps.Report()}
 }

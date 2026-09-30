@@ -313,3 +313,77 @@ func TestVersioningCaveatStaysQuietWithoutARepositoryOrAPlan(t *testing.T) {
 		})
 	}
 }
+
+// Two runs share one plan: the declaration's run decides what check reports. Another run's pending
+// rows are not this run's debt, so a settled declared run passes even while another run still owes —
+// the whole-plan reading would fail the manual check on rows it was never asked about.
+func TestCheckScopesToTheDeclaredRunAcrossTwoRuns(t *testing.T) {
+	repo := &fakeRepo{
+		root:   "/r",
+		status: porcelain(" M src/app.js"),
+		plans:  map[string]string{plan.DefaultPath: twoRunPlan},
+		config: `{"run":"run-a"}`,
+	}
+	res := Run(".", repo.deps())
+	if res.Exit != 0 {
+		t.Fatalf("exit = %d, want 0: run-a owes nothing while run-b is another run's debt:\n%s", res.Exit, res.Text)
+	}
+	if !strings.Contains(res.Text, "owes nothing") || !strings.Contains(res.Text, "for run run-a") {
+		t.Fatalf("text must say the declared run's verdict by name:\n%s", res.Text)
+	}
+	for _, otherRun := range []string{"database-persistence-testing", "2. billing"} {
+		if strings.Contains(res.Text, otherRun) {
+			t.Fatalf("text prints run-b's row %q as if it were run-a's:\n%s", otherRun, res.Text)
+		}
+	}
+}
+
+// A declared run no row carries cannot borrow the finished rows of other runs as its own proof of
+// completion: check fails closed with the scoped problem named, instead of reporting owes nothing.
+func TestCheckFailsClosedWhenTheDeclaredRunHasNoRow(t *testing.T) {
+	settledOtherRun := "## Layer matrix\n\n| Layer | Skill | Scope | Status | Run |\n|---|---|---|---|---|\n" +
+		"| Security | `appsec-adversarial-auditor` | input | done | run-b |\n\n" +
+		"## Ranked targets\n\n| Target | Verdict | Status | Run |\n|---|---|---|---|\n" +
+		"| 1. auth | probe | done | run-b |\n"
+	repo := &fakeRepo{
+		root:   "/r",
+		status: porcelain(" M src/app.js"),
+		plans:  map[string]string{plan.DefaultPath: settledOtherRun},
+		config: `{"run":"run-x"}`,
+	}
+	res := Run(".", repo.deps())
+	if res.Exit != 1 {
+		t.Fatalf("exit = %d, want 1: a run nobody opened is never an all-clear:\n%s", res.Exit, res.Text)
+	}
+	if !strings.Contains(res.Text, `run "run-x"`) {
+		t.Fatalf("text must name the missing run:\n%s", res.Text)
+	}
+	if strings.Contains(res.Text, "owes nothing") {
+		t.Fatalf("other runs' finished rows are not this run's completion:\n%s", res.Text)
+	}
+}
+
+// The manual check keeps its legacy whole-plan reading when the declaration names no run: without a
+// selected run there is no scope, and every pending row is still owed work somebody can pick up.
+func TestCheckKeepsTheWholePlanWhenNoRunIsDeclared(t *testing.T) {
+	repo := &fakeRepo{
+		root:   "/r",
+		status: porcelain(" M src/app.js"),
+		plans:  map[string]string{plan.DefaultPath: twoRunPlan},
+		config: `{"planPath":"` + plan.DefaultPath + `"}`,
+	}
+	res := Run(".", repo.deps())
+	if res.Exit != 1 {
+		t.Fatalf("exit = %d, want 1: the legacy whole-plan reading counts every pending row:\n%s", res.Exit, res.Text)
+	}
+	if !strings.Contains(res.Text, "database-persistence-testing") {
+		t.Fatalf("text = %s, want the pending row from the whole plan", res.Text)
+	}
+}
+
+const twoRunPlan = "## Layer matrix\n\n| Layer | Skill | Scope | Status | Run |\n|---|---|---|---|---|\n" +
+	"| Security | `appsec-adversarial-auditor` | input | done | run-a |\n" +
+	"| Persistence | `database-persistence-testing` | input | pending | run-b |\n\n" +
+	"## Ranked targets\n\n| Target | Verdict | Status | Run |\n|---|---|---|---|\n" +
+	"| 1. auth | probe | done | run-a |\n" +
+	"| 2. billing | probe | pending | run-b |\n"

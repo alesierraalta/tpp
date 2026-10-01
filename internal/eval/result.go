@@ -16,6 +16,7 @@ const (
 type CaseResult struct {
 	Case             string
 	Control          bool
+	Outcome          string
 	Issues           []Issue
 	IssueStates      map[string]IssueState
 	Primary          map[string]string

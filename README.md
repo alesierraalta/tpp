@@ -262,8 +262,9 @@ ones win when both are present:
   `tpp` beside it. From then on, run `tpp`.
 - `tpp sync` rewrites a Stop hook wired to `"<dir>/rdd-plus" gate` into `"<dir>/tpp" gate`, with no
   duplicate entry; `tpp uninstall` removes either.
-- The first run moves `~/.config/rdd-plus` (state, backups, update cache) to `~/.config/tpp`; if the
-  move fails, the old directory stays in use.
+- The first default-root resolution moves an existing `~/.config/tpp` or `~/.config/rdd-plus` tree
+  (state, backups, update cache) to `~/.config/tsp`, retaining both old paths as symlink aliases.
+  An existing TSP root wins; divergent legacy roots are not merged, and a failed move leaves the old root in use.
 - `.rdd-plus.json` is still read when `.tpp.json` is absent; a repository carrying both is refused
   until one is removed. tpp never renames your file.
 - `RDD_PLUS_HOME` and `RDD_PLUS_UPDATE_BASE_URL` are read when `TPP_HOME` and `TPP_UPDATE_BASE_URL`
@@ -275,8 +276,9 @@ ones win when both are present:
 
 ### State and safety
 
-Keep the local state at `<config root>/state.json`; the default is `~/.config/tpp/state.json`,
-and `TPP_HOME` overrides it. It records installed hosts, components, and files. Keep it local-only.
+Keep the local state at `<config root>/state.json`; the default is `~/.config/tsp/state.json`.
+`TSP_HOME`, then `TPP_HOME`, then `RDD_PLUS_HOME` selects an explicit root. It records installed
+hosts, components, and files. Keep it local-only.
 Feedback reports and their private review-cursor sidecar live under the selected
 `<config-dir>/telemetry` (default `~/.claude/telemetry`); `--config-dir` selects this store, separately
 from TPP_HOME's local installation state. Classify paths as managed (installed by tpp), modified-by-the-user (never overwrite without

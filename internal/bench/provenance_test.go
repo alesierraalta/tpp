@@ -97,11 +97,11 @@ func TestVerifyBenchSkillsAcceptsEmbeddedTreeAndNamesDifferences(t *testing.T) {
 		if err := writeEmbeddedSkills(config); err != nil {
 			t.Fatal(err)
 		}
-		path := filepath.Join(config, "skills", "tsp", "SKILL.md")
+		path := filepath.Join(config, "skills", "test-strategy", "SKILL.md")
 		if err := os.WriteFile(path, []byte("operator answer"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if err := VerifyBenchSkills(config); err == nil || !strings.Contains(err.Error(), "tsp/SKILL.md") {
+		if err := VerifyBenchSkills(config); err == nil || !strings.Contains(err.Error(), "test-strategy/SKILL.md") {
 			t.Fatalf("modified file error = %v, want its relative path", err)
 		}
 	})

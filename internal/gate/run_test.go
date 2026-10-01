@@ -25,7 +25,7 @@ func TestAppendEntrySealsTheIdentityFields(t *testing.T) {
 		TS:           "2026-09-15T12:00:00Z",
 		Session:      "session-literal",
 		Repo:         "repository-literal",
-		SkillsLoaded: []string{"tsp"},
+		SkillsLoaded: []string{"test-strategy"},
 		Audited:      true,
 		Fired:        false,
 		Skipped:      "skipped-literal",

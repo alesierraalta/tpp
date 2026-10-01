@@ -12,7 +12,7 @@ metadata:
 
 ## Activation Contract
 
-Load when writing or reviewing pytest tests, or when a Python suite is flaky, order-dependent, or green while a contract is broken. Owns pytest mechanics only: adversarial ladders are `exploit-testing`, pruning is `no-excess-tests`, DB semantics are `database-persistence-testing`, coverage planning is `tsp`. Do not add a coverage percentage gate.
+Load when writing or reviewing pytest tests, or when a Python suite is flaky, order-dependent, or green while a contract is broken. Owns pytest mechanics only: adversarial ladders are `exploit-testing`, pruning is `no-excess-tests`, DB semantics are `database-persistence-testing`, coverage planning is `test-strategy`. Do not add a coverage percentage gate.
 
 ## Failure-Probe Matrix
 

@@ -453,10 +453,10 @@ func gitAt(dir string, args ...string) (string, error) {
 var skillName = regexp.MustCompile(`(?m)^\s*name:\s*"?([^"\n]+?)"?\s*$`)
 var skillVersion = regexp.MustCompile(`(?m)^\s*version:\s*"?([^"\n]+?)"?\s*$`)
 
-// EmbeddedSkillIdentity reads the identity of the embedded TSP skill, so a report records
+// EmbeddedSkillIdentity reads the identity of the embedded test-strategy skill, so a report records
 // the skill that produced it and not merely the binary that wrote the row.
 func EmbeddedSkillIdentity() string {
-	data, err := fs.ReadFile(assets.Skills(), "tsp/SKILL.md")
+	data, err := fs.ReadFile(assets.Skills(), "test-strategy/SKILL.md")
 	if err != nil {
 		return "unknown"
 	}

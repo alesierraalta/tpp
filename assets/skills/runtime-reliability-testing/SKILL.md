@@ -13,7 +13,7 @@ Load to PROVE running code under operational load: saturation, capacity limits, 
 
 Fault injection (retries, timeouts, deadlines, circuit breakers, network faults, shutdown) lives in `resilience-fault-injection`.
 
-NOT for: fault injection (`resilience-fault-injection`), static unit tests (`tsp`), pruning unit test suites (`no-excess-tests`), single manual execution of a happy-path function (`real-run-validation`).
+NOT for: fault injection (`resilience-fault-injection`), static unit tests (`test-strategy`), pruning unit test suites (`no-excess-tests`), single manual execution of a happy-path function (`real-run-validation`).
 
 ## Preflight Safety Gate
 
@@ -24,7 +24,7 @@ NOT for: fault injection (`resilience-fault-injection`), static unit tests (`tsp
 
 ## Plan Contribution
 
-When invoked by `tsp` in PLAN mode: do not execute. Return target rows for the plan:
+When invoked by `test-strategy` in PLAN mode: do not execute. Return target rows for the plan:
 target (endpoint, dependency seam, journey) · check (latency SLO, soak, saturation, spike,
 contract fuzz, smoke) · target rung or depth · consequence class ·
 why. Cover every check this skill would run on this codebase, including cheap ones (smoke
@@ -38,7 +38,7 @@ journey, Schemathesis against an existing OpenAPI spec).
 4. **Assert on OBSERVED TELEMETRY, not exit codes**: database state, wire payloads, RSS/heap trends, saturation counters.
 5. **Blast radius containment**: load is scoped to test-owned ephemeral containers on isolated networks; approved exceptions keep the same bounded limits and stop contract.
 6. **Teardown is mandatory**: test-owned containers and volumes are removed even on assertion failure; never touch pre-existing resources.
-7. **Evidence**: every conclusion is `observado` (backed by metrics/logs) or `razonado`; every finding carries an executed evidence record per `~/.claude/skills/tsp/references/evidence.md`; no finding from reading alone.
+7. **Evidence**: every conclusion is `observado` (backed by metrics/logs) or `razonado`; every finding carries an executed evidence record per `~/.claude/skills/test-strategy/references/evidence.md`; no finding from reading alone.
 
 ## Decision Gates
 
@@ -71,4 +71,4 @@ Report: falsifiable invariant table (claim | bound and provenance | observed | c
 - [references/patterns.md](references/patterns.md) — coordinated omission, tail latency amplification.
 - [references/rdd-receipt.md](references/rdd-receipt.md) — receipt contract for `lens:reliability`.
 - [assets/k6-arrival-rate-template.js](assets/k6-arrival-rate-template.js) — k6 open workload script.
-- Sibling skills: `resilience-fault-injection` (fault injection, retries, breakers) · `tsp` · `docker-test-containers` · `exploit-testing` · `real-run-validation`.
+- Sibling skills: `resilience-fault-injection` (fault injection, retries, breakers) · `test-strategy` · `docker-test-containers` · `exploit-testing` · `real-run-validation`.

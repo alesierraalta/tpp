@@ -213,7 +213,7 @@ make the command exit 3.
 
 ### Skill versions in the history
 
-The history's `skill version` column records the `version` field of the installed `tsp`
+The history's `skill version` column records the `version` field of the installed `test-strategy`
 skill. Releases up to 3.4 were labelled `3.N`; the same lineage is written `0.3.N` from 2026-09-10
 onward (`3.0`…`3.4` ≡ `0.3.0`…`0.3.4`). Rows recorded under the old labels stay as they were
 written: the history is append-only, so a rename would rewrite evidence instead of adding to it.

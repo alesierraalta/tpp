@@ -4,7 +4,7 @@ Copyright 2026 Alejandro Sierra Alta
 This product includes skill definitions derived from the Gentleman-Programming skills
 (https://github.com/Gentleman-Programming), licensed under the Apache License, Version 2.0:
 
-  assets/skills/tsp
+  assets/skills/test-strategy
   assets/skills/no-excess-tests
   assets/skills/appsec-adversarial-auditor
   assets/skills/runtime-reliability-testing

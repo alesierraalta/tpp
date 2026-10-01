@@ -18,7 +18,7 @@ func fingerprintRepo(t *testing.T, files map[string]string) (string, func(path, 
 			t.Skipf("%s not available", tool)
 		}
 	}
-	script, err := fs.ReadFile(Skills(), "tsp/assets/fingerprint.sh")
+	script, err := fs.ReadFile(Skills(), "test-strategy/assets/fingerprint.sh")
 	if err != nil {
 		t.Fatal(err)
 	}

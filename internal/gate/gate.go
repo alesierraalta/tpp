@@ -11,9 +11,11 @@ import (
 	"time"
 )
 
-var Skills = []string{"tsp", "test-strategy", "exploit-testing", "no-excess-tests", "real-run-validation"}
+var Skills = []string{"test-strategy", "exploit-testing", "no-excess-tests", "real-run-validation"}
 
-var Adversarial = []string{"tsp", "exploit-testing"}
+var Adversarial = []string{"test-strategy", "exploit-testing"}
+
+var recognizedSkills = append(append([]string(nil), Skills...), "tsp")
 
 var sourceExt = map[string]bool{
 	".ts": true, ".tsx": true, ".js": true, ".jsx": true, ".mjs": true, ".cjs": true,
@@ -29,8 +31,8 @@ var excludedDirs = map[string]bool{
 }
 
 var (
-	skillCall = regexp.MustCompile(`"skill"\s*:\s*"(` + strings.Join(Skills, "|") + `)"`)
-	skillRead = regexp.MustCompile(`skills/(` + strings.Join(Skills, "|") + `)/SKILL\.md`)
+	skillCall = regexp.MustCompile(`"skill"\s*:\s*"(` + strings.Join(recognizedSkills, "|") + `)"`)
+	skillRead = regexp.MustCompile(`skills/(` + strings.Join(recognizedSkills, "|") + `)/SKILL\.md`)
 )
 
 type Input struct {
@@ -158,8 +160,8 @@ func SkillsLoaded(r io.Reader) []string {
 	found := []string{}
 	seen := map[string]bool{}
 	add := func(name string) {
-		if name == "test-strategy" {
-			name = "tsp"
+		if name == "tsp" {
+			name = "test-strategy"
 		}
 		if !seen[name] {
 			seen[name] = true

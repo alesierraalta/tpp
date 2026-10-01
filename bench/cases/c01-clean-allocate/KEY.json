@@ -1,1 +1,1 @@
-{"id":"c01-clean-allocate","language":"node","suite":"node --test","surface":"library","control":"clean","request":"the stock-allocation behaviour","defects":[]}
+{"schema":2,"id":"c01-clean-allocate","language":"node","suite":"node --test","surface":"library","control":"clean","request":"the stock-allocation behaviour","defects":[]}

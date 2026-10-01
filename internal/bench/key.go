@@ -18,20 +18,44 @@ type Trigger struct {
 	Actual   string `json:"actual"`
 }
 
+// DetectionCriteria states how a finding must be detected and proved.
+type DetectionCriteria struct {
+	Mechanism   string   `json:"mechanism"`
+	Equivalents []string `json:"equivalents"`
+	Proof       string   `json:"proof"`
+}
+
+// Reproduction describes the oracle used to reproduce a planted defect.
+type Reproduction struct {
+	Applies          bool   `json:"applies"`
+	Oracle           string `json:"oracle"`
+	Nondeterministic bool   `json:"nondeterministic"`
+	Attempts         int    `json:"attempts"`
+}
+
 // Defect is one planted defect of a case; file paths are relative to the fixture root.
 type Defect struct {
-	ID          string   `json:"id"`
-	File        string   `json:"file"`
-	Line        int      `json:"line"`
-	Class       string   `json:"class"`
-	Keywords    []string `json:"keywords"`
-	Description string   `json:"description"`
-	Trigger     Trigger  `json:"trigger"`
-	WhyMissed   string   `json:"why_missed"`
+	ID                string             `json:"id"`
+	File              string             `json:"file"`
+	Line              int                `json:"line"`
+	Class             string             `json:"class"`
+	Keywords          []string           `json:"keywords"`
+	Description       string             `json:"description"`
+	Trigger           Trigger            `json:"trigger"`
+	WhyMissed         string             `json:"why_missed"`
+	IssueType         string             `json:"issue_type,omitempty"`
+	Domain            string             `json:"domain,omitempty"`
+	Severity          string             `json:"severity,omitempty"`
+	SeverityRationale string             `json:"severity_rationale,omitempty"`
+	ExpectedBehavior  string             `json:"expected_behavior,omitempty"`
+	FailureCondition  string             `json:"failure_condition,omitempty"`
+	DetectionCriteria *DetectionCriteria `json:"detection_criteria,omitempty"`
+	Reproduction      *Reproduction      `json:"reproduction,omitempty"`
 }
 
 // Key is the sealed answer key of a case: KEY.json next to the fixture directory.
 type Key struct {
+	Schema   int    `json:"schema,omitempty"`
 	ID       string `json:"id"`
 	Language string `json:"language"`
 	Suite    string `json:"suite"`
@@ -98,6 +122,9 @@ func LoadKey(caseDir string) (Key, error) {
 // Validate rejects keys the scorer could not apply unambiguously.
 func (k Key) Validate() error {
 	var problems []string
+	if k.Schema != 0 && k.Schema != 1 && k.Schema != 2 {
+		problems = append(problems, fmt.Sprintf("schema %d is not supported", k.Schema))
+	}
 	if strings.TrimSpace(k.ID) == "" {
 		problems = append(problems, "id is empty")
 	}
@@ -128,6 +155,39 @@ func (k Key) Validate() error {
 		}
 		if len(d.Keywords) == 0 {
 			problems = append(problems, fmt.Sprintf("defect %q has no keywords", d.ID))
+		}
+		if k.Schema == 2 {
+			for _, field := range []struct{ name, value string }{
+				{"issue_type", d.IssueType}, {"domain", d.Domain}, {"severity", d.Severity},
+				{"severity_rationale", d.SeverityRationale}, {"expected_behavior", d.ExpectedBehavior},
+				{"failure_condition", d.FailureCondition},
+			} {
+				if strings.TrimSpace(field.value) == "" {
+					problems = append(problems, fmt.Sprintf("defect %q has no %s", d.ID, field.name))
+				}
+			}
+			if d.DetectionCriteria == nil {
+				problems = append(problems, fmt.Sprintf("defect %q has no detection_criteria", d.ID))
+			} else {
+				if strings.TrimSpace(d.DetectionCriteria.Mechanism) == "" {
+					problems = append(problems, fmt.Sprintf("defect %q has no detection_criteria mechanism", d.ID))
+				}
+				if strings.TrimSpace(d.DetectionCriteria.Proof) == "" {
+					problems = append(problems, fmt.Sprintf("defect %q has no detection_criteria proof", d.ID))
+				}
+			}
+			if d.Reproduction == nil {
+				problems = append(problems, fmt.Sprintf("defect %q has no reproduction", d.ID))
+			} else {
+				if d.Reproduction.Applies && d.Reproduction.Attempts < 1 {
+					problems = append(problems, fmt.Sprintf("defect %q has no positive reproduction attempts", d.ID))
+				}
+				switch d.Reproduction.Oracle {
+				case "catch", "command", "none":
+				default:
+					problems = append(problems, fmt.Sprintf("defect %q reproduction oracle %q is not catch, command, or none", d.ID, d.Reproduction.Oracle))
+				}
+			}
 		}
 	}
 	if len(problems) > 0 {

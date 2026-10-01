@@ -1,7 +1,15 @@
-{"id":"n12-path-normalize","language":"node","suite":"node --test","surface":"http",
+{"schema":2,"id":"n12-path-normalize","language":"node","suite":"node --test","surface":"http",
  "request":"the path-normalize behaviour","defects":[
   {"id":"D1","file":"src/paths.js","line":14,"class":"path-traversal","keywords":["decode","percent","traversal","order","%2e"],
    "description":"The parent-segment check runs before percent-decoding, so an encoded ../ (%2e%2e/) passes the check, is decoded, and resolves outside the root.",
    "trigger":{"input":"safeJoin('/srv/files', '%2e%2e/%2e%2e/etc/passwd')","expected":"throws PathTraversal","actual":"/etc/passwd"},
-   "why_missed":"The suite rejects a literal ../ and decodes a harmless %20; the defect is the order of two correct steps, which every individual test confirms."}
+   "why_missed":"The suite rejects a literal ../ and decodes a harmless %20; the defect is the order of two correct steps, which every individual test confirms.",
+   "issue_type":"path-traversal",
+   "domain":"security",
+   "severity":"critical",
+   "severity_rationale":"A path traversal input crosses the root boundary with the default configuration.",
+   "expected_behavior":"throws PathTraversal",
+   "failure_condition":"safeJoin('/srv/files', '%2e%2e/%2e%2e/etc/passwd') -> /etc/passwd",
+   "detection_criteria":{"mechanism":"The parent-segment check runs before percent-decoding, so an encoded ../ (%2e%2e/) passes the check, is decoded, and resolves outside the root.","equivalents":[],"proof":"Show an exploitable condition, or a concrete violation of a named security property (the input and the boundary it crosses)."},
+   "reproduction":{"applies":true,"oracle":"catch","nondeterministic":false,"attempts":1}}
  ]}

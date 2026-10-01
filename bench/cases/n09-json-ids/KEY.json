@@ -1,7 +1,15 @@
-{"id":"n09-json-ids","language":"node","suite":"node --test","surface":"etl",
+{"schema":2,"id":"n09-json-ids","language":"node","suite":"node --test","surface":"etl",
  "request":"the json-ids behaviour","defects":[
   {"id":"D1","file":"src/records.js","line":3,"class":"integer-precision","keywords":["precision","2^53","bigint","integer","collapse"],
    "description":"JSON.parse turns 64-bit ids into doubles, so ids above 2^53 lose their low bits and two consecutive upstream ids become equal, making dedupeById merge different records.",
    "trigger":{"input":"const r = parseRecords('{\"records\":[{\"id\":9007199254740993,\"name\":\"a\"},{\"id\":9007199254740992,\"name\":\"b\"}]}'); [r.map(x => x.id), dedupeById(r).length]","expected":"[9007199254740993, 9007199254740992] and 2","actual":"9007199254740992,9007199254740992 deduped: 1"},
-   "why_missed":"Suite ids are small integers that doubles represent exactly; the collapse is a property of the number range the upstream sequence reaches in production, never of a code branch."}
+   "why_missed":"Suite ids are small integers that doubles represent exactly; the collapse is a property of the number range the upstream sequence reaches in production, never of a code branch.",
+   "issue_type":"integer-precision",
+   "domain":"data",
+   "severity":"high",
+   "severity_rationale":"Distinct valid 64-bit record IDs can collapse into one record when IDs exceed JavaScript's exact integer range.",
+   "expected_behavior":"[9007199254740993, 9007199254740992] and 2",
+   "failure_condition":"const r = parseRecords('{\"records\":[{\"id\":9007199254740993,\"name\":\"a\"},{\"id\":9007199254740992,\"name\":\"b\"}]}'); [r.map(x => x.id), dedupeById(r).length] -> 9007199254740992,9007199254740992 deduped: 1",
+   "detection_criteria":{"mechanism":"JSON.parse turns 64-bit ids into doubles, so ids above 2^53 lose their low bits and two consecutive upstream ids become equal, making dedupeById merge different records.","equivalents":[],"proof":"Show the record lost, duplicated or corrupted, and the operation sequence that does it."},
+   "reproduction":{"applies":true,"oracle":"catch","nondeterministic":false,"attempts":1}}
  ]}

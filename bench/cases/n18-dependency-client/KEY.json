@@ -1,4 +1,5 @@
 {
+ "schema": 2,
  "id": "n18-dependency-client",
  "language": "node",
  "suite": "node --test",
@@ -24,7 +25,15 @@
     "expected": "the call stops by 1500 ms of clock time and returns { ok: false, error: 'deadline exceeded' } (README: every attempt and every backoff sleep together finish within deadlineMs)",
     "actual": "D1 elapsed=3300ms budget=1500ms calls=3 result={\"ok\":false,\"error\":\"timeout\"}"
    },
-   "why_missed": "The only deadline test asserts ok is false, which is also true when the call overruns its budget; no test reads the clock after a call that times out."
+   "why_missed": "The only deadline test asserts ok is false, which is also true when the call overruns its budget; no test reads the clock after a call that times out.",
+   "issue_type": "deadline-not-propagated",
+   "domain": "resilience",
+   "severity": "medium",
+   "severity_rationale": "A hanging upstream returns only after the declared deadline on a supported request, producing a visible timeout and delay.",
+   "expected_behavior": "the call stops by 1500 ms of clock time and returns { ok: false, error: 'deadline exceeded' } (README: every attempt and every backoff sleep together finish within deadlineMs)",
+   "failure_condition": "server.always('hang'); client.send('GET', '/charges', undefined, { deadlineMs: 1500 }); read clock.now() afterwards (fake clock, sleep advances it) -> D1 elapsed=3300ms budget=1500ms calls=3 result={\"ok\":false,\"error\":\"timeout\"}",
+   "detection_criteria": {"mechanism":"send never compares elapsed time with the deadline: every attempt gets the full per-attempt timeout and the retry loop only stops on the attempt count, so a call with a 1500 ms deadline against an upstream that never answers keeps retrying and backing off for 3300 ms.","equivalents":[],"proof":"Show the injected fault, the expected degradation, and the observed wrong behaviour."},
+   "reproduction": {"applies":true,"oracle":"catch","nondeterministic":false,"attempts":1}
   },
   {
    "id": "D2",
@@ -46,7 +55,15 @@
     "expected": "one charge (README: a logical POST carries one idempotency key, the same on every retry, so the service applies it at most once)",
     "actual": "D2 ok=true calls=2 charges=2"
    },
-   "why_missed": "The retry test uses a 503, which the service never processed, and the key test looks at a single attempt; no test loses a response after the charge was made, the only case where key reuse matters."
+   "why_missed": "The retry test uses a 503, which the service never processed, and the key test looks at a single attempt; no test loses a response after the charge was made, the only case where key reuse matters.",
+   "issue_type": "retry-without-idempotency-key",
+   "domain": "data",
+   "severity": "high",
+   "severity_rationale": "A charge whose successful response is lost can be applied twice when its retry uses a new idempotency key.",
+   "expected_behavior": "one charge (README: a logical POST carries one idempotency key, the same on every retry, so the service applies it at most once)",
+   "failure_condition": "server.script(['lost']); client.send('POST', '/charges', { amount: 40 }); server.charges.length -> D2 ok=true calls=2 charges=2",
+   "detection_criteria": {"mechanism":"A new idempotency key is generated on every attempt instead of once per logical POST, so when a charge is applied but its response is lost the retry carries a different key, the service cannot recognise it and the customer is charged twice.","equivalents":[],"proof":"Show the record lost, duplicated or corrupted, and the operation sequence that does it."},
+   "reproduction": {"applies":true,"oracle":"catch","nondeterministic":false,"attempts":1}
   }
  ]
 }

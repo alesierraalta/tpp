@@ -1,4 +1,5 @@
 {
+ "schema": 2,
  "id": "n17-event-consumer",
  "language": "node",
  "suite": "node --test",
@@ -24,7 +25,15 @@
     "expected": "paid is 40 (README: each event id changes the ledger at most once)",
     "actual": "paid is 80 (observed: D1 observed paid=80; assert.equal actual: 80, expected: 40)"
    },
-   "why_missed": "Every test publishes each message once and never fails an ack or restarts the broker, so the at-least-once redelivery the README describes is never exercised."
+   "why_missed": "Every test publishes each message once and never fails an ack or restarts the broker, so the at-least-once redelivery the README describes is never exercised.",
+   "issue_type": "non-idempotent-consumer",
+   "domain": "data",
+   "severity": "high",
+   "severity_rationale": "A payment redelivered after an acknowledgement failure can credit the customer twice.",
+   "expected_behavior": "paid is 40 (README: each event id changes the ledger at most once)",
+   "failure_condition": "publish payment.captured {eventId:'e1',orderId:'o1',amount:40}; broker.ack throws once ('ack timeout') during consumer.pump(); broker.restart(); consumer.drain(); consumer.getOrder('o1') -> paid is 80 (observed: D1 observed paid=80; assert.equal actual: 80, expected: 40)",
+   "detection_criteria": {"mechanism":"apply adds a payment to the order total without recording the eventId, so a message redelivered after a failed ack is applied a second time and the customer is credited twice.","equivalents":[],"proof":"Show the record lost, duplicated or corrupted, and the operation sequence that does it."},
+   "reproduction": {"applies":true,"oracle":"catch","nondeterministic":false,"attempts":1}
   },
   {
    "id": "D2",
@@ -45,7 +54,15 @@
     "expected": "{ paid: 0, status: 'shipped', version: 2 } (README: the order shows the status of the highest version)",
     "actual": "{ paid: 0, status: 'paid', version: 1 }"
    },
-   "why_missed": "The only status test publishes versions 1 and 2 in ascending order, so arrival order and version order coincide and the version field is never compared."
+   "why_missed": "The only status test publishes versions 1 and 2 in ascending order, so arrival order and version order coincide and the version field is never compared.",
+   "issue_type": "out-of-order-overwrite",
+   "domain": "data",
+   "severity": "high",
+   "severity_rationale": "An older status event delivered after a newer version can overwrite persisted order state.",
+   "expected_behavior": "{ paid: 0, status: 'shipped', version: 2 } (README: the order shows the status of the highest version)",
+   "failure_condition": "publish order.status version 2 (status 'shipped') then version 1 (status 'paid') for o1; consumer.drain(); consumer.getOrder('o1') -> { paid: 0, status: 'paid', version: 1 }",
+   "detection_criteria": {"mechanism":"apply sets the status from whichever order.status event arrives last, ignoring the version, so an older event delivered after a newer one regresses the order status.","equivalents":[],"proof":"Show the record lost, duplicated or corrupted, and the operation sequence that does it."},
+   "reproduction": {"applies":true,"oracle":"catch","nondeterministic":false,"attempts":1}
   }
  ]
 }

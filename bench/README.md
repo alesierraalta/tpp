@@ -61,6 +61,12 @@ Known limits of the overlays, verified by running every trigger against every va
    "why_missed":"one sentence: why a happy-path suite and branch coverage never reach it"}]}
 ```
 
+Schema 2 adds normalized issue type, domain, severity and rationale; expected behavior and failure
+condition; detection criteria (mechanism, accepted equivalents and domain-specific proof); and
+reproduction metadata (applies, oracle, nondeterminism and attempts). See
+[`docs/testing/harness-effectiveness-spec.md`](../docs/testing/harness-effectiveness-spec.md) sections
+2.1, 2.4, 3.3 and 11 for the field contract, severity rubric, proof obligations and taxonomy.
+
 `line` is the line of the defective statement in `file` (relative to `fixture/`). `keywords` are
 three to five lowercase words a correct finding would contain. `trigger.actual` is pasted from a
 real execution against the fixture; a defect whose trigger was never run does not belong in a key.

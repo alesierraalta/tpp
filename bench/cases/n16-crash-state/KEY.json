@@ -1,4 +1,5 @@
 {
+ "schema": 2,
  "id": "n16-crash-state",
  "language": "node",
  "suite": "node --test",
@@ -24,7 +25,15 @@
     "expected": "the save throws and loadState(f) returns {\"jobs\":{\"a\":\"done\"}} (previous state intact)",
     "actual": "save threw ENOSPC; file content is \"{\\n  \\\"jobs\\\"\"; load: SyntaxError: Expected ':' after property name in JSON at position 10 (line 2 column 9)"
    },
-   "why_missed": "The suite only saves to a healthy temp directory and reads back, so no test makes a write fail part-way or looks at the file after an interrupted save."
+   "why_missed": "The suite only saves to a healthy temp directory and reads back, so no test makes a write fail part-way or looks at the file after an interrupted save.",
+   "issue_type": "non-atomic-write",
+   "domain": "data",
+   "severity": "high",
+   "severity_rationale": "A write failure or crash during replacement can destroy previously persisted jobs under that specific failure condition.",
+   "expected_behavior": "the save throws and loadState(f) returns {\"jobs\":{\"a\":\"done\"}} (previous state intact)",
+   "failure_condition": "saveState(f,{jobs:{a:'done'}}); recordJob(f,'b','running', fs) where fs.writeSync writes the first 10 bytes then throws ENOSPC; then loadState(f) -> save threw ENOSPC; file content is \"{\\n  \\\"jobs\\\"\"; load: SyntaxError: Expected ':' after property name in JSON at position 10 (line 2 column 9)",
+   "detection_criteria": {"mechanism":"saveState opens the live state file with 'w', which truncates it, and writes in place; a write that fails or a crash part-way leaves a truncated file that loadState rejects, losing every recorded job instead of keeping the previous state.","equivalents":[],"proof":"Show the record lost, duplicated or corrupted, and the operation sequence that does it."},
+   "reproduction": {"applies":true,"oracle":"catch","nondeterministic":false,"attempts":1}
   },
   {
    "id": "D2",
@@ -45,7 +54,15 @@
     "expected": "exit code 1 (README: 1 when the state could not be saved)",
     "actual": "exit 0, stderr \"warning: could not save state: ENOSPC: no space left on device, write\\n\""
    },
-   "why_missed": "Every CLI test runs against a writable file, so the catch branch never executes and no test asserts the exit code of a failed save."
+   "why_missed": "Every CLI test runs against a writable file, so the catch branch never executes and no test asserts the exit code of a failed save.",
+   "issue_type": "swallowed-write-error",
+   "domain": "resilience",
+   "severity": "high",
+   "severity_rationale": "A failed disk write is reported as success after an I/O error, leaving state unrecorded under that failure condition.",
+   "expected_behavior": "exit code 1 (README: 1 when the state could not be saved)",
+   "failure_condition": "run(['mark','b','done'], {fs, env:{JOB_STATE_FILE:f}, err, out}) where fs.writeSync throws ENOSPC -> exit 0, stderr \"warning: could not save state: ENOSPC: no space left on device, write\\n\"",
+   "detection_criteria": {"mechanism":"The mark command catches a failed save, prints a warning and still returns 0, so a scheduler is told the job was recorded when the state file was not written.","equivalents":[],"proof":"Show the injected fault, the expected degradation, and the observed wrong behaviour."},
+   "reproduction": {"applies":true,"oracle":"catch","nondeterministic":false,"attempts":1}
   }
  ]
 }

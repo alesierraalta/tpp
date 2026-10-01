@@ -56,7 +56,7 @@ Load only on explicit invocation ("breakcheck", "romper esto", or "testing adver
 8. If a probe cannot run, mark INCONCLUSIVE or N/A with the reason; never convert inability into PASS.
 9. Write the report from `assets/readiness-report-template.md` at the path the caller names.
 10. Escalate when green: if the bounded campaign finds nothing on a high-risk candidate, hand method depth (mutation survivors, properties, concurrency, fuzzing) to `exploit-testing` instead of declaring ready; record the handoff as residual risk.
-11. Feedback on the run follows the router's feedback rule (`test-strategy`), including blocked or partial runs.
+11. Feedback on the run follows the router's feedback rule (`tsp`), including blocked or partial runs.
 
 ## Disposition Guide
 

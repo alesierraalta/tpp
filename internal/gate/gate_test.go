@@ -183,10 +183,12 @@ func TestSkillsLoaded(t *testing.T) {
 		want  []string
 	}{
 		{"listing text does not count", "- test-strategy: Trigger: haz el testing ... exploit-testing ...\n", []string{}},
-		{"a Skill tool call counts", `{"type":"tool_use","name":"Skill","input":{"skill":"test-strategy"}}` + "\n", []string{"test-strategy"}},
+		{"a canonical Skill tool call counts", `{"type":"tool_use","name":"Skill","input":{"skill":"tsp"}}` + "\n", []string{"tsp"}},
+		{"a legacy Skill tool alias canonicalizes", `{"type":"tool_use","name":"Skill","input":{"skill":"test-strategy"}}` + "\n", []string{"tsp"}},
+		{"a legacy SKILL.md path canonicalizes", `{"input":{"file_path":"/home/x/.claude/skills/test-strategy/SKILL.md"}}` + "\n", []string{"tsp"}},
 		{"a SKILL.md read counts", `{"input":{"file_path":"/home/x/.claude/skills/exploit-testing/SKILL.md"}}` + "\n", []string{"exploit-testing"}},
 		{"a sibling alone returns only that sibling", `{"input":{"file_path":"/x/.claude/skills/no-excess-tests/SKILL.md"}}` + "\n", []string{"no-excess-tests"}},
-		{"order is first seen, no duplicates", `{"skill":"exploit-testing"}` + "\n" + `{"skill":"test-strategy"}` + "\n" + `{"skill":"exploit-testing"}` + "\n", []string{"exploit-testing", "test-strategy"}},
+		{"order is first seen, no duplicates", `{"skill":"exploit-testing"}` + "\n" + `{"skill":"test-strategy"}` + "\n" + `{"skill":"exploit-testing"}` + "\n", []string{"exploit-testing", "tsp"}},
 		{"empty transcript", "", []string{}},
 	}
 	for _, tc := range cases {
@@ -243,13 +245,13 @@ func TestDecide(t *testing.T) {
 		{name: "the bound audit does not require git status", bind: true, in: Input{SessionID: "sess-decide", TranscriptPath: "t"}, repo: func() *fakeRepo {
 			r := base()
 			r.statusErr = errors.New("boom")
-			r.transcript = stamped(start, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
+			r.transcript = stamped(start, `{"name":"Skill","input":{"skill":"tsp"}}`)
 			r.plan = "## Layer matrix\n\n| Layer | Skill | Scope | Status | Run |\n|---|---|---|---|---|\n" +
 				"| Security | `appsec-adversarial-auditor` | input | pending | run-t1 |\n\n" +
 				"## Ranked targets\n\n| Target | Verdict | Status | Run |\n|---|---|---|---|---|\n" +
 				"| 1. auth | probe | pending | run-t1 |\n"
 			return r
-		}, audit: true, loaded: []string{"test-strategy"}, wantPlan: plan.DefaultPath},
+		}, audit: true, loaded: []string{"tsp"}, wantPlan: plan.DefaultPath},
 		{name: "opt-out at the root silences a cwd in a subdirectory before any binding is read", in: Input{TranscriptPath: "t", Cwd: root + "/sub/dir"}, repo: func() *fakeRepo { r := base(); r.optOut = true; return r }, optOut: true},
 		{name: "a bound stop whose transcript cannot be read audits nothing", bind: true, in: Input{SessionID: "sess-decide", TranscriptPath: "t"}, repo: func() *fakeRepo {
 			r := base()
@@ -361,7 +363,7 @@ func TestStopGateDoesNotAttributeAnotherSessionsEditsToThisStop(t *testing.T) {
 	t.Run("A is bound and invoked the skill: only A's run is audited", func(t *testing.T) {
 		setBinding(t, "sess-a", root, plan.DefaultPath, "run-a")
 		repo := repoWithBothSessions()
-		repo.transcript = stamped(started, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
+		repo.transcript = stamped(started, `{"name":"Skill","input":{"skill":"tsp"}}`)
 		repo.plan = twoRunPlan
 		res := Decide(Input{SessionID: "sess-a", TranscriptPath: "t"}, repo.deps(now))
 		if res.Fire {

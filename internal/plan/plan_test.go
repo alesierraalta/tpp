@@ -764,8 +764,8 @@ func TestCheckNamesTheLineOfTheLedgerRowItBlames(t *testing.T) {
 func TestCheckAcceptsTheShippedPlans(t *testing.T) {
 	files := []string{
 		filepath.Join("..", "..", "docs", "testing", "test-plan.md"),
-		filepath.Join("..", "..", "assets", "skills", "test-strategy", "evals", "fixtures", "plans", "clean.md"),
-		filepath.Join("..", "..", "assets", "skills", "test-strategy", "evals", "fixtures", "plans", "rejected.md"),
+		filepath.Join("..", "..", "assets", "skills", "tsp", "evals", "fixtures", "plans", "clean.md"),
+		filepath.Join("..", "..", "assets", "skills", "tsp", "evals", "fixtures", "plans", "rejected.md"),
 		filepath.Join("..", "..", "assets", "skills", MicroTemplatePath),
 	}
 	for _, f := range files {
@@ -1534,8 +1534,8 @@ func TestCheckAcceptsASubheadingThatOpensItsOwnTable(t *testing.T) {
 func TestCheckAcceptsTheShippedPlansWithAFencedExample(t *testing.T) {
 	files := []string{
 		filepath.Join("..", "..", "docs", "testing", "test-plan.md"),
-		filepath.Join("..", "..", "assets", "skills", "test-strategy", "evals", "fixtures", "plans", "clean.md"),
-		filepath.Join("..", "..", "assets", "skills", "test-strategy", "evals", "fixtures", "plans", "rejected.md"),
+		filepath.Join("..", "..", "assets", "skills", "tsp", "evals", "fixtures", "plans", "clean.md"),
+		filepath.Join("..", "..", "assets", "skills", "tsp", "evals", "fixtures", "plans", "rejected.md"),
 	}
 	for _, f := range files {
 		t.Run(filepath.Base(f), func(t *testing.T) {

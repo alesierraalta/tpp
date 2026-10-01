@@ -22,7 +22,7 @@ The reporter's own summary is never that metric.
    install dependencies, and confirm the existing suite is green there.
 2. **Pick files.** Take the source files cited by the top ranked rows of `docs/testing/test-plan.md`
    (or the diff's blast radius when calibrating a change). Three to five files.
-3. **Seed.** `python3 ~/.claude/skills/test-strategy/assets/seed-mutants.py --root <worktree>
+3. **Seed.** `python3 ~/.claude/skills/tsp/assets/seed-mutants.py --root <worktree>
    --files <paths...> --count 5 --key-out <scratchpad>/calib-<date>-key.json --seed <n>`.
    Record the printed key path and sha256. Do not open the key.
 3b. **Comparing skill versions**: replay the previous run's key with `seed-mutants.py --root <new worktree> --files <same files> --replay <key.json>` so both versions face the identical mutants; a fresh seed measures the skill on new ground, a replay measures the delta.

@@ -29,7 +29,7 @@ var mutants = []mutant{
 	{"M02 ignore the opt-out file", gateFile, "fire := len(files) > 0 && !entry.OptedOut && !isAdversarial(entry.SkillsLoaded)", "fire := len(files) > 0 && !isAdversarial(entry.SkillsLoaded)"},
 	{"M03 ignore whether an adversarial skill was loaded", gateFile, "fire := len(files) > 0 && !entry.OptedOut && !isAdversarial(entry.SkillsLoaded)", "fire := len(files) > 0 && !entry.OptedOut"},
 	{"M04 fire even with zero changed files", gateFile, "fire := len(files) > 0 && !entry.OptedOut && !isAdversarial(entry.SkillsLoaded)", "fire := len(files) >= 0 && !entry.OptedOut && !isAdversarial(entry.SkillsLoaded)"},
-	{"M05 a non-adversarial sibling silences the gate", gateFile, `var Adversarial = []string{"test-strategy", "exploit-testing"}`, `var Adversarial = []string{"test-strategy", "exploit-testing", "no-excess-tests"}`},
+	{"M05 a non-adversarial sibling silences the gate", gateFile, `var Adversarial = []string{"tsp", "exploit-testing"}`, `var Adversarial = []string{"tsp", "exploit-testing", "no-excess-tests"}`},
 	{"M06 session start ignores the transcript and uses now", gateFile, "since = SessionStart(rc, d.Now)", "since = d.Now"},
 	{"M07 mtime boundary: strictly after instead of at-or-after", gateFile, "if !info.ModTime().Before(since) {", "if info.ModTime().After(since) {"},
 	{"M08 entry-cap boundary off by one", gateFile, "if len(entries) > MaxStatusEntries {", "if len(entries) >= MaxStatusEntries {"},

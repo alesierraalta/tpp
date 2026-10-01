@@ -93,4 +93,4 @@ useful verdict.
 - [references/fakery.md](references/fakery.md) — stubs, error masking, disconnected knobs.
 - [references/clones-and-claims.md](references/clones-and-claims.md) — divergent copies, false names and docs.
 - [assets/theater-audit-template.md](assets/theater-audit-template.md) — audit artifact.
-- Siblings: `~/.claude/skills/test-strategy/SKILL.md` (the router) · `exploit-testing` (hunts reds) · `silent-degradation` (green that lies) · `dependency-legitimacy` (is the dependency real).
+- Siblings: `~/.claude/skills/tsp/SKILL.md` (the router) · `exploit-testing` (hunts reds) · `silent-degradation` (green that lies) · `dependency-legitimacy` (is the dependency real).

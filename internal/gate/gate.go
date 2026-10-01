@@ -11,9 +11,9 @@ import (
 	"time"
 )
 
-var Skills = []string{"test-strategy", "exploit-testing", "no-excess-tests", "real-run-validation"}
+var Skills = []string{"tsp", "test-strategy", "exploit-testing", "no-excess-tests", "real-run-validation"}
 
-var Adversarial = []string{"test-strategy", "exploit-testing"}
+var Adversarial = []string{"tsp", "exploit-testing"}
 
 var sourceExt = map[string]bool{
 	".ts": true, ".tsx": true, ".js": true, ".jsx": true, ".mjs": true, ".cjs": true,
@@ -158,6 +158,9 @@ func SkillsLoaded(r io.Reader) []string {
 	found := []string{}
 	seen := map[string]bool{}
 	add := func(name string) {
+		if name == "test-strategy" {
+			name = "tsp"
+		}
 		if !seen[name] {
 			seen[name] = true
 			found = append(found, name)

@@ -43,12 +43,12 @@ test-only, or is pure logic whose unit test already exercises the real artifact.
 - State plainly what was validated vs what was NOT reachable this way.
 - Never invent output. If you cannot run it, say so and stop.
 - Evidence: every finding carries an executed evidence record per
-  `~/.claude/skills/test-strategy/references/evidence.md`; no finding from reading alone.
+  `~/.claude/skills/tsp/references/evidence.md`; no finding from reading alone.
 - Put throwaway drivers in a scratchpad/temp dir, never in the repo diff. Remove them only after previewing the exact owned path and explicitly confirming destructive deletion; retain rollback/inspection artifacts when required and report skipped ambiguous items.
 
 ## Plan Contribution
 
-When invoked by `test-strategy` in PLAN mode: do not execute. Return target rows for the plan:
+When invoked by `tsp` in PLAN mode: do not execute. Return target rows for the plan:
 target (journey or runtime surface) · check (real-artifact drive: happy path plus one failure
 path) · target depth · consequence class · why. Cover the two or three journeys the business
 cannot lose and every runtime surface the change touches.

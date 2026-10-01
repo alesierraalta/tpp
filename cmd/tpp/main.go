@@ -1355,7 +1355,7 @@ func runBenchRun(args []string) int {
 	if *out == "" {
 		*out = filepath.Join(*benchDir, "results", bench.Stamp(time.Now()))
 	}
-	cfgDir, skillFile := *agentConfig, filepath.Join(defaultConfigDir(), "skills", "test-strategy", "SKILL.md")
+	cfgDir, skillFile := *agentConfig, filepath.Join(defaultConfigDir(), "skills", "tsp", "SKILL.md")
 	switch {
 	case *runner == bench.RunnerPi && (cfgDir == "" || cfgDir == "bench"):
 		// A Pi run always gets a throwaway config: the runner exists so a reading is not shaped by
@@ -1389,7 +1389,7 @@ func runBenchRun(args []string) int {
 		}
 	}
 	if cfgDir != "" {
-		skillFile = filepath.Join(cfgDir, "skills", "test-strategy", "SKILL.md")
+		skillFile = filepath.Join(cfgDir, "skills", "tsp", "SKILL.md")
 	}
 	_, code := bench.Run(bench.Options{
 		CasesGlob: *cases, Model: *model, Runner: *runner, Runs: *runs, MaxTurns: *maxTurns,

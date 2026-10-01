@@ -19,7 +19,7 @@ func validText() string {
 		"ts: 2026-09-10T12:00:00Z\n" +
 		"repo: /repo\n" +
 		"plan: docs/testing/test-plan.md\n" +
-		"skill: test-strategy 0.3.9\n" +
+		"skill: tsp 0.3.9\n" +
 		"build: 0.3.6 (abc1234)\n" +
 		"paid: the plan made me write the row first\n" +
 		"cost: two hours\n" +
@@ -37,7 +37,7 @@ func TestParseReadsTheTemplateShape(t *testing.T) {
 	if r.TS != "2026-09-10T12:00:00Z" || r.Repo != "/repo" || r.Plan != "docs/testing/test-plan.md" {
 		t.Fatalf("identity mangled: %+v", r)
 	}
-	if r.Skill != "test-strategy 0.3.9" || r.Build != "0.3.6 (abc1234)" {
+	if r.Skill != "tsp 0.3.9" || r.Build != "0.3.6 (abc1234)" {
 		t.Fatalf("build identity mangled: %+v", r)
 	}
 	if r.Paid != "the plan made me write the row first" || r.Cost != "two hours" {
@@ -58,14 +58,15 @@ func TestParseValidatesSkillIdentityShape(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "breakcheck version", skill: "breakcheck 0.1.0"},
-		{name: "test strategy version", skill: "test-strategy 0.3.9"},
+		{name: "canonical TSP version", skill: "tsp 0.3.9"},
+		{name: "legacy skill identity remains valid", skill: "test-strategy 0.3.9"},
 		{name: "bare name", skill: "breakcheck"},
 		{name: "bare version", skill: "0.3.9", wantErr: true},
 		{name: "free prose", skill: "bounded campaign, five probes", wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			text := strings.Replace(validText(), "skill: test-strategy 0.3.9", "skill: "+tt.skill, 1)
+			text := strings.Replace(validText(), "skill: tsp 0.3.9", "skill: "+tt.skill, 1)
 			_, err := Parse(text)
 			if tt.wantErr {
 				if err == nil {
@@ -138,8 +139,8 @@ func TestParseRefusesAVerdictOutsideTheThree(t *testing.T) {
 }
 
 func TestTemplateFillsTheIdentityAndNamesTheSubmitCommand(t *testing.T) {
-	got := Template(Report{TS: "t", Repo: "/repo", Plan: "/plan", Skill: "test-strategy 0.3.9", Build: "0.3.6 (abc)"})
-	for _, want := range []string{"ts: t", "repo: /repo", "plan: /plan", "skill: test-strategy 0.3.9", "build: 0.3.6 (abc)"} {
+	got := Template(Report{TS: "t", Repo: "/repo", Plan: "/plan", Skill: "tsp 0.3.9", Build: "0.3.6 (abc)"})
+	for _, want := range []string{"ts: t", "repo: /repo", "plan: /plan", "skill: tsp 0.3.9", "build: 0.3.6 (abc)"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("template missing %q:\n%s", want, got)
 		}
@@ -646,8 +647,8 @@ func TestSummaryOnAMissingLedgerSaysSo(t *testing.T) {
 }
 
 func TestEmbeddedSkillIdentityNamesTheEmbeddedSkill(t *testing.T) {
-	if got := EmbeddedSkillIdentity(); got != "test-strategy 0.4.1" {
-		t.Fatalf("embedded skill identity = %q, want %q", got, "test-strategy 0.4.1")
+	if got := EmbeddedSkillIdentity(); got != "tsp 0.4.1" {
+		t.Fatalf("embedded skill identity = %q, want %q", got, "tsp 0.4.1")
 	}
 }
 

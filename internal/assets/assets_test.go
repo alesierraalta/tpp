@@ -13,7 +13,7 @@ var expected = []string{
 	"agent-eval", "appsec-adversarial-auditor", "breakcheck", "clean-architecture-audit", "contract-compat-testing", "crash-and-process-testing", "database-persistence-testing",
 	"dependency-legitimacy", "docker-test-containers", "exploit-testing", "go-testing", "iac-safe-auditor", "implementation-theater",
 	"llm-eval-design", "llm-redteam", "messaging-eventdriven-testing", "no-excess-tests", "python-testing-patterns", "rag-audit-evaluator", "real-run-validation", "resilience-fault-injection", "runtime-reliability-testing", "silent-degradation",
-	"test-strategy",
+	"tsp",
 }
 
 func TestEverySkillIsEmbeddedWithAMatchingName(t *testing.T) {
@@ -39,23 +39,38 @@ func TestEverySkillIsEmbeddedWithAMatchingName(t *testing.T) {
 	}
 }
 
+func TestTSPDescriptionHasTheExactTriggerAliases(t *testing.T) {
+	data, err := fs.ReadFile(Skills(), "tsp/SKILL.md")
+	if err != nil {
+		t.Fatalf("SKILL.md missing: %v", err)
+	}
+	description := regexp.MustCompile(`(?m)^description:\s*"?([^"\n]+?)"?\s*$`).FindSubmatch(data)
+	if description == nil {
+		t.Fatal("tsp frontmatter has no single-line description")
+	}
+	const want = "Trigger: haz test stragety, haz test strategy, test-strategy, haz el testing"
+	if got := string(description[1]); got != want {
+		t.Fatalf("tsp description = %q, want %q", got, want)
+	}
+}
+
 // The skill tells a session which binary it was written for; the two versions must move together,
 // or a session cannot tell whether the tool it has is the tool the skill expects.
 func TestSkillNamesTheTppVersionItRequires(t *testing.T) {
-	data, err := fs.ReadFile(Skills(), "test-strategy/SKILL.md")
+	data, err := fs.ReadFile(Skills(), "tsp/SKILL.md")
 	if err != nil {
 		t.Fatalf("SKILL.md missing: %v", err)
 	}
 	field := requiredVersion(data)
 	if field == nil {
-		t.Fatalf("test-strategy frontmatter has no requires_tpp; this build is %s", buildinfo.Version)
+		t.Fatalf("tsp frontmatter has no requires_tpp; this build is %s", buildinfo.Version)
 	}
 	if got := string(field[1]); got != buildinfo.Version {
-		t.Fatalf("test-strategy requires tpp %s, but this build is %s", got, buildinfo.Version)
+		t.Fatalf("tsp requires tpp %s, but this build is %s", got, buildinfo.Version)
 	}
 	if !strings.Contains(string(data), "make build") ||
 		!strings.Contains(string(data), "go install github.com/alesierraalta/tpp/cmd/tpp@latest") {
-		t.Fatalf("test-strategy requires tpp %s but names no install path", buildinfo.Version)
+		t.Fatalf("tsp requires tpp %s but names no install path", buildinfo.Version)
 	}
 }
 
@@ -91,8 +106,8 @@ func TestNoRunArtifactsAreEmbedded(t *testing.T) {
 // skipped one. The mitigation is disclosure, and this skill is what tells the session to write it: the routing
 // ledger entry for an invoked sibling has to say which mode it ran in. This pins that rule, because its removal
 // is what puts the plan back to reporting coverage nobody can check.
-func TestStrategySkillRequiresTheInvocationModeInTheRoutingLedger(t *testing.T) {
-	data, err := fs.ReadFile(Skills(), "test-strategy/SKILL.md")
+func TestTSPSkillRequiresTheInvocationModeInTheRoutingLedger(t *testing.T) {
+	data, err := fs.ReadFile(Skills(), "tsp/SKILL.md")
 	if err != nil {
 		t.Fatalf("SKILL.md missing: %v", err)
 	}
@@ -103,7 +118,7 @@ func TestStrategySkillRequiresTheInvocationModeInTheRoutingLedger(t *testing.T) 
 		{"`skipped`", "the other entry the same ledger rule has to carry"},
 	} {
 		if !strings.Contains(text, want.phrase) {
-			t.Errorf("test-strategy no longer names %s: %s", want.phrase, want.contract)
+			t.Errorf("tsp no longer names %s: %s", want.phrase, want.contract)
 		}
 	}
 }

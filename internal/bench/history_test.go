@@ -156,7 +156,7 @@ func TestHistoryAppendsAdjudicatedMetricsInDeclaredOrder(t *testing.T) {
 func TestSkillVersion(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "SKILL.md")
-	if err := os.WriteFile(f, []byte("---\nname: test-strategy\nmetadata:\n  author: x\n  version: \"0.3.0\"\n---\n"), 0o644); err != nil {
+	if err := os.WriteFile(f, []byte("---\nname: tsp\nmetadata:\n  author: x\n  version: \"0.3.0\"\n---\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if got := SkillVersion(f); got != "0.3.0" {

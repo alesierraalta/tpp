@@ -49,7 +49,7 @@ func TestStopGateBindsEachSessionToItsOwnPlanInOneWorktree(t *testing.T) {
 		root:       "/repo",
 		status:     porcelain(" M src/app.js"),
 		files:      map[string]time.Time{"src/app.js": auditNow},
-		transcript: stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`),
+		transcript: stamped(auditStart, `{"name":"Skill","input":{"skill":"tsp"}}`),
 		plans: map[string]string{
 			"docs/testing/plan-a.md": owed,
 			"docs/testing/plan-b.md": swept,
@@ -103,7 +103,7 @@ func TestStopGateStaysSilentWithoutAnExactBinding(t *testing.T) {
 		root:       "/repo",
 		status:     porcelain(" M src/app.js"),
 		files:      map[string]time.Time{"src/app.js": auditNow},
-		transcript: stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`),
+		transcript: stamped(auditStart, `{"name":"Skill","input":{"skill":"tsp"}}`),
 		plan:       owed,
 	}
 	cases := []struct {
@@ -198,7 +198,7 @@ func TestStoredBindingsGiveEachSessionItsOwnPlanAndRun(t *testing.T) {
 	t.Setenv(BindingEnv, "")
 	repo := &fakeRepo{
 		root:       "/repo",
-		transcript: stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`),
+		transcript: stamped(auditStart, `{"name":"Skill","input":{"skill":"tsp"}}`),
 		plans:      map[string]string{"docs/testing/plan-a.md": owedRuns, "docs/testing/plan-b.md": sweptRuns},
 	}
 	dir := t.TempDir()
@@ -236,7 +236,7 @@ func TestStoredBindingsGiveEachSessionItsOwnPlanAndRun(t *testing.T) {
 func TestStopGateFailsClosedWhenEnvAndStoredBindingDisagree(t *testing.T) {
 	repo := &fakeRepo{
 		root:       "/repo",
-		transcript: stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`),
+		transcript: stamped(auditStart, `{"name":"Skill","input":{"skill":"tsp"}}`),
 		plans:      map[string]string{"docs/testing/plan-a.md": owedRuns, "docs/testing/plan-b.md": sweptRuns},
 	}
 	dir := t.TempDir()
@@ -280,7 +280,7 @@ func TestStopGateReadsNoBindingFromFileContentThatIsNotExact(t *testing.T) {
 	t.Setenv(BindingEnv, "")
 	repo := &fakeRepo{
 		root:       "/repo",
-		transcript: stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`),
+		transcript: stamped(auditStart, `{"name":"Skill","input":{"skill":"tsp"}}`),
 		plan:       owedRuns,
 	}
 	dir := t.TempDir()
@@ -449,7 +449,7 @@ func TestConcurrentSetBindingKeepsEachSessionSeparate(t *testing.T) {
 	t.Setenv(BindingEnv, "")
 	repo := &fakeRepo{
 		root:       "/repo",
-		transcript: stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`),
+		transcript: stamped(auditStart, `{"name":"Skill","input":{"skill":"tsp"}}`),
 		plans:      map[string]string{"docs/testing/plan-a.md": owedRuns, "docs/testing/plan-b.md": sweptRuns},
 	}
 	dir := t.TempDir()

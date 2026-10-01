@@ -511,7 +511,7 @@ func TestFeedbackCLIRequiresOptInThenRecords(t *testing.T) {
 	body := "ts: 2026-09-10T12:00:00Z\n" +
 		"repo: " + configDir + "\n" +
 		"plan: docs/testing/test-plan.md\n" +
-		"skill: test-strategy 0.3.6\n" +
+		"skill: tsp 0.3.6\n" +
 		"build: test\n" +
 		"paid: it found the defect\n" +
 		"cost: one hour\n" +
@@ -630,7 +630,7 @@ func TestFeedbackCLI(t *testing.T) {
 	body := "ts: 2026-09-10T12:00:00Z\n" +
 		"repo: " + dir + "\n" +
 		"plan: docs/testing/test-plan.md\n" +
-		"skill: test-strategy 0.3.11\n" +
+		"skill: tsp 0.3.11\n" +
 		"build: test\n" +
 		"paid: it found the defect\n" +
 		"cost: one hour\n" +
@@ -737,7 +737,7 @@ func TestFeedbackPendingCLIReviewLifecycle(t *testing.T) {
 	fixture := func(id string) reportFixture {
 		return reportFixture{
 			ts: "2026-09-10T12:00:00Z", repo: "/work/repo-" + id, plan: "docs/testing/" + id + ".md",
-			skill: "test-strategy 0.3.11", build: "build-" + id, paid: "paid-" + id,
+			skill: "tsp 0.3.11", build: "build-" + id, paid: "paid-" + id,
 			cost: "cost-" + id, reason: "reason-" + id, verdict: "paid",
 			guess: "guess-" + id, freeform: "freeform-" + id,
 		}
@@ -898,7 +898,7 @@ func TestFeedbackCLISanitizesPersistedSecretsAndFailsClosed(t *testing.T) {
 	body := "ts: 2026-09-10T12:00:00Z\n" +
 		"repo: " + rawRepo + "\n" +
 		"plan: docs/testing/test-plan.md\n" +
-		"skill: test-strategy 0.3.6\n" +
+		"skill: tsp 0.3.6\n" +
 		"build: test\n" +
 		"paid: it found the defect\n" +
 		"cost: one hour\n" +
@@ -1641,7 +1641,7 @@ func TestSyncConfigDirCreatesMissingClaudeTarget(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("sync --config-dir with a missing target exit = %d\n%s", code, out)
 	}
-	if _, err := os.Stat(filepath.Join(custom, "skills", "test-strategy", "SKILL.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(custom, "skills", "tsp", "SKILL.md")); err != nil {
 		t.Fatalf("missing Claude target did not receive skills: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(custom, "settings.json")); err != nil {
@@ -1796,7 +1796,7 @@ func TestSyncForceReplacesAModifiedFileWithABackup(t *testing.T) {
 	home := os.Getenv("TPP_HOME")
 	bin := buildCLI(t)
 	configDir := t.TempDir()
-	skillPath := filepath.Join(configDir, "skills", "test-strategy", "SKILL.md")
+	skillPath := filepath.Join(configDir, "skills", "tsp", "SKILL.md")
 
 	out, code := runCLI(t, bin, "sync", "--config-dir", configDir)
 	if code != 0 {
@@ -2094,7 +2094,7 @@ func TestSetupInstallsVerifiesAndSaysItIsWorking(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("setup on a machine with Claude Code exit = %d, want 0\n%s", code, out)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".claude", "skills", "test-strategy", "SKILL.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(home, ".claude", "skills", "tsp", "SKILL.md")); err != nil {
 		t.Fatalf("setup did not install the skills: %v\n%s", err, out)
 	}
 	settings, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))

@@ -14,14 +14,14 @@ Apply when writing tests or deciding what test code gets pushed. Author-time com
 ## Hard Rules
 
 - For each kept test, name the distinct production behavior, contract, or regression it protects and the falsifiable oracle. Do not require a specific production line; no unique behavior or oracle -> CUT candidate.
-- Coverage of BEHAVIOR, not count: derive equivalence classes from the contract and its consequence, never from the branches of the current implementation (`~/.claude/skills/test-strategy/references/altitude.md`). Keep one representative case per class, plus each boundary of the contract. Extra cases in the same class are redundant; a second case with an independent oracle is not.
+- Coverage of BEHAVIOR, not count: derive equivalence classes from the contract and its consequence, never from the branches of the current implementation (`~/.claude/skills/tsp/references/altitude.md`). Keep one representative case per class, plus each boundary of the contract. Extra cases in the same class are redundant; a second case with an independent oracle is not.
 - One test per independent oracle, not one per behavior. Never prune a test whose oracle differs from the surviving one (for example a round trip and a spec example on the same function).
 - A kept test must fail under a mutation of the behavior it guards. Run or reason through one concrete mutation (invert a condition, drop a call, change a boundary). A test that cannot go red is vacuous (for example an assertion that holds for any output): repair it until it can, or cut it. Redundant (another test already fails) is a different verdict from vacuous (nothing fails); report which.
 - A flaky test is untrustworthy evidence, not merely excess: quarantine it, report it as flaky, and never count it toward a confirming result until a deterministic repro exists.
-- Characterization tests (pin current behavior during a refactor) are kept, labeled as characterization, and never counted as confirming correctness (oracle ladder: `~/.claude/skills/test-strategy/SKILL.md` rule 2).
+- Characterization tests (pin current behavior during a refactor) are kept, labeled as characterization, and never counted as confirming correctness (oracle ladder: `~/.claude/skills/tsp/SKILL.md` rule 2).
 - Tests that pin the API surface of a published library (exported names, signatures consumers import) protect a contract and are not structure-pinning; keep them.
 - Markered live-infra/real-LLM tests only behind a marker (`llm_eval`/`memory_eval`); unmarkered live tests do not belong in the suite.
-- Comments in promoted tests follow `~/.claude/skills/test-strategy/references/comments.md`: one-line intent only, the characterization label, and the ledger id; restating or stale comments are cut at promotion.
+- Comments in promoted tests follow `~/.claude/skills/tsp/references/comments.md`: one-line intent only, the characterization label, and the ledger id; restating or stale comments are cut at promotion.
 
 ## Default Action: route, don't delete
 

@@ -73,7 +73,7 @@ func TestDecideAsksTheSecondQuestionWhenTheDisciplineRanAndStoppedHalfway(t *tes
 		"| Critical e2e journeys | `real-run-validation` | checkout | done | run-a |\n\n" +
 		"## Ranked targets\n\n| Target | Verdict | Status | Run |\n|---|---|---|---|\n| 1. token refresh | probe | done | run-a |\n"
 	swept := strings.Replace(planned, "| untrusted input | pending | run-a |", "| untrusted input | done | run-a |", 1)
-	invoked := stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
+	invoked := stamped(auditStart, `{"name":"Skill","input":{"skill":"tsp"}}`)
 	cases := []struct {
 		name       string
 		transcript string
@@ -137,7 +137,7 @@ func TestDecideAuditsTheDeclaredPlanNotTheDefault(t *testing.T) {
 	owed := strings.Replace(complete, "| Security | `appsec-adversarial-auditor` | input | done |", "| Security | `appsec-adversarial-auditor` | input | pending |", 1)
 	owed = strings.Replace(owed, "| 1. auth | probe | done |", "| 1. auth | probe | pending |", 1)
 	repo := auditRepo()
-	repo.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
+	repo.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"tsp"}}`)
 	// The declaration points at the default while the binding points at the declared plan, so a
 	// gate that still read the worktree-wide declaration audits the wrong file and fails here.
 	repo.planConfig = `{"planPath":"` + plan.DefaultPath + `"}`
@@ -159,7 +159,7 @@ func TestDecideAuditsTheDeclaredPlanNotTheDefault(t *testing.T) {
 func TestDecideLogsThePlanItRead(t *testing.T) {
 	const declared = "docs/testing/scoped-plan.md"
 	repo := auditRepo()
-	repo.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
+	repo.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"tsp"}}`)
 	repo.planPath = declared
 	setBinding(t, "sess-audit", "/repo", declared, "run-a")
 	repo.plan = "## Layer matrix\n\n| Layer | Skill | Scope | Status | Run |\n|---|---|---|---|---|\n| Security | `appsec-adversarial-auditor` | input | done | run-a |\n\n## Ranked targets\n\n| Target | Verdict | Status | Run |\n|---|---|---|---|\n| 1. auth | probe | done | run-a |\n"
@@ -174,7 +174,7 @@ func TestDecideLogsThePlanItRead(t *testing.T) {
 // neither silence the audit nor redirect it: the binding is the only plan input the Stop has.
 func TestDecideIgnoresABrokenDeclarationWhenBound(t *testing.T) {
 	repo := auditRepo()
-	repo.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
+	repo.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"tsp"}}`)
 	repo.planConfig = `{`
 	repo.plan = "## Layer matrix\n\n| Layer | Skill | Scope | Status |\n|---|---|---|---|\n| Security | `appsec-adversarial-auditor` | input | pending |\n\n## Ranked targets\n\n| Target | Verdict | Status |\n|---|---|---|---|\n| 1. auth | probe | pending |\n"
 
@@ -298,7 +298,7 @@ func TestDecideCarriesTheOwedCountsIntoTheAudit(t *testing.T) {
 		"| 1. token refresh | probe | pending | run-a |\n" +
 		"| 2. slug rendering | probe | pending | run-a |\n"
 	r := auditRepo()
-	r.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
+	r.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"tsp"}}`)
 	r.plan = planned
 	setBinding(t, "sess-audit", "/repo", plan.DefaultPath, "run-a")
 	res := Decide(Input{SessionID: "sess-audit", TranscriptPath: "t"}, r.deps(auditNow))
@@ -330,7 +330,7 @@ func TestDecideAuditLineNamesPendingTargetsWhenNoLayerIsOwed(t *testing.T) {
 		"## Ranked targets\n\n| Target | Verdict | Status | Run |\n|---|---|---|---|\n" +
 		"| 1. token refresh | probe | pending | run-a |\n"
 	r := auditRepo()
-	r.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
+	r.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"tsp"}}`)
 	r.plan = planned
 	setBinding(t, "sess-audit", "/repo", plan.DefaultPath, "run-a")
 	res := Decide(Input{SessionID: "sess-audit", TranscriptPath: "t"}, r.deps(auditNow))
@@ -354,7 +354,7 @@ func TestDecideCarriesZeroCountsForAFinishedPlan(t *testing.T) {
 		"## Ranked targets\n\n| Target | Verdict | Status | Run |\n|---|---|---|---|\n" +
 		"| 1. token refresh | probe | done | run-a |\n"
 	r := auditRepo()
-	r.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
+	r.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"tsp"}}`)
 	r.plan = planned
 	setBinding(t, "sess-audit", "/repo", plan.DefaultPath, "run-a")
 	res := Decide(Input{SessionID: "sess-audit", TranscriptPath: "t"}, r.deps(auditNow))
@@ -371,7 +371,7 @@ func TestDecideCarriesZeroCountsForAFinishedPlan(t *testing.T) {
 // operator the plan owes nothing.
 func TestDecideNamesWhatItCouldNotReadOrPlan(t *testing.T) {
 	r := auditRepo()
-	r.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
+	r.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"tsp"}}`)
 	r.plan = "## Layer matrix\n\n| Layer | Skill | Scope | Status |\n|---|---|---|---|\n| Security | `appsec-adversarial-auditor` | x | done |\na sentence that closes the table\n| Persistence | `database-persistence-testing` | x | done |\n"
 	setBinding(t, "sess-audit", "/repo", plan.DefaultPath, "run-a")
 	res := Decide(Input{SessionID: "sess-audit", TranscriptPath: "t"}, r.deps(auditNow))
@@ -392,7 +392,7 @@ func TestDecideNamesWhatItCouldNotReadOrPlan(t *testing.T) {
 // it did not sweep.
 func TestDecideReadsAMicroPlanAsCompleteWithoutClaimingEveryLayer(t *testing.T) {
 	r := auditRepo()
-	r.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
+	r.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"tsp"}}`)
 	r.plan = microPlanDoc
 	setBinding(t, "sess-audit", "/repo", plan.DefaultPath, "run-a")
 	res := Decide(Input{SessionID: "sess-audit", TranscriptPath: "t"}, r.deps(auditNow))
@@ -420,7 +420,7 @@ const microPlanDoc = "# Micro test plan\n\nMicro: internal/text/trim.go · touch
 // this session's debt, other runs' finished rows as its all-clear.
 func TestDecideStaysSilentWhenTheBindingNamesNoRun(t *testing.T) {
 	r := auditRepo()
-	r.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
+	r.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"tsp"}}`)
 	r.plan = "## Layer matrix\n\n| Layer | Skill | Scope | Status | Run |\n|---|---|---|---|---|\n" +
 		"| Security | `appsec-adversarial-auditor` | input | pending | run-a |\n\n" +
 		"## Ranked targets\n\n| Target | Verdict | Status | Run |\n|---|---|---|---|\n" +
@@ -445,7 +445,7 @@ func TestDecideStaysSilentWhenTheBindingNamesNoRun(t *testing.T) {
 func TestDecideRecordsTheBoundPlanItCouldNotRead(t *testing.T) {
 	const declared = "docs/testing/scoped-plan.md"
 	repo := auditRepo()
-	repo.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
+	repo.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"tsp"}}`)
 	// Both fallback routes sit readable on purpose: a read that redirected to the declaration or to
 	// the default plan would audit instead of skipping and fail every assertion below.
 	repo.planConfig = `{"planPath":"` + plan.DefaultPath + `"}`
@@ -501,7 +501,7 @@ func TestRunStaysSilentWhenTheBoundPlanIsUnreadable(t *testing.T) {
 		t.Fatalf("write declaration: %v", err)
 	}
 	transcript := filepath.Join(base, "transcript.jsonl")
-	if err := os.WriteFile(transcript, []byte(`{"name":"Skill","input":{"skill":"test-strategy"}}`+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(transcript, []byte(`{"name":"Skill","input":{"skill":"tsp"}}`+"\n"), 0o644); err != nil {
 		t.Fatalf("write transcript: %v", err)
 	}
 	logPath := filepath.Join(base, "telemetry", "testing-gate.jsonl")
@@ -565,7 +565,7 @@ func TestDecideAuditsOnlyTheBoundRunAmongTwoRuns(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r := auditRepo()
-			r.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
+			r.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"tsp"}}`)
 			r.plan = fmt.Sprintf(twoRuns, tc.layerA, tc.layerB, tc.targetA, tc.targetB)
 			setBinding(t, "sess-audit", "/repo", plan.DefaultPath, "run-a")
 			res := Decide(Input{SessionID: "sess-audit", TranscriptPath: "t"}, r.deps(auditNow))
@@ -622,7 +622,7 @@ func TestDecideReportsTheRunScopeProblemInsteadOfOwesNothing(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r := auditRepo()
-			r.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"test-strategy"}}`)
+			r.transcript = stamped(auditStart, `{"name":"Skill","input":{"skill":"tsp"}}`)
 			r.plan = tc.plan
 			setBinding(t, "sess-audit", "/repo", plan.DefaultPath, "run-x")
 			res := Decide(Input{SessionID: "sess-audit", TranscriptPath: "t"}, r.deps(auditNow))

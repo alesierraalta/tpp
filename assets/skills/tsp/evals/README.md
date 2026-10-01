@@ -16,7 +16,7 @@ reports, and an optional baseline arm without the skill.
 ## Run
 
 ```bash
-cd ~/.claude/skills/test-strategy/evals
+cd ~/.claude/skills/tsp/evals
 python3 run_evals.py --dry-run                      # scaffold every case, no model cost
 python3 run_evals.py --case 04-plan-only --model haiku
 python3 run_evals.py --runs 3 --model sonnet         # the whole suite, 3 runs per case

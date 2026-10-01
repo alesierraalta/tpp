@@ -83,6 +83,6 @@ blindness`. Say plainly what remains unmeasured.
 - [references/silent-loss.md](references/silent-loss.md) — where data and quality vanish without an error.
 - [references/measurement.md](references/measurement.md) — goldsets, baselines, metric validation, ablation, ceiling analysis.
 - [assets/quality-audit-template.md](assets/quality-audit-template.md) — audit artifact.
-- `~/.claude/skills/test-strategy/SKILL.md` — what deserves testing at all (the router).
+- `~/.claude/skills/tsp/SKILL.md` — what deserves testing at all (the router).
 - `~/.claude/skills/exploit-testing/SKILL.md` — adversarial sibling (hunts reds).
 - `~/.claude/skills/implementation-theater/SKILL.md` — sibling for code that runs but does nothing (a dead knob or a silent fallback is often the cause of the quality loss).

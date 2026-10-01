@@ -25,7 +25,7 @@ func TestAppendEntrySealsTheIdentityFields(t *testing.T) {
 		TS:           "2026-09-15T12:00:00Z",
 		Session:      "session-literal",
 		Repo:         "repository-literal",
-		SkillsLoaded: []string{"test-strategy"},
+		SkillsLoaded: []string{"tsp"},
 		Audited:      true,
 		Fired:        false,
 		Skipped:      "skipped-literal",
@@ -201,7 +201,7 @@ func TestRunAuditsFromTheBindingStoredBesideItsLog(t *testing.T) {
 		t.Fatalf("write plan: %v", err)
 	}
 	transcript := filepath.Join(base, "transcript.jsonl")
-	if err := os.WriteFile(transcript, []byte(`{"name":"Skill","input":{"skill":"test-strategy"}}`+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(transcript, []byte(`{"name":"Skill","input":{"skill":"tsp"}}`+"\n"), 0o644); err != nil {
 		t.Fatalf("write transcript: %v", err)
 	}
 	logPath := filepath.Join(base, "telemetry", "testing-gate.jsonl")

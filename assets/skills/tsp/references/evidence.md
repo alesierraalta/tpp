@@ -1,7 +1,7 @@
 # Evidence contract — no claim without execution
 
 A testing skill reports what it RAN and SAW. Reading code produces hypotheses, never
-findings. This contract applies to every testing skill routed by `test-strategy`.
+findings. This contract applies to every testing skill routed by `tsp`.
 
 ## Rules
 

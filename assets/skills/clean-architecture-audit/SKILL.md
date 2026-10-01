@@ -11,13 +11,13 @@ metadata:
 
 Load when evaluating layer boundaries, dependency direction, import cycles, or public-API drift in an architectural change, PR diff, or refactoring plan. Objective: prove with executable rules that the code respects its boundaries, and that each rule can fail.
 
-NOT for: test allocation (`test-strategy`), pruning tests (`no-excess-tests`), dead code, duplicated logic and clone detection (`implementation-theater`), mutation testing in general (`exploit-testing`), swallowed errors and silent fallbacks (`silent-degradation`).
+NOT for: test allocation (`tsp`), pruning tests (`no-excess-tests`), dead code, duplicated logic and clone detection (`implementation-theater`), mutation testing in general (`exploit-testing`), swallowed errors and silent fallbacks (`silent-degradation`).
 
 Scope guard: a single-package CLI or a 3-file script needs no fitness functions; the language already enforces what they would check (Go forbids import cycles at compile time).
 
 ## Plan Contribution
 
-When invoked by `test-strategy` in PLAN mode: do not execute. Return target rows for the plan: target (package, module, or symbol) · check (layer boundary, cycle, domain isolation, unearned interface, public-API compatibility) · target depth · consequence class · why. Include cheap static checks (dependency-cruiser / import-linter / depguard / archon run).
+When invoked by `tsp` in PLAN mode: do not execute. Return target rows for the plan: target (package, module, or symbol) · check (layer boundary, cycle, domain isolation, unearned interface, public-API compatibility) · target depth · consequence class · why. Include cheap static checks (dependency-cruiser / import-linter / depguard / archon run).
 
 ## Hard Rules
 
@@ -27,7 +27,7 @@ When invoked by `test-strategy` in PLAN mode: do not execute. Return target rows
 4. **Cycles are strongly connected components of size > 1**, not "any import inside the same package". Domain-to-domain imports are legal; only a cycle is a finding.
 5. **Unearned interface**: one implementation and no process boundary is theater, EXCEPT a consumer-owned port that exists for a test double, a second adapter (present or planned), or a team/process boundary. Those are the seam and stay.
 6. **Complexity is a finding only when the target configures a limit** (linter or analyzer config); report the score against that limit. Invent no default threshold.
-7. **Evidence**: every finding carries an executed record per `~/.claude/skills/test-strategy/references/evidence.md` (the conformance run output); no finding from reading alone.
+7. **Evidence**: every finding carries an executed record per `~/.claude/skills/tsp/references/evidence.md` (the conformance run output); no finding from reading alone.
 8. **Architecture-contract mutants only**: break a boundary on purpose and the conformance test must go red. General mutation testing belongs to `exploit-testing`.
 
 ## Decision Gates

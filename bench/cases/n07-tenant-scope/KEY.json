@@ -1,5 +1,5 @@
 {"schema":2,"id":"n07-tenant-scope","language":"node","suite":"node --test","surface":"library",
- "request":"the tenant-scope behaviour","defects":[
+ "request":"the tenant-scope behaviour","canary":"d3a283893a48ce0a6f9535f77e5a83da","defects":[
   {"id":"D1","file":"src/access.js","line":11,"class":"authorization","keywords":["startswith","prefix","tenant","equality","cross-tenant"],
    "description":"Tenant membership is checked with startsWith, so a user of tenant acme reaches every tenant whose slug begins with acme, such as acme-corp.",
    "trigger":{"input":"canAccess({tenant:'acme', roles:['viewer']}, {tenant:'acme-corp'})","expected":"false","actual":"true"},

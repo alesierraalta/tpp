@@ -61,6 +61,7 @@ type Key struct {
 	Suite    string `json:"suite"`
 	Surface  string `json:"surface"`
 	Control  string `json:"control,omitempty"`
+	Canary   string `json:"canary,omitempty"`
 	// Request is the bounded unit of work a run is asked to test, when the case has one. A case without
 	// it is the generic case the bench has always run. The pointer is what tells the two apart: a key
 	// that supplies a blank request is a mistake, not a generic case, and is refused rather than read

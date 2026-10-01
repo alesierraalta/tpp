@@ -1,5 +1,5 @@
 {"schema":2,"id":"n12-path-normalize","language":"node","suite":"node --test","surface":"http",
- "request":"the path-normalize behaviour","defects":[
+ "request":"the path-normalize behaviour","canary":"d3a283893a48ce0a6f9535f77e5a83da","defects":[
   {"id":"D1","file":"src/paths.js","line":14,"class":"path-traversal","keywords":["decode","percent","traversal","order","%2e"],
    "description":"The parent-segment check runs before percent-decoding, so an encoded ../ (%2e%2e/) passes the check, is decoded, and resolves outside the root.",
    "trigger":{"input":"safeJoin('/srv/files', '%2e%2e/%2e%2e/etc/passwd')","expected":"throws PathTraversal","actual":"/etc/passwd"},

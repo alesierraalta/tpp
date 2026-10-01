@@ -1,5 +1,5 @@
 {"schema":2,"id":"n10-order-state","language":"node","suite":"node --test","surface":"state-machine",
- "request":"the order-state behaviour","defects":[
+ "request":"the order-state behaviour","canary":"d3a283893a48ce0a6f9535f77e5a83da","defects":[
   {"id":"D1","file":"src/order.js","line":24,"class":"unreachable-state","keywords":["refunded","typo","unreachable","refundd","transition"],
    "description":"The outcome of the refund event is misspelled, so a returned order can never reach refunded; every refund throws an unknown-state error.",
    "trigger":{"input":"transition('returned', 'refund')","expected":"\"refunded\"","actual":"RangeError: unknown state refundd"},

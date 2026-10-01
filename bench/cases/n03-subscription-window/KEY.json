@@ -1,5 +1,5 @@
 {"schema":2,"id":"n03-subscription-window","language":"node","suite":"node --test","surface":"library",
- "request":"the subscription-window behaviour","defects":[
+ "request":"the subscription-window behaviour","canary":"d3a283893a48ce0a6f9535f77e5a83da","defects":[
   {"id":"D1","file":"src/subscription.js","line":7,"class":"timezone","keywords":["timezone","utc","local","boundary","inclusive"],
    "description":"start and end are parsed as UTC midnight while a Date built from calendar components is local midnight, so the first or last inclusive day is reported inactive in any non-UTC zone.",
    "trigger":{"input":"TZ=America/Caracas node: isActive({start:'2026-03-01',end:'2026-03-31'}, new Date(2026,2,31))","expected":"true","actual":"last day local: false"},

@@ -1,1 +1,1 @@
-{"schema":2,"id":"g05-clean-backoff","language":"go","suite":"go test ./...","surface":"library","control":"clean","request":"the retry-backoff behaviour","defects":[]}
+{"schema":2,"id":"g05-clean-backoff","language":"go","suite":"go test ./...","surface":"library","control":"clean","request":"the retry-backoff behaviour","canary":"d3a283893a48ce0a6f9535f77e5a83da","defects":[]}

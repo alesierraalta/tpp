@@ -1,5 +1,5 @@
 {"schema":2,"id":"n05-keyset-pagination","language":"node","suite":"node --test","surface":"library",
- "request":"the keyset-pagination behaviour","defects":[
+ "request":"the keyset-pagination behaviour","canary":"d3a283893a48ce0a6f9535f77e5a83da","defects":[
   {"id":"D1","file":"src/pagination.js","line":10,"class":"pagination-cursor","keywords":["cursor","tie","timestamp","skipped","keyset"],
    "description":"The cursor is created_at alone and the next page filters strictly after it, so rows sharing the boundary timestamp are skipped and never returned.",
    "trigger":{"input":"collectAll([{id:'a',created_at:'2026-01-01T00:00:00Z'},{id:'b',created_at:'2026-01-01T00:00:00Z'},{id:'c',created_at:'2026-01-02T00:00:00Z'}], 1).map(r => r.id)","expected":"[\"a\",\"b\",\"c\"]","actual":"[\"a\",\"c\"]"},

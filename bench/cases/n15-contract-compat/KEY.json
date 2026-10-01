@@ -1,5 +1,5 @@
 {"schema":2,"id":"n15-contract-compat","language":"node","suite":"node --test","surface":"http",
- "request":"the webhook and order-message compatibility","defects":[
+ "request":"the webhook and order-message compatibility","canary":"d3a283893a48ce0a6f9535f77e5a83da","defects":[
   {"id":"D1","file":"src/webhook.js","line":28,"class":"signature-reserialized-body","keywords":["signature","raw","body","reserialized","stringify"],
    "description":"The signature is verified over JSON.stringify(JSON.parse(rawBody)) instead of the raw bytes the sender signed, so any correctly signed delivery whose body is not byte-identical to compact re-serialization is rejected.",
    "trigger":{"input":"raw = '{\\n  \"type\": \"order.paid\",\\n  \"id\": \"o1\"\\n}'; header = t=1700000000,v1=sign('whsec_test', 1700000000, raw); verifyWebhook('whsec_test', header, raw, {now: 1700000000})","expected":"{\"ok\":true,\"event\":{\"type\":\"order.paid\",\"id\":\"o1\"}}","actual":"{\"ok\":false,\"reason\":\"bad-signature\"}"},

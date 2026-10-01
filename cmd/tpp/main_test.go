@@ -2480,3 +2480,43 @@ func TestBindCLIStoresAndUnsetsPerSessionBindings(t *testing.T) {
 		t.Fatalf("after the second unset the dir holds %d entries (err %v), want 1", len(entries), err)
 	}
 }
+
+func TestBenchManifestBuildAndVerifyCLI(t *testing.T) {
+	bin := buildCLI(t)
+	benchDir := t.TempDir()
+	caseDir := filepath.Join(benchDir, "cases", "c1")
+	for _, name := range []string{"fixture", "fix"} {
+		if err := os.MkdirAll(filepath.Join(caseDir, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(caseDir, name, "source.txt"), []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	canary := "0123456789abcdef0123456789abcdef"
+	key := `{"schema":2,"id":"c1","language":"go","suite":"go test","surface":"library","control":"clean","canary":"` + canary + `","defects":[]}`
+	if err := os.WriteFile(filepath.Join(caseDir, "KEY.json"), []byte(key), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	template := `{"status":"draft","created":"2026-10-01T00:00:00Z","change_reason":"template","supersedes":"","key_schema":2,"domains":[],"critical_domains":[],"detection_criteria_version":"dc-1","metric_config":{"weighted_recall_w":0.5,"ci_level":0.9,"early_stop_ci_level":0.95,"bootstrap_resamples":10000,"bootstrap_seed":1729,"consolidation":"strict-majority"},"replicates":{"k_min":1,"k_target":1,"k_max":1},"budgets":{"max_cases":1,"max_attempts_per_case":1,"max_retries":1,"max_tokens_per_case_run":100,"max_cost_per_case_run_usd":1,"max_cost_suite_usd":1,"max_runtime_per_case_run_seconds":60,"max_runtime_suite_seconds":60,"verdicts":["PASS"]},"seeds":{"case_order":7},"canary":"` + canary + `"}`
+	templatePath := filepath.Join(t.TempDir(), "template.json")
+	if err := os.WriteFile(templatePath, []byte(template), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(t.TempDir(), "manifest.json")
+	out, code := runCLI(t, bin, "bench", "manifest", "build", "--suite", "CORE", "--version", "1.0", "--cases", "c1", "--change-reason", "CLI contract", "--bench-dir", benchDir, "--from-template", templatePath, "--out", manifestPath)
+	if code != 0 {
+		t.Fatalf("manifest build exit %d:\n%s", code, out)
+	}
+	out, code = runCLI(t, bin, "bench", "manifest", "verify", manifestPath, "--bench-dir", benchDir)
+	if code != 0 {
+		t.Fatalf("manifest verify exit %d:\n%s", code, out)
+	}
+	if err := os.WriteFile(filepath.Join(caseDir, "fixture", "source.txt"), []byte("tampered"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, code = runCLI(t, bin, "bench", "manifest", "verify", manifestPath, "--bench-dir", benchDir)
+	if code != 1 || !strings.Contains(out, "c1") {
+		t.Fatalf("mismatched manifest verify = %d, %q; want exit 1 naming c1", code, out)
+	}
+}

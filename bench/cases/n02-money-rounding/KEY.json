@@ -1,5 +1,5 @@
 {"schema":2,"id":"n02-money-rounding","language":"node","suite":"node --test","surface":"library",
- "request":"the ledger behaviour","defects":[
+ "request":"the ledger behaviour","canary":"d3a283893a48ce0a6f9535f77e5a83da","defects":[
   {"id":"D1","file":"src/ledger.js","line":11,"class":"float-precision","keywords":["float","precision","cents","integer","accumulate"],
    "description":"The balance accumulates parsed floats, so three postings of 0.10 do not sum to 0.30 and two ledgers can disagree at the cent.",
    "trigger":{"input":"const l = createLedger(); l.post('a','0.10'); l.post('b','0.10'); l.post('c','0.10'); [l.balance(), l.balance() === 0.3]","expected":"0.3, true","actual":"0.30000000000000004 false"},

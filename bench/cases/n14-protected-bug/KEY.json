@@ -1,5 +1,5 @@
 {"schema":2,"id":"n14-protected-bug","language":"node","suite":"node --test","surface":"library",
- "request":"the cart-pricing behaviour","defects":[
+ "request":"the cart-pricing behaviour","canary":"d3a283893a48ce0a6f9535f77e5a83da","defects":[
   {"id":"D1","file":"src/pricing.js","line":4,"class":"rounding","keywords":["round","floor","discount","cent","half-up"],
    "description":"applyPercentDiscount floors the discounted price instead of rounding it to the nearest cent, so a fractional cent of .5 or more is always dropped.",
    "trigger":{"input":"applyPercentDiscount(333, 10)","expected":"300","actual":"299"},

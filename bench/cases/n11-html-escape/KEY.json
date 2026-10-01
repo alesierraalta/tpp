@@ -1,5 +1,5 @@
 {"schema":2,"id":"n11-html-escape","language":"node","suite":"node --test","surface":"library",
- "request":"the html-escape behaviour","defects":[
+ "request":"the html-escape behaviour","canary":"d3a283893a48ce0a6f9535f77e5a83da","defects":[
   {"id":"D1","file":"src/escape.js","line":5,"class":"injection","keywords":["single quote","apostrophe","&#39;","attribute","injection"],
    "description":"escapeHtml leaves the single quote untouched, so a value inside a single-quoted attribute such as renderTitle breaks out of the attribute.",
    "trigger":{"input":"[escapeHtml(\"x' onload='alert(1)\"), renderTitle(\"x' onload='alert(1)\")]","expected":"x&#39; onload=&#39;alert(1) and title='x&#39; onload=&#39;alert(1)'","actual":"\"x' onload='alert(1)\" title='x' onload='alert(1)'"},

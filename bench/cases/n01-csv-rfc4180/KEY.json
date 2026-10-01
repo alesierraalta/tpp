@@ -1,5 +1,5 @@
 {"schema":2,"id":"n01-csv-rfc4180","language":"node","suite":"node --test","surface":"library",
- "request":"the csv-line behaviour","defects":[
+ "request":"the csv-line behaviour","canary":"d3a283893a48ce0a6f9535f77e5a83da","defects":[
   {"id":"D1","file":"src/csv.js","line":7,"class":"escaping","keywords":["quote","double","escape","rfc","embedded"],
    "description":"renderLine quotes a field that contains a comma but never doubles an embedded double quote, so the rendered line is not RFC 4180 and cannot round-trip.",
    "trigger":{"input":"renderLine(['say \"hi\", ok'])","expected":"\"say \"\"hi\"\", ok\"","actual":"\"say \"hi\", ok\""},

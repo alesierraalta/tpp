@@ -21,6 +21,7 @@ import (
 	"github.com/alesierraalta/tpp/internal/bench"
 	"github.com/alesierraalta/tpp/internal/buildinfo"
 	"github.com/alesierraalta/tpp/internal/check"
+	"github.com/alesierraalta/tpp/internal/eval"
 	"github.com/alesierraalta/tpp/internal/evidence"
 	"github.com/alesierraalta/tpp/internal/feature"
 	"github.com/alesierraalta/tpp/internal/feedback"
@@ -62,7 +63,7 @@ commands:
            --force replaces modified managed files after backing them up)
   doctor   report installed skills, the hook wiring, and optional capabilities
   bench    run the testing skill against sealed-key fixtures and score it (run | score | history |
-           compare | rescore | adjudicate)
+           compare | rescore | adjudicate | manifest)
   plan     write the skeleton, check the contract, name what breadth is still owed, record a
            Findings row from flags, and admit every Evidence row (init | check | gaps | upgrade | add-finding | admit)
   check    say what this repository still owes, from git and the plan alone: no hook payload,
@@ -1299,10 +1300,154 @@ func runBench(args []string) int {
 		return runBenchRescore(args[1:])
 	case "adjudicate":
 		return runBenchAdjudicate(args[1:])
+	case "manifest":
+		return runBenchManifest(args[1:])
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		return 2
 	}
+}
+
+func runBenchManifest(args []string) int {
+	if len(args) == 0 {
+		fmt.Fprint(os.Stderr, usage)
+		return 2
+	}
+	switch args[0] {
+	case "build":
+		return runBenchManifestBuild(args[1:])
+	case "verify":
+		return runBenchManifestVerify(args[1:])
+	default:
+		fmt.Fprint(os.Stderr, usage)
+		return 2
+	}
+}
+
+func runBenchManifestBuild(args []string) int {
+	fs := flag.NewFlagSet("bench manifest build", flag.ContinueOnError)
+	suite := fs.String("suite", "", "suite name")
+	version := fs.String("version", "", "suite version")
+	casesFlag := fs.String("cases", "", "comma-separated case IDs or * for every case")
+	changeReason := fs.String("change-reason", "", "reason for this benchmark version")
+	benchDir := fs.String("bench-dir", "bench", "benchmark directory")
+	fromTemplate := fs.String("from-template", "", "JSON manifest specification template")
+	out := fs.String("out", "", "output manifest path")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 || *suite == "" || *version == "" || *casesFlag == "" || *changeReason == "" || *out == "" {
+		fmt.Fprintln(os.Stderr, "bench manifest build: requires --suite, --version, --cases, --change-reason, and --out")
+		return 2
+	}
+	caseIDs, err := manifestCaseIDs(*benchDir, *casesFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "bench manifest build: %v\n", err)
+		return 1
+	}
+	var spec eval.ManifestSpec
+	if *fromTemplate != "" {
+		data, err := os.ReadFile(*fromTemplate)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "bench manifest build: read template: %v\n", err)
+			return 1
+		}
+		if err := json.Unmarshal(data, &spec); err != nil {
+			fmt.Fprintf(os.Stderr, "bench manifest build: parse template: %v\n", err)
+			return 1
+		}
+	} else {
+		spec, err = eval.DefaultManifestSpec(*suite, *version, *changeReason, *benchDir, caseIDs)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "bench manifest build: %v\n", err)
+			return 1
+		}
+	}
+	spec.Benchmark, spec.Version, spec.Cases, spec.ChangeReason = *suite, *version, caseIDs, *changeReason
+	manifest, err := eval.BuildManifest(*benchDir, spec)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "bench manifest build: %v\n", err)
+		return 1
+	}
+	manifest, err = manifest.Seal()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "bench manifest build: %v\n", err)
+		return 1
+	}
+	data, err := eval.CanonicalJSON(manifest)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "bench manifest build: %v\n", err)
+		return 1
+	}
+	if err := os.WriteFile(*out, data, 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "bench manifest build: write output: %v\n", err)
+		return 1
+	}
+	fmt.Printf("built %s (%s)\n", *out, manifest.ManifestSHA256)
+	return 0
+}
+
+func runBenchManifestVerify(args []string) int {
+	var path string
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		path, args = args[0], args[1:]
+	}
+	fs := flag.NewFlagSet("bench manifest verify", flag.ContinueOnError)
+	benchDir := fs.String("bench-dir", "bench", "benchmark directory")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if path == "" && fs.NArg() == 1 {
+		path = fs.Arg(0)
+	} else if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "bench manifest verify: requires one manifest FILE")
+		return 2
+	}
+	if path == "" {
+		fmt.Fprintln(os.Stderr, "bench manifest verify: requires one manifest FILE")
+		return 2
+	}
+	manifest, err := eval.LoadManifest(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "bench manifest verify: %v\n", err)
+		return 1
+	}
+	mismatches := eval.VerifyCases(*benchDir, manifest)
+	for _, id := range mismatches {
+		fmt.Fprintf(os.Stderr, "bench manifest verify: case %s does not match manifest\n", id)
+	}
+	if len(mismatches) != 0 {
+		return 1
+	}
+	fmt.Printf("verified %s (%s)\n", path, manifest.ManifestSHA256)
+	return 0
+}
+
+func manifestCaseIDs(benchDir, selection string) ([]string, error) {
+	if selection != "*" {
+		ids := strings.Split(selection, ",")
+		for i := range ids {
+			ids[i] = strings.TrimSpace(ids[i])
+			if ids[i] == "" {
+				return nil, fmt.Errorf("--cases contains an empty case ID")
+			}
+		}
+		return ids, nil
+	}
+	entries, err := os.ReadDir(filepath.Join(benchDir, "cases"))
+	if err != nil {
+		return nil, fmt.Errorf("list cases: %w", err)
+	}
+	var ids []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			ids = append(ids, entry.Name())
+		}
+	}
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("no case directories under %s", filepath.Join(benchDir, "cases"))
+	}
+	return ids, nil
 }
 
 // configModeFor names the agent configuration a run measured with: a throwaway directory holding only

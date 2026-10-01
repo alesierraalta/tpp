@@ -56,6 +56,17 @@ func TestLoadKeyMissingFile(t *testing.T) {
 	}
 }
 
+func TestLoadKeyCanary(t *testing.T) {
+	body := `{"schema":2,"id":"c1","language":"go","suite":"go test","surface":"library","control":"clean","canary":"0123456789abcdef0123456789abcdef","defects":[]}`
+	key, err := LoadKey(writeKey(t, body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key.Canary != "0123456789abcdef0123456789abcdef" {
+		t.Fatalf("Canary = %q", key.Canary)
+	}
+}
+
 func TestLoadKeySchemaV2Validation(t *testing.T) {
 	base := `{"id":"c1","language":"node","suite":"node --test","surface":"lib","defects":[{"id":"d1","file":"src/a.js","line":3,"class":"boundary","keywords":["limit"],"description":"x","trigger":{"input":"i","expected":"e","actual":"a"},"why_missed":"w"}]}`
 	validV2 := `{"schema":2,"id":"c1","language":"node","suite":"node --test","surface":"lib","defects":[{"id":"d1","file":"src/a.js","line":3,"class":"boundary","keywords":["limit"],"description":"x","trigger":{"input":"i","expected":"e","actual":"a"},"why_missed":"w","issue_type":"boundary","domain":"unchecked-here","severity":"unchecked-here","severity_rationale":"rationale","expected_behavior":"expected","failure_condition":"input -> actual","detection_criteria":{"mechanism":"mechanism","equivalents":[],"proof":"proof"},"reproduction":{"applies":true,"oracle":"catch","nondeterministic":false,"attempts":1}}]}`

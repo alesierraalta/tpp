@@ -1,5 +1,5 @@
 {"schema":2,"id":"n08-sliding-limiter","language":"node","suite":"node --test","surface":"library",
- "request":"the sliding-limiter behaviour","defects":[
+ "request":"the sliding-limiter behaviour","canary":"d3a283893a48ce0a6f9535f77e5a83da","defects":[
   {"id":"D1","file":"src/limiter.js","line":16,"class":"off-by-one","keywords":["off-by-one","limit","boundary","plus one","greater"],
    "description":"The check rejects only when recent requests exceed the limit, so limit + 1 requests are allowed inside one window.",
    "trigger":{"input":"const l = createLimiter({limit:3, windowMs:1000, now:() => 1000}); [1,2,3,4].map(() => l.allow('user:a'))","expected":"[true,true,true,false]","actual":"[true,true,true,true]"},

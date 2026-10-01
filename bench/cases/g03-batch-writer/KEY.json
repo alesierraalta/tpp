@@ -1,5 +1,5 @@
 {"schema":2,"id":"g03-batch-writer","language":"go","suite":"go test ./...","surface":"worker",
- "request":"the batchwriter behaviour","defects":[
+ "request":"the batchwriter behaviour","canary":"d3a283893a48ce0a6f9535f77e5a83da","defects":[
   {"id":"D1","file":"writer.go","line":25,"class":"data-loss","keywords":["partial","last batch","flush","remainder","modulo"],
    "description":"The loop only sends full batches, so the final partial batch is silently dropped whenever the record count is not a multiple of BatchSize.",
    "trigger":{"input":"WriteAll(countingSink, 250 records)","expected":"Written=250, sink received 250","actual":"250 records: Written=200 sink received=200 err=<nil>"},

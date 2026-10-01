@@ -1,5 +1,5 @@
 {"schema":2,"id":"n06-retry-policy","language":"node","suite":"node --test","surface":"http",
- "request":"the retry-policy behaviour","defects":[
+ "request":"the retry-policy behaviour","canary":"d3a283893a48ce0a6f9535f77e5a83da","defects":[
   {"id":"D1","file":"src/retry.js","line":11,"class":"unbounded-retry","keywords":["429","unbounded","cap","attempts","infinite"],
    "description":"A 429 response retries without counting against maxAttempts, so a server that keeps answering 429 without Retry-After is retried forever.",
    "trigger":{"input":"fetchFn always {status:429, headers:{}}, counting calls and throwing after 50; fetchWithRetry(fetchFn, '/x', {maxAttempts:3, sleep: async () => {}})","expected":"{ok:false, error} after at most 3 requests","actual":"ERROR: runaway after 51 calls"},

@@ -5,6 +5,7 @@
  "suite": "node --test",
  "surface": "http",
  "request": "the payments client that calls the charge service with retries",
+ "canary":"d3a283893a48ce0a6f9535f77e5a83da",
  "defects": [
   {
    "id": "D1",

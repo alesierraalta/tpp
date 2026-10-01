@@ -1,5 +1,5 @@
 {"schema":2,"id":"n04-slug-normalize","language":"node","suite":"node --test","surface":"library",
- "request":"the slug behaviour","defects":[
+ "request":"the slug behaviour","canary":"d3a283893a48ce0a6f9535f77e5a83da","defects":[
   {"id":"D1","file":"src/slug.js","line":4,"class":"idempotence","keywords":["idempotent","leading","dash","twice","strip"],
    "description":"Only one leading dash is removed per call, so a title starting with two dashes yields a slug with a leading dash and slugify(slugify(x)) differs from slugify(x).",
    "trigger":{"input":"[slugify('--a'), slugify(slugify('--a'))]","expected":"[\"a\",\"a\"]","actual":"\"-a\" \"a\""},

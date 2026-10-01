@@ -1,5 +1,5 @@
 {"schema":2,"id":"g02-config-merge","language":"go","suite":"go test ./...","surface":"library",
- "request":"the config behaviour","defects":[
+ "request":"the config behaviour","canary":"d3a283893a48ce0a6f9535f77e5a83da","defects":[
   {"id":"D1","file":"config.go","line":20,"class":"config-merge","keywords":["zero value","false","disable","override","explicit"],
    "description":"Merge applies Debug only when the override sets it to true, so an explicit false is treated as unset and no higher layer can ever disable debug.",
    "trigger":{"input":"Load(Config{Debug: boolp(true)}, Config{Debug: boolp(false)}).Debug","expected":"false","actual":"Debug=true"},

@@ -1,5 +1,5 @@
 {"schema":2,"id":"g01-inventory-reserve","language":"go","suite":"go test -race ./...","surface":"library",
- "request":"the inventory behaviour","defects":[
+ "request":"the inventory behaviour","canary":"d3a283893a48ce0a6f9535f77e5a83da","defects":[
   {"id":"D1","file":"inventory.go","line":37,"class":"data-race","keywords":["race","mutex","concurrent","lost update","synchronization"],
    "description":"Reserve reads and writes the shared stock map without synchronization, so concurrent reservations race: the runtime aborts on concurrent map writes and, when it does not, updates are lost and stock oversells.",
    "trigger":{"input":"go run -race of a main that calls inv.Add(\"b\", 100000) then 2000 goroutines each inv.Reserve(\"b\", 1) and prints inv.Available(\"b\")","expected":"98000, no race report","actual":"WARNING: DATA RACE (and without -race: fatal error: concurrent map writes at inventory.go:37)"},

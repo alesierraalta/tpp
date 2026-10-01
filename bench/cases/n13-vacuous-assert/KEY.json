@@ -1,5 +1,5 @@
 {"schema":2,"id":"n13-vacuous-assert","language":"node","suite":"node --test","surface":"library",
- "request":"the range-clamp behaviour","defects":[
+ "request":"the range-clamp behaviour","canary":"d3a283893a48ce0a6f9535f77e5a83da","defects":[
   {"id":"D1","file":"src/clamp.js","line":4,"class":"boundary-clamp","keywords":["clamp","maximum","boundary","upper","return"],
    "description":"The above-maximum branch returns the unclamped value instead of max, so any value greater than max passes through unbounded.",
    "trigger":{"input":"clamp(15, 0, 10)","expected":"10","actual":"15"},

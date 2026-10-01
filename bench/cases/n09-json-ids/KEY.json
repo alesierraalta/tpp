@@ -1,5 +1,5 @@
 {"schema":2,"id":"n09-json-ids","language":"node","suite":"node --test","surface":"etl",
- "request":"the json-ids behaviour","defects":[
+ "request":"the json-ids behaviour","canary":"d3a283893a48ce0a6f9535f77e5a83da","defects":[
   {"id":"D1","file":"src/records.js","line":3,"class":"integer-precision","keywords":["precision","2^53","bigint","integer","collapse"],
    "description":"JSON.parse turns 64-bit ids into doubles, so ids above 2^53 lose their low bits and two consecutive upstream ids become equal, making dedupeById merge different records.",
    "trigger":{"input":"const r = parseRecords('{\"records\":[{\"id\":9007199254740993,\"name\":\"a\"},{\"id\":9007199254740992,\"name\":\"b\"}]}'); [r.map(x => x.id), dedupeById(r).length]","expected":"[9007199254740993, 9007199254740992] and 2","actual":"9007199254740992,9007199254740992 deduped: 1"},

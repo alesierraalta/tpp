@@ -215,7 +215,7 @@ func ImportRun(resultsDir, benchDir string, manifest Manifest, policy Policy, ha
 				return Imported{}, fmt.Errorf("admit case %s: %w", caseID, err)
 			}
 		}
-		if err := scanResultLeaks(caseDir, caseID, replicate, manifest.Canary, &stored.Record.Leaks); err != nil {
+		if err := scanResultLeaks(caseDir, caseID, replicate, manifest.Canary, result.Result, &stored.Record.Leaks); err != nil {
 			return Imported{}, err
 		}
 		stored.CaseRuns[caseID] = cr
@@ -289,7 +289,7 @@ func isInfrastructureFailure(reason string) bool {
 	return false
 }
 
-func scanResultLeaks(caseDir, caseID string, replicate int, canary string, leaks *[]Leak) error {
+func scanResultLeaks(caseDir, caseID string, replicate int, canary string, result bench.Result, leaks *[]Leak) error {
 	for _, name := range []string{"agent.log", "test-plan.md"} {
 		path := filepath.Join(caseDir, name)
 		data, err := os.ReadFile(path)
@@ -300,6 +300,23 @@ func scanResultLeaks(caseDir, caseID string, replicate int, canary string, leaks
 			return fmt.Errorf("read %s for leak scan: %w", path, err)
 		}
 		source := filepath.ToSlash(filepath.Join(caseID, fmt.Sprint(replicate), name))
+		found, err := ScanLeaks(source, strings.NewReader(string(data)), canary)
+		if err != nil {
+			return err
+		}
+		*leaks = append(*leaks, found...)
+	}
+	// The saved test snapshots are evidence the replay trusts later, so their content is scanned
+	// like the plan and the agent log: a snapshot that leaks the canary or a key/fix path is a
+	// ground-truth leak. Each snapshot is read through the safe loader, so bytes that no longer
+	// hash to the digest result.json records fail the import instead of being scanned as trusted.
+	artifactRoot := filepath.Join(caseDir, "test-artifacts")
+	for _, artifact := range result.TestArtifacts {
+		data, err := bench.ReadSavedArtifact(artifactRoot, artifact)
+		if err != nil {
+			return fmt.Errorf("saved test artifact for leak scan: %w", err)
+		}
+		source := filepath.ToSlash(filepath.Join(caseID, fmt.Sprint(replicate), "test-artifacts", filepath.FromSlash(artifact.Path)))
 		found, err := ScanLeaks(source, strings.NewReader(string(data)), canary)
 		if err != nil {
 			return err

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -407,6 +408,53 @@ func DiscriminateSavedTests(caseDir, artifactDir string, key Key, artifacts []Te
 	return Discriminate(caseDir, ws, key, timeout), nil
 }
 
+// ReadSavedArtifact resolves one recorded snapshot under root, refuses any path that escapes it,
+// and returns its bytes only when they hash to the recorded sha256: a saved test is evidence only
+// while its content is exactly what the run recorded. Both the replay and the import-time leak
+// scan read snapshots through it, so a corrupted or relocated artifact is refused before anything
+// consumes it.
+func ReadSavedArtifact(root string, artifact TestArtifact) ([]byte, error) {
+	path, err := safeArtifactFile(root, artifact.Path)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	sum := sha256.Sum256(data)
+	if got := hex.EncodeToString(sum[:]); !strings.EqualFold(got, artifact.SHA256) {
+		return nil, fmt.Errorf("artifact %q: recorded sha256 %s, persisted bytes hash to %s", artifact.Path, artifact.SHA256, got)
+	}
+	return data, nil
+}
+
+// VerifiedTestArtifacts checks a result's snapshot list against the catch check that listed it and
+// verifies every recorded file under root, returning the artifact paths in sorted order. The list
+// must name exactly the test files the catch check ran: a snapshot that is missing, a path the
+// catch check never listed, and bytes that no longer hash to the recorded sha256 are each refused,
+// so a caller that digests or replays the returned paths can trust them.
+func VerifiedTestArtifacts(root string, catch CatchResult, artifacts []TestArtifact) ([]string, error) {
+	want := append([]string(nil), catch.TestFiles...)
+	got := make([]string, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		got = append(got, artifact.Path)
+	}
+	slices.Sort(want)
+	slices.Sort(got)
+	if !slices.Equal(want, got) {
+		return nil, fmt.Errorf("saved test artifacts %v do not match the catch check's test files %v", got, want)
+	}
+	ordered := append([]TestArtifact(nil), artifacts...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Path < ordered[j].Path })
+	for _, artifact := range ordered {
+		if _, err := ReadSavedArtifact(root, artifact); err != nil {
+			return nil, err
+		}
+	}
+	return got, nil
+}
+
 // restoreTestWorkspace verifies each artifact against its recorded digest and lays fixture/ plus
 // the saved test bytes into a fresh temporary workspace. A verification failure removes the
 // workspace it was building, so a refused artifact set leaves nothing behind to replay.
@@ -425,17 +473,9 @@ func restoreTestWorkspace(caseDir, artifactDir string, artifacts []TestArtifact)
 	ordered := append([]TestArtifact(nil), artifacts...)
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Path < ordered[j].Path })
 	for _, a := range ordered {
-		src, err := safeArtifactFile(artifactDir, a.Path)
+		data, err := ReadSavedArtifact(artifactDir, a)
 		if err != nil {
 			return fail(err)
-		}
-		data, err := os.ReadFile(src)
-		if err != nil {
-			return fail(err)
-		}
-		sum := sha256.Sum256(data)
-		if got := hex.EncodeToString(sum[:]); !strings.EqualFold(got, a.SHA256) {
-			return fail(fmt.Errorf("artifact %q: recorded sha256 %s, persisted bytes hash to %s", a.Path, a.SHA256, got))
 		}
 		dst := filepath.Join(ws, filepath.FromSlash(a.Path))
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {

@@ -1,6 +1,8 @@
 package eval
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -306,5 +308,29 @@ func writeImportResult(t *testing.T, resultsDir, resultJSON, plan, agentLog stri
 	}
 	if err := os.WriteFile(filepath.Join(resultsDir, "aggregate.json"), aggregate, 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A saved test snapshot is read only through the safe loader during the leak scan: bytes that no
+// longer hash to the digest result.json records are refused at import instead of silently scanned
+// as trustworthy evidence.
+func TestImportRunRefusesACorruptedSavedTestArtifact(t *testing.T) {
+	benchDir, manifest, policy := importTestInputs(t)
+	results := t.TempDir()
+	claimed := sha256.Sum256([]byte("the bytes the run actually kept"))
+	resultJSON := `{"case":"c1","run":1,"plan_found":true,"plan_format":"table",` +
+		`"catch":{"checked":true,"test_files":["tests/d1.sh"]},` +
+		`"test_artifacts":[{"path":"tests/d1.sh","sha256":"` + hex.EncodeToString(claimed[:]) + `"}]}`
+	writeImportResult(t, results, resultJSON, importPlanTable, "")
+	artifactPath := filepath.Join(results, "c1", "1", "test-artifacts", "tests", "d1.sh")
+	if err := os.MkdirAll(filepath.Dir(artifactPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(artifactPath, []byte("the bytes after tampering"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ImportRun(results, benchDir, manifest, policy, "baseline", 1, "t1")
+	if err == nil || !strings.Contains(err.Error(), "tests/d1.sh") {
+		t.Fatalf("a corrupted snapshot must be refused, got %v", err)
 	}
 }

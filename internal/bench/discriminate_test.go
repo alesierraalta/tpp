@@ -276,6 +276,48 @@ func TestReplayRefusesTamperedEscapingAndSymlinkedArtifacts(t *testing.T) {
 	})
 }
 
+// The digest map and the replay both trust VerifiedTestArtifacts: its list must be exactly the
+// catch check's test files, and every listed file must exist with its recorded bytes. A snapshot
+// path the catch check never listed, a listed test that was never saved, and a saved file that
+// disappeared are each refused before anything digests or replays them.
+func TestVerifiedTestArtifactsChecksTheCatchListAndTheFiles(t *testing.T) {
+	artifactDir := filepath.Join(t.TempDir(), "test-artifacts")
+	body := []byte("grep -q D1=ok src.txt\n")
+	saved := filepath.Join(artifactDir, "tests", "d1.sh")
+	if err := os.MkdirAll(filepath.Dir(saved), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(saved, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(body)
+	artifact := TestArtifact{Path: "tests/d1.sh", SHA256: hex.EncodeToString(sum[:])}
+	catch := CatchResult{TestFiles: []string{"tests/d1.sh"}}
+	paths, err := VerifiedTestArtifacts(artifactDir, catch, []TestArtifact{artifact})
+	if err != nil || len(paths) != 1 || paths[0] != "tests/d1.sh" {
+		t.Fatalf("VerifiedTestArtifacts = %v, %v; want the one verified path", paths, err)
+	}
+	for _, tc := range []struct {
+		name      string
+		catch     CatchResult
+		artifacts []TestArtifact
+		want      string
+	}{
+		{"unknown path", catch, []TestArtifact{artifact, {Path: "tests/other.sh", SHA256: hex.EncodeToString(sum[:])}}, "do not match"},
+		{"listed but never saved", CatchResult{TestFiles: []string{"tests/d1.sh", "tests/gone.sh"}}, []TestArtifact{artifact}, "do not match"},
+	} {
+		if _, err := VerifiedTestArtifacts(artifactDir, tc.catch, tc.artifacts); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want refusal containing %q", tc.name, err, tc.want)
+		}
+	}
+	if err := os.Remove(saved); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifiedTestArtifacts(artifactDir, catch, []TestArtifact{artifact}); err == nil || !strings.Contains(err.Error(), "tests/d1.sh") {
+		t.Errorf("missing file: err = %v, want refusal naming the artifact", err)
+	}
+}
+
 func TestIsTestFile(t *testing.T) {
 	yes := []string{"tests/a.sh", "test/x.js", "__tests__/y.tsx", "src/a.test.js", "src/a.spec.ts", "pkg/a_test.go", "spec/z_spec.rb", "tests/test_x.py"}
 	no := []string{"src/a.js", "config.go", "docs/testing/test-plan.md", "node_modules/x/test/a.js", ".git/hooks/test", "testdata/a.txt"}

@@ -235,8 +235,10 @@ func compareGateBinaries(hookCommand string, lookPath func(string) (string, erro
 	if err != nil || wiredInfo.IsDir() {
 		return "", "", false
 	}
-	// The binary on PATH is tpp after the rename; a machine that has not moved yet only has tpp.
-	for _, name := range hookcmd.GateBinaries {
+	// The product binary on PATH is tpp for now; a machine that has not moved yet only has tpp.
+	// This lookup follows the product name, not hookcmd.GateBinaries: tsp is canonical for hook
+	// commands first, while the installed binary is still tpp.
+	for _, name := range []string{"tpp", "rdd-plus"} {
 		p, err := lookPath(name)
 		if err != nil || p == "" {
 			continue

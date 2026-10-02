@@ -52,9 +52,9 @@ func ShellWords(command string) ([]string, error) {
 	return words, nil
 }
 
-// GateBinaries are the names the gate binary has shipped under, current first: tpp, and rdd-plus before the
-// rename. A hook wired by either is this tool's gate.
-var GateBinaries = []string{"tpp", "rdd-plus"}
+// GateBinaries are the names the gate binary has shipped under, current first: tsp, then tpp, and
+// rdd-plus before those renames. A hook wired by any of them is this tool's gate.
+var GateBinaries = []string{"tsp", "tpp", "rdd-plus"}
 
 // IsGate reports whether command runs this tool's gate: a well-formed command whose executable's base name
 // is one of GateBinaries and whose next word is gate. The rule reads the executable's own name, never a
@@ -64,8 +64,8 @@ func IsGate(command string) bool {
 	return gateBinary(command) != ""
 }
 
-// IsLegacyGate reports whether command runs the gate under a name it no longer ships under: a hook wired
-// before the rename, which sync moves to the current binary.
+// IsLegacyGate reports whether command runs the gate under a name it no longer ships under: a hook
+// wired before the current name, which sync moves to the current binary.
 func IsLegacyGate(command string) bool {
 	name := gateBinary(command)
 	return name != "" && name != GateBinaries[0]

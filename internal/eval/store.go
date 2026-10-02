@@ -32,7 +32,7 @@ type StoredRun struct {
 type CaseRunResources struct {
 	CostUSD      float64 `json:"cost_usd"`
 	AgentSeconds float64 `json:"agent_seconds"`
-	Tokens       int     `json:"tokens"`
+	Tokens       *int    `json:"tokens,omitempty"`
 }
 
 // ReconstructCompletedRun derives metric-ready data from the sealed manifest and case ledgers.

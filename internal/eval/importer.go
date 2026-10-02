@@ -22,7 +22,6 @@ type importedAggregate struct {
 
 type importedResult struct {
 	bench.Result
-	Tokens int `json:"tokens"`
 }
 
 // ImportRun converts one replicate's runner results into adjudicable case runs.
@@ -43,6 +42,11 @@ func ImportRun(resultsDir, benchDir string, manifest Manifest, policy Policy, ha
 	var aggregate importedAggregate
 	if err := json.Unmarshal(aggregateData, &aggregate); err != nil {
 		return Imported{}, fmt.Errorf("parse aggregate.json: %w", err)
+	}
+	// A reading sealed under one manifest may not be imported under another: the relabel would
+	// fabricate comparability with runs the supplied manifest never measured.
+	if bound := aggregate.Provenance.ManifestSHA256; bound != "" && bound != manifest.ManifestSHA256 {
+		return Imported{}, fmt.Errorf("aggregate provenance is bound to manifest %s, not the supplied %s: refusing to relabel another manifest's reading", bound, manifest.ManifestSHA256)
 	}
 	if aggregate.Model == "" {
 		aggregate.Model = aggregate.Provenance.Model
@@ -94,6 +98,11 @@ func ImportRun(resultsDir, benchDir string, manifest Manifest, policy Policy, ha
 		var result importedResult
 		if err := json.Unmarshal(resultData, &result); err != nil {
 			return Imported{}, fmt.Errorf("parse result for case %s: %w", caseID, err)
+		}
+		// Unknown token usage in a manifest-bound reading must never be recorded as a measured
+		// zero: bench.Result keeps it as a nil pointer, and a bound reading without it is refused.
+		if aggregate.Provenance.ManifestSHA256 != "" && !result.Invalid && result.Tokens == nil {
+			return Imported{}, fmt.Errorf("case %s: token usage is missing in a manifest-bound reading; refusing to record an unknown usage as measured zero", caseID)
 		}
 
 		planBytes, planErr := os.ReadFile(filepath.Join(caseDir, "test-plan.md"))
@@ -169,6 +178,13 @@ func ImportRun(resultsDir, benchDir string, manifest Manifest, policy Policy, ha
 			if stored.Record.AbortReason == "" {
 				stored.Record.AbortReason = fmt.Sprintf("case %s: %s", caseID, invalidReason)
 			}
+		} else if result.BudgetExhausted || result.Outcome == "budget_exhausted" {
+			// The harness ran out of its own case budget (spec 5.3): the plan as it stands is
+			// scored, Issues not found are FN, and it is never an infrastructure failure.
+			stored.CaseOutcomes[caseID] = "budget_exhausted"
+			if err := cr.Admit(ts); err != nil {
+				return Imported{}, fmt.Errorf("admit budget-exhausted case %s: %w", caseID, err)
+			}
 		} else if result.Failed {
 			if isInfrastructureFailure(result.FailReason) {
 				stored.CaseOutcomes[caseID] = result.FailReason
@@ -204,7 +220,32 @@ func ImportRun(resultsDir, benchDir string, manifest Manifest, policy Policy, ha
 		}
 		stored.CaseRuns[caseID] = cr
 	}
+	// Provenance that does not prove a valid, complete, budget-supported execution may never
+	// become a COMPLETED record (spec 15): land it INVALID with the reason. Cases already
+	// dispositioned failed or invalid set a terminal state of their own.
+	if reason := provenanceCompromised(aggregate.Provenance); reason != "" && stored.Record.State == RunAdjudicating {
+		stored.Record.State = RunInvalid
+		stored.Record.AbortReason = reason
+	}
 	return Imported{Run: stored}, nil
+}
+
+// provenanceCompromised names why a manifest-bound reading may not become a COMPLETED record:
+// an invalid instrument, an unverified budget, or an incomplete execution — the same three
+// refusals the comparator applies to the readings it is offered.
+func provenanceCompromised(p bench.Provenance) string {
+	if p.ManifestSHA256 == "" {
+		return ""
+	}
+	switch {
+	case p.InstrumentValid == nil || !*p.InstrumentValid:
+		return "provenance instrument is invalid or lacks validity evidence"
+	case p.BudgetStatus != "supported":
+		return "provenance budget support is not verified: " + p.BudgetUnsupportedReason
+	case p.ExecutionComplete == nil || !*p.ExecutionComplete:
+		return "provenance execution is incomplete"
+	}
+	return ""
 }
 
 func appendCaseTransition(cr *CaseRun, from, to CaseRunState, ts, reason string) error {

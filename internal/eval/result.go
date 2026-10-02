@@ -25,7 +25,7 @@ type CaseResult struct {
 	Repro            map[string]ReproOutcome
 	CostUSD          float64
 	AgentSeconds     float64
-	Tokens           int
+	Tokens           *int
 }
 
 // CaseResultFrom copies the terminal outcomes of a CaseRun for metric computation.
@@ -91,10 +91,14 @@ func (run RunData) AgentSeconds() float64 {
 	return total
 }
 
-func (run RunData) Tokens() int {
+// Tokens reports the run's total usage, or nil while any case's usage is unknown.
+func (run RunData) Tokens() *int {
 	var total int
 	for _, result := range run.Cases {
-		total += result.Tokens
+		if result.Tokens == nil {
+			return nil
+		}
+		total += *result.Tokens
 	}
-	return total
+	return &total
 }

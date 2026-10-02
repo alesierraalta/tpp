@@ -20,12 +20,14 @@ func metricTestFinding(result *CaseResult, id string, state FindingState, repro 
 	}
 }
 
+func metricTestTokens(value int) *int { return &value }
+
 func handComputedRun() RunData {
 	defect := CaseResult{
 		Case: "defect", Issues: make([]Issue, 39),
 		IssueStates: make(map[string]IssueState), Primary: make(map[string]string),
 		FindingStates: make(map[string]FindingState), ReportedSeverity: make(map[string]Severity), Repro: make(map[string]ReproOutcome),
-		CostUSD: 78, AgentSeconds: 310, Tokens: 1200,
+		CostUSD: 78, AgentSeconds: 310, Tokens: metricTestTokens(1200),
 	}
 	for i := range defect.Issues {
 		id := fmt.Sprintf("i%02d", i)
@@ -81,8 +83,8 @@ func handComputedRun() RunData {
 	metricTestFinding(&defect, "inconclusive", FindingInconclusive, "")
 	metricTestFinding(&defect, "novel", FindingConfirmedNovel, Reproduced)
 	metricTestFinding(&defect, "invalid", FindingInvalid, "")
-	controlFP := CaseResult{Case: "control-fp", Control: true, FindingStates: map[string]FindingState{"fp": FindingFP}}
-	controlClean := CaseResult{Case: "control-clean", Control: true}
+	controlFP := CaseResult{Case: "control-fp", Control: true, FindingStates: map[string]FindingState{"fp": FindingFP}, Tokens: metricTestTokens(0)}
+	controlClean := CaseResult{Case: "control-clean", Control: true, Tokens: metricTestTokens(0)}
 	return RunData{ID: "hand", Cases: []CaseResult{defect, controlFP, controlClean}}
 }
 
@@ -138,8 +140,8 @@ func TestComputeRunMatchesHandCalculatedSpecExample(t *testing.T) {
 	if got := run.AgentSeconds(); got != 310 {
 		t.Fatalf("RunData.AgentSeconds() = %v, want 310", got)
 	}
-	if got := run.Tokens(); got != 1200 {
-		t.Fatalf("RunData.Tokens() = %d, want 1200", got)
+	if got := run.Tokens(); got == nil || *got != 1200 {
+		t.Fatalf("RunData.Tokens() = %v, want 1200", got)
 	}
 }
 
@@ -188,4 +190,23 @@ func TestComputeRunNADenominatorsAndZeroZeroF1(t *testing.T) {
 	if zero.ControlFPR != nil {
 		t.Fatalf("ControlFPR without controls = %v, want N/A", *zero.ControlFPR)
 	}
+}
+
+// Aggregation keeps an unknown member unknown instead of summing it as zero; all-measured-zero reports a pointer to zero.
+func TestRunTokensAggregationKeepsUnknownDistinctFromMeasuredZero(t *testing.T) {
+	t.Run("all members measured zero", func(t *testing.T) {
+		measuredZero := 0
+		run := RunData{Cases: []CaseResult{{Case: "a", Tokens: &measuredZero}, {Case: "b", Tokens: &measuredZero}}}
+		got := ComputeRun(run, 0.5).Tokens
+		if got == nil || *got != 0 {
+			t.Fatalf("Tokens = %v, want pointer to 0", got)
+		}
+	})
+	t.Run("one member unknown", func(t *testing.T) {
+		run := RunData{Cases: []CaseResult{{Case: "a", Tokens: metricTestTokens(7)}, {Case: "b"}}}
+		got := ComputeRun(run, 0.5).Tokens
+		if got != nil {
+			t.Fatalf("Tokens = %d, want nil while a case usage is unknown", *got)
+		}
+	})
 }

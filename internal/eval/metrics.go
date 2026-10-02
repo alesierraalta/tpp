@@ -27,7 +27,7 @@ type RunMetrics struct {
 	ConfirmedNovel, Invalid, KnownIssues             int
 	TotalRawFindings, ReproNotRun                    int
 	CostUSD, AgentSeconds                            float64
-	Tokens                                           int
+	Tokens                                           *int
 	StrictRecall, DetectionCoverage, MissRate        *float64
 	PartialDetectionRate, WeightedRecall             *float64
 	StrictPrecision, AcceptedPrecision, FDR          *float64

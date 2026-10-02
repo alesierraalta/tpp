@@ -102,7 +102,13 @@ func TestBenchEvalCLIImportAdjudicateCompareAndVerify(t *testing.T) {
 			if err := os.MkdirAll(caseRunDir, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			resultData, err := json.Marshal(bench.Result{Case: caseID, Run: 1, PlanFound: true, PlanFormat: bench.FormatTable, CostUSD: 0.1, Seconds: 2})
+			result := bench.Result{Case: caseID, Run: 1, PlanFound: true, PlanFormat: bench.FormatTable, CostUSD: 0.1, Seconds: 2}
+			if caseID == "c2" {
+				// c2 records an explicit measured zero; c1's usage stays unknown.
+				measuredZero := 0
+				result.Tokens = &measuredZero
+			}
+			resultData, err := json.Marshal(result)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -139,6 +145,52 @@ func TestBenchEvalCLIImportAdjudicateCompareAndVerify(t *testing.T) {
 		if out, code := runCLI(t, bin, "bench", "eval", "close", "--eval", runDir); code != 0 {
 			t.Fatalf("close exited %d:\n%s", code, out)
 		}
+	}
+	// Unknown usage (c1) must survive import and close as unknown while c2's measured zero stays zero.
+	candidateRunJSON, err := os.ReadFile(filepath.Join(candidateEval, "run-1", "run.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var closedRun struct {
+		CaseResources map[string]map[string]json.RawMessage `json:"case_resources"`
+		Data          struct {
+			Cases []struct {
+				Case   string
+				Tokens json.RawMessage
+			}
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(candidateRunJSON, &closedRun); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := closedRun.CaseResources["c1"]["tokens"]; present {
+		t.Fatalf("unknown token usage recorded as a value: %s", closedRun.CaseResources["c1"])
+	}
+	if got := string(closedRun.CaseResources["c2"]["tokens"]); got != "0" {
+		t.Fatalf("measured zero tokens = %s, want 0", got)
+	}
+	if len(closedRun.Data.Cases) != 2 {
+		t.Fatalf("closed cases = %d, want 2", len(closedRun.Data.Cases))
+	}
+	for _, caseResult := range closedRun.Data.Cases {
+		want := "null"
+		if caseResult.Case == "c2" {
+			want = "0"
+		}
+		if got := string(caseResult.Tokens); got != want {
+			t.Fatalf("closed %s tokens = %s, want %s", caseResult.Case, got, want)
+		}
+	}
+	metricsBytes, err := os.ReadFile(filepath.Join(candidateEval, "run-1", "metrics.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var metrics metricsArtifact
+	if err := json.Unmarshal(metricsBytes, &metrics); err != nil {
+		t.Fatal(err)
+	}
+	if metrics.Metrics.Tokens != nil {
+		t.Fatalf("run metrics tokens = %d, want nil while a case usage is unknown", *metrics.Metrics.Tokens)
 	}
 	baselineRun := filepath.Join(baselineEval, "run-1")
 	if out, code := runCLI(t, bin, "bench", "eval", "reopen", "--eval", baselineRun, "--case", "c1", "--finding", "c1-f1", "--by", "reviewer2", "--reason", "new evidence"); code != 0 {

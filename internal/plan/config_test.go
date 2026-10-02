@@ -9,7 +9,7 @@ import (
 )
 
 // declares answers body for the current declaration and nothing for any other file, the way a repository
-// that carries only .tpp.json reads.
+// that carries only .tsp.json reads.
 func declares(body string) Reader {
 	return declaresAs(ConfigName, body)
 }
@@ -207,9 +207,88 @@ func TestResolveReadsTheDeclarationOnceForPathAndRun(t *testing.T) {
 	}
 }
 
-func TestTheCurrentDeclarationIsNamedTpp(t *testing.T) {
-	if ConfigName != ".tpp.json" {
-		t.Fatalf("ConfigName = %q, want .tpp.json", ConfigName)
+func TestResolveSupportsEachRepositoryDeclarationName(t *testing.T) {
+	const canonicalConfigName = ".tsp.json"
+	const tppLegacyConfigName = ".tpp.json"
+	tests := []struct {
+		name     string
+		planPath string
+		run      string
+	}{
+		{name: canonicalConfigName, planPath: "docs/testing/canonical-plan.md", run: "canonical-run"},
+		{name: tppLegacyConfigName, planPath: "docs/testing/tpp-plan.md", run: "tpp-legacy"},
+		{name: LegacyConfigName, planPath: "docs/testing/rdd-plan.md", run: "rdd-legacy"},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			reads := 0
+			path, run, err := Resolve(t.TempDir(), func(path string) (string, error) {
+				if filepath.Base(path) != tc.name {
+					return "", fs.ErrNotExist
+				}
+				reads++
+				return `{"planPath":"` + tc.planPath + `","run":"` + tc.run + `"}`, nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if path != tc.planPath || run != tc.run {
+				t.Fatalf("resolved %q, %q; want %q, %q", path, run, tc.planPath, tc.run)
+			}
+			if reads != 1 {
+				t.Fatalf("declaration body read %d times, want once", reads)
+			}
+		})
+	}
+}
+
+func TestResolveRefusesMultipleRepositoryDeclarationNames(t *testing.T) {
+	const canonicalConfigName = ".tsp.json"
+	const tppLegacyConfigName = ".tpp.json"
+	tests := []struct {
+		name    string
+		present []string
+		absent  string
+	}{
+		{name: "canonical and tpp legacy", present: []string{canonicalConfigName, tppLegacyConfigName}, absent: LegacyConfigName},
+		{name: "canonical and rdd-plus legacy", present: []string{canonicalConfigName, LegacyConfigName}, absent: tppLegacyConfigName},
+		{name: "both legacy names", present: []string{tppLegacyConfigName, LegacyConfigName}, absent: canonicalConfigName},
+		{name: "all names", present: []string{canonicalConfigName, tppLegacyConfigName, LegacyConfigName}},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			declarations := make(map[string]string, len(tc.present))
+			for _, name := range tc.present {
+				declarations[name] = `{"planPath":"docs/testing/shared-plan.md","run":"shared-run"}`
+			}
+			_, _, err := Resolve(t.TempDir(), func(path string) (string, error) {
+				body, present := declarations[filepath.Base(path)]
+				if !present {
+					return "", fs.ErrNotExist
+				}
+				return body, nil
+			})
+			if err == nil {
+				t.Fatal("Resolve succeeded with multiple declaration files")
+			}
+			message := err.Error()
+			for _, name := range tc.present {
+				if !strings.Contains(message, name) {
+					t.Errorf("error %q does not name present declaration %q", message, name)
+				}
+			}
+			if tc.absent != "" && strings.Contains(message, tc.absent) {
+				t.Errorf("error %q names absent declaration %q", message, tc.absent)
+			}
+		})
+	}
+}
+
+func TestTheCanonicalDeclarationIsNamedTsp(t *testing.T) {
+	if ConfigName != ".tsp.json" {
+		t.Fatalf("ConfigName = %q, want .tsp.json", ConfigName)
 	}
 }
 
@@ -221,16 +300,6 @@ func TestTheLegacyDeclarationIsReadWhenTheCurrentOneIsAbsent(t *testing.T) {
 	}
 	if got != "docs/testing/legacy-plan.md" {
 		t.Fatalf("path = %q, want the legacy declaration's", got)
-	}
-}
-
-// Two declarations can disagree, and picking one silently would audit a plan the operator did not mean.
-func TestBothDeclarationsPresentIsRefusedNamingBoth(t *testing.T) {
-	_, err := DeclaredPath(t.TempDir(), func(string) (string, error) {
-		return `{"planPath":"docs/testing/custom-plan.md"}`, nil
-	})
-	if err == nil || !strings.Contains(err.Error(), ".tpp.json") || !strings.Contains(err.Error(), ".rdd-plus.json") {
-		t.Fatalf("error = %v, want a refusal naming both declarations", err)
 	}
 }
 

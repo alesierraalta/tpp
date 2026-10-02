@@ -181,7 +181,7 @@ func TestScoreWorkspaceReadsThePlanFile(t *testing.T) {
 	}
 }
 
-// A run that delivers its plan at the path its .tpp.json declares is scored from that path; a
+// A run that delivers its plan at the path its .tsp.json declares is scored from that path; a
 // declaration that escapes is refused with a note and the default path is read instead; and a
 // workspace with no plan anywhere keeps today's result and note.
 // A plan path that exists but cannot be read as a plan is not a missing plan. Both scorers name the
@@ -471,7 +471,7 @@ func TestScoreWorkspaceRefusesSymlinkEscapes(t *testing.T) {
 				// Both facts travel in one note: the rejected declaration and the refusal of the fallback it
 				// would otherwise have read.
 				return []string{fmt.Sprintf(
-					"declared plan path refused (.tpp.json escapes the worktree: %q); read %s instead; selected plan path %q refused: resolves outside workspace to %q",
+					"declared plan path refused (.tsp.json escapes the worktree: %q); read %s instead; selected plan path %q refused: resolves outside workspace to %q",
 					"../escape.md", PlanPath, PlanPath, outside)}
 			},
 		},

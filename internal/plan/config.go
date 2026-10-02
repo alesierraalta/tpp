@@ -11,11 +11,10 @@ import (
 	"strings"
 )
 
-// ConfigName is the repository-local declaration read from the worktree root.
-const ConfigName = ".tpp.json"
+// ConfigName is the canonical repository-local declaration read from the worktree root.
+const ConfigName = ".tsp.json"
 
-// LegacyConfigName is the declaration's name before the rename. It is still read when ConfigName is absent,
-// and never renamed on the operator's behalf.
+// LegacyConfigName is an older declaration name that remains readable for compatibility.
 const LegacyConfigName = ".rdd-plus.json"
 
 // Reader reads a file's text; nil means os.ReadFile.
@@ -82,13 +81,13 @@ func readDeclaration(root string, read Reader) (declaration, error) {
 	return d, nil
 }
 
-// readDeclarationFile answers the name and body of the declaration the root carries: ConfigName, else
-// LegacyConfigName, else no name at all. Both present is an error naming both, because the two can disagree
-// and silently picking one would audit a plan the operator did not mean.
+// readDeclarationFile answers the name and body of the declaration the root carries: ConfigName, then
+// the legacy names, else no name at all. Multiple present files fail closed, because silently choosing one
+// would audit a plan the operator did not mean.
 func readDeclarationFile(root string, read Reader) (string, string, error) {
 	var found []string
 	var body string
-	for _, name := range []string{ConfigName, LegacyConfigName} {
+	for _, name := range []string{ConfigName, ".tpp.json", LegacyConfigName} {
 		text, err := read(filepath.Join(root, name))
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
@@ -107,7 +106,7 @@ func readDeclarationFile(root string, read Reader) (string, string, error) {
 	case 1:
 		return found[0], body, nil
 	default:
-		return "", "", fmt.Errorf("both %s and %s are present at the worktree root; keep %s and remove %s", ConfigName, LegacyConfigName, ConfigName, LegacyConfigName)
+		return "", "", fmt.Errorf("multiple declarations are present at the worktree root: %s", strings.Join(found, ", "))
 	}
 }
 

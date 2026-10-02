@@ -265,8 +265,9 @@ ones win when both are present:
 - The first default-root resolution moves an existing `~/.config/tpp` or `~/.config/rdd-plus` tree
   (state, backups, update cache) to `~/.config/tsp`, retaining both old paths as symlink aliases.
   An existing TSP root wins; divergent legacy roots are not merged, and a failed move leaves the old root in use.
-- `.rdd-plus.json` is still read when `.tpp.json` is absent; a repository carrying both is refused
-  until one is removed. tpp never renames your file.
+- `.tsp.json` is the canonical repository declaration; `.tpp.json` and `.rdd-plus.json` remain
+  read-only legacy names. If any two or three are present, tpp refuses them even when contents match.
+  No declaration file is automatically renamed, deleted, merged or rewritten.
 - `RDD_PLUS_HOME` and `RDD_PLUS_UPDATE_BASE_URL` are read when `TPP_HOME` and `TPP_UPDATE_BASE_URL`
   are unset.
 - The OpenCode snippet and Pi's settings hook are copies, not managed files: re-copy

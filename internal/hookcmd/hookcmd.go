@@ -52,9 +52,9 @@ func ShellWords(command string) ([]string, error) {
 	return words, nil
 }
 
-// GateBinaries are the names the gate binary has shipped under, current first: tsp, then tpp, and
+// GateBinaries are the names the gate command is recognized under, installed first: tpp, then tsp, and
 // rdd-plus before those renames. A hook wired by any of them is this tool's gate.
-var GateBinaries = []string{"tsp", "tpp", "rdd-plus"}
+var GateBinaries = []string{"tpp", "tsp", "rdd-plus"}
 
 // IsGate reports whether command runs this tool's gate: a well-formed command whose executable's base name
 // is one of GateBinaries and whose next word is gate. The rule reads the executable's own name, never a
@@ -64,11 +64,13 @@ func IsGate(command string) bool {
 	return gateBinary(command) != ""
 }
 
-// IsLegacyGate reports whether command runs the gate under a name it no longer ships under: a hook
-// wired before the current name, which sync moves to the current binary.
+// InstalledBinary is the gate's installed name: sync moves legacy hooks to it, never to pending tsp.
+const InstalledBinary = "tpp"
+
+// IsLegacyGate reports whether command runs the gate under a name InstalledBinary superseded.
 func IsLegacyGate(command string) bool {
 	name := gateBinary(command)
-	return name != "" && name != GateBinaries[0]
+	return name != "" && name != InstalledBinary && name != "tsp"
 }
 
 // gateBinary answers which of GateBinaries command runs the gate subcommand of, or "" for any other command.

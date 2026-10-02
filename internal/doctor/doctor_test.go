@@ -381,7 +381,7 @@ func TestDoctorStaysQuietWhenItCannotCompareBinaries(t *testing.T) {
 	dir := t.TempDir()
 	writeSettings(t, dir, `"`+binary(t, t.TempDir(), "tpp")+`" gate`)
 	noTpp := func(name string) (string, error) {
-		if name == "tpp" {
+		if name == "tsp" || name == "tpp" || name == "rdd-plus" {
 			return "", errors.New("not found")
 		}
 		return "/usr/bin/" + name, nil
@@ -408,10 +408,11 @@ func TestDoctorDoesNotCallASkillVerifiedWhenItCannotReadTheTree(t *testing.T) {
 }
 
 // After the rename the binary on PATH is tpp, and a machine mid-migration may still carry rdd-plus beside
-// it: the comparison asks for tpp first and falls back to rdd-plus only when no tpp resolves.
+// it: the comparison asks for tpp first, then tsp, and falls back to rdd-plus when neither resolves.
 func TestBinaryComparisonLooksUpTppBeforeRddPlus(t *testing.T) {
 	tppBin := binary(t, t.TempDir(), "tpp")
 	legacyBin := binary(t, t.TempDir(), "rdd-plus")
+	tspBin := binary(t, t.TempDir(), "tsp")
 	cases := []struct {
 		name       string
 		hook       string
@@ -422,6 +423,7 @@ func TestBinaryComparisonLooksUpTppBeforeRddPlus(t *testing.T) {
 		{"tpp on PATH is preferred", tppBin, map[string]string{"tpp": tppBin, "rdd-plus": legacyBin}, false, tppBin},
 		{"a legacy hook against tpp on PATH differs", legacyBin, map[string]string{"tpp": tppBin}, true, tppBin},
 		{"only rdd-plus on PATH still compares", legacyBin, map[string]string{"rdd-plus": legacyBin}, false, legacyBin},
+		{"a tsp-wired hook is compared against tsp on PATH", tspBin, map[string]string{"tsp": legacyBin}, true, legacyBin},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -431,7 +433,7 @@ func TestBinaryComparisonLooksUpTppBeforeRddPlus(t *testing.T) {
 				if p, ok := tc.onPath[name]; ok {
 					return p, nil
 				}
-				if name == "tpp" || name == "rdd-plus" {
+				if name == "tsp" || name == "tpp" || name == "rdd-plus" {
 					return "", errors.New("not found")
 				}
 				return "/usr/bin/" + name, nil

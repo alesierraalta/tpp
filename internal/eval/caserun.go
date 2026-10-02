@@ -1,8 +1,10 @@
 package eval
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -236,6 +238,99 @@ func (cr *CaseRun) Close(ts string) error {
 	return nil
 }
 
+// confirmationPayload is the recorded body of a reproduction confirmation event.
+type confirmationPayload struct {
+	IssueID        string `json:"issue_id"`
+	Outcome        string `json:"outcome"`
+	ArtifactDigest string `json:"artifact_digest"`
+	Attempts       int    `json:"attempts"`
+}
+
+// validSHA256Digest reports whether digest is a "sha256:"-prefixed 64-hex-digit digest.
+func validSHA256Digest(digest string) bool {
+	const prefix = "sha256:"
+	if !strings.HasPrefix(digest, prefix) {
+		return false
+	}
+	raw := strings.TrimPrefix(digest, prefix)
+	if len(raw) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(raw)
+	return err == nil
+}
+
+// RecordReproductionConfirmation appends the confirmation re-run outcome for an Issue.
+// It requires an adjudicating case run, an Issue under evaluation whose reproduction
+// applies and that already has a primary finding; repeated confirmations are allowed.
+func (cr *CaseRun) RecordReproductionConfirmation(issueID, outcome, artifactDigest string, attempts int, ts string) error {
+	if cr.caseRunState() != CaseRunAdjudicating {
+		return fmt.Errorf("case run %q cannot record a confirmation in state %q", cr.Case, cr.caseRunState())
+	}
+	issue, ok := cr.issue(issueID)
+	if !ok {
+		return fmt.Errorf("unknown issue %q", issueID)
+	}
+	if cr.IssueState(issue.ID) != IssueUnderEvaluation {
+		return fmt.Errorf("issue %q is not under evaluation", issue.ID)
+	}
+	if !issue.Reproduction.Applies {
+		return fmt.Errorf("issue %q reproduction does not apply", issue.ID)
+	}
+	plan, err := cr.selectionPlan()
+	if err != nil {
+		return err
+	}
+	if plan.primaries[cr.issueEventID(*issue)] == "" {
+		return fmt.Errorf("issue %q has no primary finding to confirm", issue.ID)
+	}
+	if outcome != string(Reproduced) && outcome != string(NotReproduced) {
+		return fmt.Errorf("confirmation outcome must be %q or %q, got %q", Reproduced, NotReproduced, outcome)
+	}
+	if !validSHA256Digest(artifactDigest) {
+		return fmt.Errorf("confirmation artifact digest %q is not a sha256 digest", artifactDigest)
+	}
+	if attempts < 0 {
+		return fmt.Errorf("confirmation attempts cannot be negative, got %d", attempts)
+	}
+	payload, err := json.Marshal(confirmationPayload{IssueID: cr.issueEventID(*issue), Outcome: outcome, ArtifactDigest: artifactDigest, Attempts: attempts})
+	if err != nil {
+		return fmt.Errorf("marshal confirmation: %w", err)
+	}
+	_, err = cr.Log.Append(Event{Entity: EntityIssue, ID: cr.issueEventID(*issue), Kind: EventConfirm, PreviousState: string(IssueUnderEvaluation), NewState: string(IssueUnderEvaluation), TS: ts, Adjudicator: ConfirmAdjudicator, Payload: payload})
+	return err
+}
+
+// MissingReproductionConfirmations reports the sorted Issue IDs whose current primary
+// finding still lacks a reproduction confirmation. Issues without a primary need none.
+func (cr *CaseRun) MissingReproductionConfirmations() ([]string, error) {
+	plan, err := cr.selectionPlan()
+	if err != nil {
+		return nil, err
+	}
+	confirmed := make(map[string]bool)
+	for _, event := range cr.Log.Events {
+		if event.Kind != EventConfirm {
+			continue
+		}
+		if _, err := decodeConfirmation(event); err != nil {
+			continue // a malformed confirmation never satisfies the guard
+		}
+		confirmed[event.ID] = true
+	}
+	missing := make([]string, 0, len(cr.Issues))
+	for _, issue := range cr.Issues {
+		if !issue.Reproduction.Applies || plan.primaries[cr.issueEventID(issue)] == "" {
+			continue
+		}
+		if !confirmed[cr.issueEventID(issue)] {
+			missing = append(missing, issue.ID)
+		}
+	}
+	sort.Strings(missing)
+	return missing, nil
+}
+
 // Reopen reopens a terminal finding and its terminal candidate Issue.
 func (cr *CaseRun) Reopen(findingID, reason, by, ts string) error {
 	if _, ok := cr.finding(findingID); !ok {
@@ -301,6 +396,14 @@ func (cr *CaseRun) MatchLevel(findingID string) MatchLevel {
 	var computed ComputedFacts
 	if issue, ok := cr.issue(decision.CandidateIssue); ok {
 		computed = finding.Computed[issue.ID]
+		if outcome, confirmed := cr.latestConfirmation(*issue); confirmed {
+			switch outcome {
+			case Reproduced:
+				computed.C5 = FactTrue
+			case NotReproduced:
+				computed.C5 = FactFalse
+			}
+		}
 	}
 	return makeFacts(decision, computed).Level()
 }
@@ -521,6 +624,23 @@ func (cr *CaseRun) latestDecision(id string) (Decision, bool) {
 		return decision, true
 	}
 	return Decision{}, false
+}
+
+// latestConfirmation returns the most recent recorded confirmation outcome for an Issue.
+func (cr *CaseRun) latestConfirmation(issue Issue) (ReproOutcome, bool) {
+	key := cr.issueEventID(issue)
+	for i := len(cr.Log.Events) - 1; i >= 0; i-- {
+		event := cr.Log.Events[i]
+		if event.Entity != EntityIssue || event.ID != key || event.Kind != EventConfirm {
+			continue
+		}
+		payload, err := decodeConfirmation(event)
+		if err != nil {
+			continue // malformed confirmations never overlay C5; the latest valid one wins
+		}
+		return ReproOutcome(payload.Outcome), true
+	}
+	return "", false
 }
 
 func (cr *CaseRun) caseRunState() CaseRunState {

@@ -349,6 +349,359 @@ func TestDecisionValidate(t *testing.T) {
 	}
 }
 
+var (
+	confirmDigestA = "sha256:" + strings.Repeat("a", 64)
+	confirmDigestB = "sha256:" + strings.Repeat("b", 64)
+)
+
+// validConfirmPayload builds a semantically valid confirmation body bound to an issue key.
+func validConfirmPayload(issueKey string) json.RawMessage {
+	return json.RawMessage(`{"issue_id":"` + issueKey + `","outcome":"REPRODUCED","artifact_digest":"` + confirmDigestA + `","attempts":1}`)
+}
+
+// craftConfirm injects an event with a correctly recomputed hash, bypassing Append's
+// write-time validation so verification can be probed on its own.
+func craftConfirm(t *testing.T, log *Log, event Event) {
+	t.Helper()
+	event.Seq = len(log.Events) + 1
+	event.PrevHash = ""
+	if len(log.Events) > 0 {
+		event.PrevHash = log.Events[len(log.Events)-1].Hash
+	}
+	event.Hash = ""
+	if hash, err := hashEvent(event); err == nil {
+		event.Hash = hash // an unhashable payload is rejected before hash verification
+	}
+	log.Events = append(log.Events, event)
+}
+
+// A state-preserving confirmation extends the hash chain without changing the Issue state.
+func TestEventConfirmAppendsToHashChain(t *testing.T) {
+	var log Log
+	if _, err := log.Append(Event{Entity: EntityIssue, ID: "case/i1", Kind: EventAdmit, PreviousState: string(IssuePending), NewState: string(IssueUnderEvaluation), TS: "t1"}); err != nil {
+		t.Fatal(err)
+	}
+	payload := validConfirmPayload("case/i1")
+	if _, err := log.Append(Event{Entity: EntityIssue, ID: "case/i1", Kind: EventConfirm, PreviousState: string(IssueUnderEvaluation), NewState: string(IssueUnderEvaluation), TS: "t2", Adjudicator: ConfirmAdjudicator, Payload: payload}); err != nil {
+		t.Fatalf("state-preserving confirmation must append: %v", err)
+	}
+	if err := log.Verify(); err != nil {
+		t.Fatalf("Verify() after confirmation: %v", err)
+	}
+	if got := log.States()[EntityIssue+":case/i1"]; got != string(IssueUnderEvaluation) {
+		t.Fatalf("confirmation changed Issue state to %q", got)
+	}
+	var encoded bytes.Buffer
+	if err := log.WriteLog(&encoded); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := ReadLog(&encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Events[1].Payload = json.RawMessage(strings.Replace(string(payload), "REPRODUCED", "NOT_REPRODUCED", 1))
+	if err := loaded.Verify(); err == nil {
+		t.Fatal("Verify accepted a tampered confirmation payload")
+	}
+}
+
+// Spec 7.5: the latest confirmation overlays admission C5 before primary selection and close.
+func TestReproductionConfirmationDrivesCloseClassification(t *testing.T) {
+	tests := []struct {
+		name        string
+		outcome     ReproOutcome
+		c5          Fact
+		wantLevel   MatchLevel
+		wantFinding FindingState
+		wantIssue   IssueState
+	}{
+		{name: "failed confirmation demotes full match", outcome: NotReproduced, c5: FactTrue, wantLevel: LevelPartial, wantFinding: FindingPDFinding, wantIssue: IssuePD},
+		{name: "reproduced confirmation keeps full match", outcome: Reproduced, c5: FactTrue, wantLevel: LevelFull, wantFinding: FindingTPFinding, wantIssue: IssueTP},
+		{name: "reproduced confirmation supplies unknown admission c5", outcome: Reproduced, c5: FactUnknown, wantLevel: LevelFull, wantFinding: FindingTPFinding, wantIssue: IssueTP},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cr := CaseRun{
+				Case:     "case",
+				Issues:   []Issue{{Case: "case", ID: "D1", Reproduction: Reproduction{Applies: true, Oracle: "oracle", Attempts: 3}}},
+				Findings: []Finding{{ID: "f1", Row: 1, Computed: map[string]ComputedFacts{"D1": {C2: FactTrue, C4Cited: FactTrue, C5: tt.c5}}}},
+			}
+			if err := cr.Admit("t1"); err != nil {
+				t.Fatal(err)
+			}
+			if err := cr.Decide(Decision{FindingID: "f1", CandidateIssue: "D1", C1: FactTrue, C3: FactTrue, C4Shows: FactTrue, By: "reviewer", TS: "t2", Reason: "verified"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := cr.RecordReproductionConfirmation("D1", string(tt.outcome), confirmDigestA, 3, "t3"); err != nil {
+				t.Fatal(err)
+			}
+			if err := cr.Log.Verify(); err != nil {
+				t.Fatalf("confirmation broke the hash chain: %v", err)
+			}
+			if got := cr.MatchLevel("f1"); got != tt.wantLevel {
+				t.Fatalf("MatchLevel after %s = %v, want %v", tt.outcome, got, tt.wantLevel)
+			}
+			if err := cr.Close("t4"); err != nil {
+				t.Fatalf("Close after confirmation: %v", err)
+			}
+			if cr.FindingState("f1") != tt.wantFinding || cr.IssueState("D1") != tt.wantIssue {
+				t.Fatalf("after close finding=%s issue=%s, want %s/%s", cr.FindingState("f1"), cr.IssueState("D1"), tt.wantFinding, tt.wantIssue)
+			}
+		})
+	}
+}
+
+// Only applied-reproduction Issues that currently have a primary require a confirmation.
+func TestMissingReproductionConfirmations(t *testing.T) {
+	cr := CaseRun{
+		Case: "case",
+		Issues: []Issue{
+			{Case: "case", ID: "D2", Reproduction: Reproduction{Applies: true}},
+			{Case: "case", ID: "D1", Reproduction: Reproduction{Applies: true}},
+			{Case: "case", ID: "D3", Reproduction: Reproduction{Applies: false}},
+			{Case: "case", ID: "D4", Reproduction: Reproduction{Applies: true}},
+		},
+		Findings: []Finding{
+			{ID: "f2", Row: 2, Computed: map[string]ComputedFacts{"D2": {C2: FactTrue, C4Cited: FactTrue, C5: FactTrue}}},
+			{ID: "f1", Row: 1, Computed: map[string]ComputedFacts{"D1": {C2: FactTrue, C4Cited: FactTrue, C5: FactTrue}}},
+		},
+	}
+	if err := cr.Admit("t1"); err != nil {
+		t.Fatal(err)
+	}
+	for _, pair := range [][2]string{{"f1", "D1"}, {"f2", "D2"}} {
+		if err := cr.Decide(Decision{FindingID: pair[0], CandidateIssue: pair[1], C1: FactTrue, C3: FactTrue, C4Shows: FactTrue, By: "reviewer", TS: "t2", Reason: "verified"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	missing, err := cr.MissingReproductionConfirmations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(missing) != 2 || missing[0] != "D1" || missing[1] != "D2" {
+		t.Fatalf("missing = %v, want sorted [D1 D2]: D3 does not apply, D4 has no primary", missing)
+	}
+	if err := cr.RecordReproductionConfirmation("D1", string(Reproduced), confirmDigestA, 1, "t3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cr.Log.Verify(); err != nil {
+		t.Fatalf("Verify after confirmation: %v", err)
+	}
+	if missing, err = cr.MissingReproductionConfirmations(); err != nil || len(missing) != 1 || missing[0] != "D2" {
+		t.Fatalf("missing after D1 confirmation = %v, %v; want [D2]", missing, err)
+	}
+	if err := cr.RecordReproductionConfirmation("D2", string(NotReproduced), confirmDigestB, 2, "t4"); err != nil {
+		t.Fatal(err)
+	}
+	if missing, err = cr.MissingReproductionConfirmations(); err != nil || len(missing) != 0 {
+		t.Fatalf("missing after all confirmations = %v, %v; want none", missing, err)
+	}
+}
+
+// Confirmations are append-only and repeated before close: the latest outcome wins.
+func TestRepeatedConfirmationsLatestWins(t *testing.T) {
+	cr := CaseRun{
+		Case:     "case",
+		Issues:   []Issue{{Case: "case", ID: "D1", Reproduction: Reproduction{Applies: true, Oracle: "oracle", Attempts: 3}}},
+		Findings: []Finding{{ID: "f1", Row: 1, Computed: map[string]ComputedFacts{"D1": {C2: FactTrue, C4Cited: FactTrue, C5: FactTrue}}}},
+	}
+	if err := cr.Admit("t1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cr.Decide(Decision{FindingID: "f1", CandidateIssue: "D1", C1: FactTrue, C3: FactTrue, C4Shows: FactTrue, By: "reviewer", TS: "t2", Reason: "verified"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cr.RecordReproductionConfirmation("D1", string(Reproduced), confirmDigestA, 1, "t3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cr.RecordReproductionConfirmation("D1", string(NotReproduced), confirmDigestB, 2, "t4"); err != nil {
+		t.Fatal(err)
+	}
+	confirmations := 0
+	for _, event := range cr.Log.Events {
+		if event.Kind == EventConfirm {
+			confirmations++
+		}
+	}
+	if confirmations != 2 {
+		t.Fatalf("confirm events = %d, want both append-only entries", confirmations)
+	}
+	if got := cr.MatchLevel("f1"); got != LevelPartial {
+		t.Fatalf("MatchLevel with latest NOT_REPRODUCED = %v, want partial", got)
+	}
+	if err := cr.Log.Verify(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A confirmation is refused outside an Issue in UNDER_EVALUATION, on any other entity, or with a state change.
+func TestEventConfirmRejectsIllegalEntityAndState(t *testing.T) {
+	var log Log
+	if _, err := log.Append(Event{Entity: EntityIssue, ID: "case/i1", Kind: EventAdmit, PreviousState: string(IssuePending), NewState: string(IssueUnderEvaluation), TS: "t1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := log.Append(Event{Entity: EntityIssue, ID: "case/i1", Kind: EventDerive, PreviousState: string(IssueUnderEvaluation), NewState: string(IssueTP), TS: "t2"}); err != nil {
+		t.Fatal(err)
+	}
+	for name, illegal := range map[string]Event{
+		"wrong entity":           {Entity: EntityFinding, ID: "f1", Kind: EventConfirm, PreviousState: string(FindingPendingAdjudication), NewState: string(FindingPendingAdjudication)},
+		"pending issue":          {Entity: EntityIssue, ID: "case/i2", Kind: EventConfirm, PreviousState: string(IssuePending), NewState: string(IssuePending)},
+		"terminal issue":         {Entity: EntityIssue, ID: "case/i1", Kind: EventConfirm, PreviousState: string(IssueTP), NewState: string(IssueTP)},
+		"stale under-evaluation": {Entity: EntityIssue, ID: "case/i1", Kind: EventConfirm, PreviousState: string(IssueUnderEvaluation), NewState: string(IssueUnderEvaluation), Adjudicator: ConfirmAdjudicator, Payload: validConfirmPayload("case/i1")},
+		"state-changing":         {Entity: EntityIssue, ID: "case/i1", Kind: EventConfirm, PreviousState: string(IssueTP), NewState: string(IssueUnderEvaluation)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := log.Append(illegal); err == nil {
+				t.Fatalf("Append accepted a %s confirmation", name)
+			}
+		})
+	}
+}
+
+// A confirmation needs an adjudicating case, a known applied-reproduction Issue under
+// evaluation with a primary, and a well-formed outcome, digest and attempt count.
+func TestRecordReproductionConfirmationGuards(t *testing.T) {
+	build := func(t *testing.T) *CaseRun {
+		t.Helper()
+		cr := &CaseRun{
+			Case: "case",
+			Issues: []Issue{
+				{Case: "case", ID: "D1", Reproduction: Reproduction{Applies: true, Oracle: "oracle"}},
+				{Case: "case", ID: "D3", Reproduction: Reproduction{Applies: false}},
+				{Case: "case", ID: "D4", Reproduction: Reproduction{Applies: true}},
+			},
+			Findings: []Finding{{ID: "f1", Row: 1, Computed: map[string]ComputedFacts{"D1": {C2: FactTrue, C4Cited: FactTrue, C5: FactTrue}}}},
+		}
+		if err := cr.Admit("t1"); err != nil {
+			t.Fatal(err)
+		}
+		return cr
+	}
+	adjudicate := func(t *testing.T, cr *CaseRun) {
+		t.Helper()
+		if err := cr.Decide(Decision{FindingID: "f1", CandidateIssue: "D1", C1: FactTrue, C3: FactTrue, C4Shows: FactTrue, By: "reviewer", TS: "t2", Reason: "verified"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustFail := func(t *testing.T, err error, want string) {
+		t.Helper()
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %v, want substring %q", err, want)
+		}
+	}
+	t.Run("case not adjudicating", func(t *testing.T) {
+		mustFail(t, build(t).RecordReproductionConfirmation("D1", "REPRODUCED", confirmDigestA, 1, "t2"), "state")
+	})
+	t.Run("case closed", func(t *testing.T) {
+		cr := build(t)
+		adjudicate(t, cr)
+		if err := cr.RecordReproductionConfirmation("D1", "REPRODUCED", confirmDigestA, 1, "t3"); err != nil {
+			t.Fatal(err)
+		}
+		if err := cr.Close("t4"); err != nil {
+			t.Fatal(err)
+		}
+		mustFail(t, cr.RecordReproductionConfirmation("D1", "REPRODUCED", confirmDigestA, 1, "t5"), "state")
+	})
+	t.Run("guards", func(t *testing.T) {
+		cr := build(t)
+		adjudicate(t, cr)
+		mustFail(t, cr.RecordReproductionConfirmation("DX", "REPRODUCED", confirmDigestA, 1, "t3"), "unknown issue")
+		mustFail(t, cr.RecordReproductionConfirmation("D3", "REPRODUCED", confirmDigestA, 1, "t3"), "does not apply")
+		mustFail(t, cr.RecordReproductionConfirmation("D4", "REPRODUCED", confirmDigestA, 1, "t3"), "no primary")
+		for _, tc := range []struct {
+			name, outcome, digest string
+			attempts              int
+			want                  string
+		}{
+			{name: "outcome", outcome: "MAYBE", digest: confirmDigestA, attempts: 1, want: "outcome"},
+			{name: "empty digest", outcome: "REPRODUCED", digest: "", attempts: 1, want: "digest"},
+			{name: "non-sha256 digest", outcome: "REPRODUCED", digest: "sha256:abc", attempts: 1, want: "digest"},
+			{name: "negative attempts", outcome: "REPRODUCED", digest: confirmDigestA, attempts: -1, want: "attempts"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				mustFail(t, cr.RecordReproductionConfirmation("D1", tc.outcome, tc.digest, tc.attempts, "t3"), tc.want)
+			})
+		}
+		if err := cr.RecordReproductionConfirmation("D1", "NOT_REPRODUCED", confirmDigestA, 0, "t3"); err != nil {
+			t.Fatalf("zero attempts must be allowed when no agent tests were supplied: %v", err)
+		}
+	})
+}
+
+// A crafted confirmation with a correctly recomputed hash must fail verification on its semantics alone.
+func TestEventConfirmVerifyRejectsMalformedPayloads(t *testing.T) {
+	open := `{"issue_id":"case/i1","outcome":"REPRODUCED","artifact_digest":"` + confirmDigestA + `","attempts":1`
+	tests := []struct {
+		name        string
+		payload     string
+		adjudicator string
+	}{
+		{name: "unknown outcome", payload: `{"issue_id":"case/i1","outcome":"MAYBE","artifact_digest":"` + confirmDigestA + `","attempts":1}`},
+		{name: "duplicate outcome keys", payload: `{"issue_id":"case/i1","outcome":"NOT_REPRODUCED","outcome":"REPRODUCED","artifact_digest":"` + confirmDigestA + `","attempts":1}`},
+		{name: "empty digest", payload: `{"issue_id":"case/i1","outcome":"REPRODUCED","artifact_digest":"","attempts":1}`},
+		{name: "negative attempts", payload: `{"issue_id":"case/i1","outcome":"NOT_REPRODUCED","artifact_digest":"` + confirmDigestA + `","attempts":-7}`},
+		{name: "empty object", payload: `{}`},
+		{name: "foreign issue key", payload: `{"issue_id":"i1","outcome":"REPRODUCED","artifact_digest":"` + confirmDigestA + `","attempts":1}`},
+		{name: "unknown field", payload: open + `,"extra":true}`},
+		{name: "trailing json", payload: open + `} {"x":1}`},
+		{name: "missing payload", payload: ""},
+		{name: "wrong adjudicator", payload: open + `}`, adjudicator: "reviewer"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var log Log
+			if _, err := log.Append(Event{Entity: EntityIssue, ID: "case/i1", Kind: EventAdmit, PreviousState: string(IssuePending), NewState: string(IssueUnderEvaluation), TS: "t1"}); err != nil {
+				t.Fatal(err)
+			}
+			event := Event{Entity: EntityIssue, ID: "case/i1", Kind: EventConfirm, PreviousState: string(IssueUnderEvaluation), NewState: string(IssueUnderEvaluation), TS: "t2", Adjudicator: ConfirmAdjudicator}
+			if tt.adjudicator != "" {
+				event.Adjudicator = tt.adjudicator
+			}
+			if tt.payload != "" {
+				event.Payload = json.RawMessage(tt.payload)
+			}
+			craftConfirm(t, &log, event)
+			err := log.Verify()
+			if err == nil {
+				t.Fatal("Verify accepted a malformed confirmation")
+			}
+			if !strings.Contains(err.Error(), "confirm") {
+				t.Fatalf("rejection must come from confirmation semantics, got: %v", err)
+			}
+		})
+	}
+}
+
+// A malformed confirmation never satisfies the missing-confirmation guard.
+func TestMissingConfirmationIgnoresMalformedEvent(t *testing.T) {
+	cr := CaseRun{
+		Case:     "case",
+		Issues:   []Issue{{Case: "case", ID: "D1", Reproduction: Reproduction{Applies: true, Oracle: "oracle"}}},
+		Findings: []Finding{{ID: "f1", Row: 1, Computed: map[string]ComputedFacts{"D1": {C2: FactTrue, C4Cited: FactTrue, C5: FactTrue}}}},
+	}
+	if err := cr.Admit("t1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cr.Decide(Decision{FindingID: "f1", CandidateIssue: "D1", C1: FactTrue, C3: FactTrue, C4Shows: FactTrue, By: "reviewer", TS: "t2", Reason: "verified"}); err != nil {
+		t.Fatal(err)
+	}
+	craftConfirm(t, &cr.Log, Event{Entity: EntityIssue, ID: "case/D1", Kind: EventConfirm, PreviousState: string(IssueUnderEvaluation), NewState: string(IssueUnderEvaluation), TS: "t3", Adjudicator: ConfirmAdjudicator, Payload: json.RawMessage(`{"issue_id":"case/D1","outcome":"MAYBE","artifact_digest":"` + confirmDigestA + `","attempts":1}`)})
+	missing, err := cr.MissingReproductionConfirmations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(missing) != 1 || missing[0] != "D1" {
+		t.Fatalf("missing = %v, want [D1]: a malformed confirmation must not count", missing)
+	}
+	if err := cr.RecordReproductionConfirmation("D1", string(Reproduced), confirmDigestA, 1, "t4"); err != nil {
+		t.Fatal(err)
+	}
+	if missing, err = cr.MissingReproductionConfirmations(); err != nil || len(missing) != 0 {
+		t.Fatalf("missing after a valid confirmation = %v, %v; want none", missing, err)
+	}
+}
+
 func equalDomains(a, b []Domain) bool {
 	if len(a) != len(b) {
 		return false

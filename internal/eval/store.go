@@ -111,15 +111,23 @@ func ReconstructCompletedRun(stored StoredRun, manifest Manifest) (RunData, erro
 }
 
 // ReproFromEvents derives reproduction outcomes from the verified adjudication events.
+// A recorded Issue confirmation maps to that Issue's primary finding only; Issues without
+// a confirmation keep the legacy admission-C5 fold, and Issues whose reproduction does not
+// apply are NOT_APPLICABLE.
 func ReproFromEvents(caseRun CaseRun) map[string]ReproOutcome {
 	decisions := make(map[string]Decision)
+	confirmations := make(map[string]ReproOutcome)
 	for _, event := range caseRun.Log.Events {
-		if event.Entity != EntityFinding || event.Kind != EventDecide {
-			continue
-		}
-		var decision Decision
-		if json.Unmarshal(event.Payload, &decision) == nil {
-			decisions[decision.FindingID] = decision
+		switch {
+		case event.Entity == EntityFinding && event.Kind == EventDecide:
+			var decision Decision
+			if json.Unmarshal(event.Payload, &decision) == nil {
+				decisions[decision.FindingID] = decision
+			}
+		case event.Entity == EntityIssue && event.Kind == EventConfirm:
+			if payload, err := decodeConfirmation(event); err == nil {
+				confirmations[event.ID] = ReproOutcome(payload.Outcome)
+			}
 		}
 	}
 	outcomes := make(map[string]ReproOutcome)
@@ -132,6 +140,15 @@ func ReproFromEvents(caseRun CaseRun) map[string]ReproOutcome {
 		if !ok {
 			continue
 		}
+		if issue, exists := caseRun.issue(decision.CandidateIssue); exists {
+			if _, confirmed := confirmations[caseRun.issueEventID(*issue)]; confirmed {
+				continue // the confirmation outcome maps to the Issue's primary finding only
+			}
+			if !issue.Reproduction.Applies {
+				outcomes[finding.ID] = NotApplicable
+				continue
+			}
+		}
 		switch facts.C5 {
 		case FactTrue:
 			outcomes[finding.ID] = Reproduced
@@ -141,6 +158,29 @@ func ReproFromEvents(caseRun CaseRun) map[string]ReproOutcome {
 			outcomes[finding.ID] = NotApplicable
 		default:
 			outcomes[finding.ID] = NotRun
+		}
+	}
+	plan, planErr := caseRun.selectionPlan()
+	for _, issue := range caseRun.Issues {
+		key := caseRun.issueEventID(issue)
+		outcome, confirmed := confirmations[key]
+		if !confirmed {
+			continue
+		}
+		primary := caseRun.Primary(issue.ID)
+		if primary == "" && planErr == nil {
+			primary = plan.primaries[key]
+		}
+		if primary == "" {
+			continue
+		}
+		switch outcome {
+		case Reproduced:
+			outcomes[primary] = Reproduced
+		case NotReproduced:
+			outcomes[primary] = NotReproduced
+		default:
+			outcomes[primary] = NotRun
 		}
 	}
 	return outcomes

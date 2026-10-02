@@ -21,6 +21,10 @@ const (
 	EventDerive     = "derive"
 	EventReopen     = "reopen"
 	EventTransition = "transition"
+	EventConfirm    = "confirm_reproduction"
+
+	// ConfirmAdjudicator is the rule identity recorded with every reproduction confirmation.
+	ConfirmAdjudicator = "bench-confirm@1"
 )
 
 // Event is one append-only state or adjudication record.
@@ -52,6 +56,11 @@ func (l *Log) Append(event Event) (Event, error) {
 	if !validEventKind(event.Kind) {
 		return Event{}, fmt.Errorf("unknown event kind %q", event.Kind)
 	}
+	if event.Kind == EventConfirm {
+		if _, err := decodeConfirmation(event); err != nil {
+			return Event{}, err
+		}
+	}
 	states := l.States()
 	current, exists := states[event.Entity+":"+event.ID]
 	if !exists {
@@ -65,8 +74,8 @@ func (l *Log) Append(event Event) (Event, error) {
 		return Event{}, fmt.Errorf("%s %q previous state %q does not match current state %q", event.Entity, event.ID, event.PreviousState, current)
 	}
 	if event.PreviousState == event.NewState {
-		if event.Kind != EventDecide {
-			return Event{}, fmt.Errorf("state-preserving event must be a decide event")
+		if event.Kind != EventDecide && event.Kind != EventConfirm {
+			return Event{}, fmt.Errorf("state-preserving event must be a decide or confirm event")
 		}
 	} else {
 		if isTerminalState(event.Entity, event.PreviousState) {
@@ -225,11 +234,65 @@ func initialState(entity string) (string, bool) {
 
 func validEventKind(kind string) bool {
 	switch kind {
-	case EventAdmit, EventDecide, EventDerive, EventReopen, EventTransition:
+	case EventAdmit, EventDecide, EventDerive, EventReopen, EventTransition, EventConfirm:
 		return true
 	default:
 		return false
 	}
+}
+
+// validStatePreservingConfirm reports whether an event is a legal state-preserving
+// reproduction confirmation: an unchanged Issue in UNDER_EVALUATION.
+func validStatePreservingConfirm(event Event) bool {
+	return event.Kind == EventConfirm && event.Entity == EntityIssue &&
+		event.PreviousState == string(IssueUnderEvaluation) && event.NewState == string(IssueUnderEvaluation)
+}
+
+// decodeConfirmation validates a confirm event's identity binding and payload semantics:
+// an unchanged Issue in UNDER_EVALUATION, the bench-confirm@1 rule, and a body whose
+// issue key equals the event id with an allowed outcome, sha256 digest and attempt count.
+// The payload bytes must equal the json.Marshal encoding the writer emits, which also
+// rejects duplicate keys and any alternate whitespace, order or escaping.
+// Append and Verify share this gate, and consumption points re-run it to fail closed.
+func decodeConfirmation(event Event) (confirmationPayload, error) {
+	if !validStatePreservingConfirm(event) {
+		return confirmationPayload{}, fmt.Errorf("confirm event must be a state-preserving %s event in %s, got entity %q %s -> %s", EntityIssue, IssueUnderEvaluation, event.Entity, event.PreviousState, event.NewState)
+	}
+	if event.Adjudicator != ConfirmAdjudicator {
+		return confirmationPayload{}, fmt.Errorf("confirm adjudicator must be %q, got %q", ConfirmAdjudicator, event.Adjudicator)
+	}
+	if len(event.Payload) == 0 {
+		return confirmationPayload{}, fmt.Errorf("confirm payload is required")
+	}
+	var payload confirmationPayload
+	decoder := json.NewDecoder(strings.NewReader(string(event.Payload)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&payload); err != nil {
+		return confirmationPayload{}, fmt.Errorf("decode confirm payload: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return confirmationPayload{}, fmt.Errorf("confirm payload has trailing JSON data")
+	}
+	if payload.IssueID == "" || payload.IssueID != event.ID {
+		return confirmationPayload{}, fmt.Errorf("confirm payload issue_id %q must equal event id %q", payload.IssueID, event.ID)
+	}
+	if payload.Outcome != string(Reproduced) && payload.Outcome != string(NotReproduced) {
+		return confirmationPayload{}, fmt.Errorf("confirm payload outcome must be %q or %q, got %q", Reproduced, NotReproduced, payload.Outcome)
+	}
+	if !validSHA256Digest(payload.ArtifactDigest) {
+		return confirmationPayload{}, fmt.Errorf("confirm payload artifact_digest %q is not a sha256 digest", payload.ArtifactDigest)
+	}
+	if payload.Attempts < 0 {
+		return confirmationPayload{}, fmt.Errorf("confirm payload attempts cannot be negative, got %d", payload.Attempts)
+	}
+	canonical, err := json.Marshal(payload)
+	if err != nil {
+		return confirmationPayload{}, fmt.Errorf("canonicalize confirm payload: %w", err)
+	}
+	if string(canonical) != string(event.Payload) {
+		return confirmationPayload{}, fmt.Errorf("confirm payload is not the canonical encoding emitted by the writer")
+	}
+	return payload, nil
 }
 
 func isTerminalState(entity, state string) bool {

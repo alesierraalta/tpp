@@ -160,19 +160,36 @@ func importTestInputs(t *testing.T) (string, Manifest, Policy) {
 }
 
 // writeImportProvenance rewrites aggregate.json with a full provenance whose binding fields the
-// test chooses; the base fields stay what writeImportResult wrote.
-func writeImportProvenance(t *testing.T, resultsDir string, fields map[string]any) {
+// test chooses; the base fields stay what writeImportResult wrote. The optional aggregate field
+// carries the runner's own aggregate verdict, such as budget_exhausted.
+func writeImportProvenance(t *testing.T, resultsDir string, fields map[string]any, aggregate ...map[string]any) {
 	t.Helper()
 	provenance := map[string]any{"model": "model", "runner": "pi", "agent_config": "bench", "skills_digest": "sha256:test", "environment": "linux/amd64"}
 	for key, value := range fields {
 		provenance[key] = value
 	}
-	data, err := json.Marshal(map[string]any{"model": "model", "provenance": provenance})
+	aggregateJSON := map[string]any{"model": "model", "provenance": provenance}
+	if len(aggregate) > 0 {
+		for key, value := range aggregate[0] {
+			aggregateJSON[key] = value
+		}
+	}
+	data, err := json.Marshal(aggregateJSON)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(resultsDir, "aggregate.json"), data, 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// boundSuiteBudgetProvenance is the reading a suite budget stop seals: the manifest binding, a
+// valid instrument, a supported budget, a budget that ran out, and an execution that never
+// finished (internal/bench/run.go noteBudgetExhausted with suite=true).
+func boundSuiteBudgetProvenance(manifest Manifest) map[string]any {
+	return map[string]any{
+		"manifest_sha256": manifest.ManifestSHA256, "instrument_valid": true,
+		"execution_complete": false, "budget_status": "supported",
 	}
 }
 
@@ -333,4 +350,150 @@ func TestImportRunRefusesACorruptedSavedTestArtifact(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "tests/d1.sh") {
 		t.Fatalf("a corrupted snapshot must be refused, got %v", err)
 	}
+}
+
+// writeImportCaseResult writes one case's runner result, so a reading can be shaped case by case
+// (a case that never ran has no file at all).
+func writeImportCaseResult(t *testing.T, resultsDir, caseID, resultJSON string) {
+	t.Helper()
+	caseDir := filepath.Join(resultsDir, caseID, "1")
+	if err := os.MkdirAll(caseDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(caseDir, "result.json"), []byte(resultJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// twoCaseImportInputs is a manifest whose second case exists so a budget stop can leave it unrun.
+func twoCaseImportInputs(t *testing.T) (string, Manifest, Policy) {
+	t.Helper()
+	benchDir := t.TempDir()
+	canary := "0123456789abcdef0123456789abcdef"
+	writeManifestCase(t, benchDir, canary)
+	caseDir := filepath.Join(benchDir, "cases", "c2")
+	for _, sub := range []string{"fixture", "fix"} {
+		if err := os.MkdirAll(filepath.Join(caseDir, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	key, err := json.Marshal(bench.Key{Schema: 2, ID: "c2", Language: "go", Suite: "go test", Surface: "library", Control: bench.ControlClean, Canary: canary, Defects: []bench.Defect{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(caseDir, bench.KeyFile), key, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	spec := testManifestSpec(canary)
+	spec.Cases = []string{"c1", "c2"}
+	spec.Budgets.MaxCases = 2
+	manifest, err := BuildManifest(benchDir, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err = manifest.Seal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := (Policy{Name: "test"}).Seal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return benchDir, manifest, policy
+}
+
+// A suite whose own budget ran out never measured the whole reading, so it imports as ABORTED on
+// budget — the state the comparator reads as the hard completeness blocker — while per-case
+// exhaustion, infrastructure failure and a compromised instrument keep their own handling.
+func TestImportRunRecordsSuiteBudgetAbortAsAborted(t *testing.T) {
+	t.Run("aborted on budget", func(t *testing.T) {
+		benchDir, manifest, policy := importTestInputs(t)
+		results := t.TempDir()
+		writeImportResult(t, results, `{"case":"c1","run":1,"plan_found":true,"plan_format":"table","budget_exhausted":true,"outcome":"budget_exhausted","tokens":5}`, importPlanTable, "")
+		writeImportProvenance(t, results, boundSuiteBudgetProvenance(manifest), map[string]any{"budget_exhausted": true})
+		got, err := ImportRun(results, benchDir, manifest, policy, "candidate", 1, "t1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Run.Record.State != RunAborted || got.Run.Record.AbortReason != "budget" {
+			t.Fatalf("suite budget stop = state %s reason %q, want %s on budget", got.Run.Record.State, got.Run.Record.AbortReason, RunAborted)
+		}
+		if len(got.Run.Record.Data.Cases) != 0 {
+			t.Fatalf("aborted reading kept %d case metrics, want none", len(got.Run.Record.Data.Cases))
+		}
+	})
+
+	t.Run("a case that never ran is recorded aborted", func(t *testing.T) {
+		benchDir, manifest, policy := twoCaseImportInputs(t)
+		results := t.TempDir()
+		writeImportResult(t, results, `{"case":"c1","run":1,"plan_found":true,"plan_format":"table","budget_exhausted":true,"outcome":"budget_exhausted","tokens":5}`, importPlanTable, "")
+		writeImportProvenance(t, results, boundSuiteBudgetProvenance(manifest), map[string]any{"budget_exhausted": true})
+		got, err := ImportRun(results, benchDir, manifest, policy, "candidate", 1, "t1")
+		if err != nil {
+			t.Fatalf("an unstarted case must not fail the import before the abort is seen: %v", err)
+		}
+		unrun, ok := got.Run.CaseRuns["c2"]
+		if !ok || unrun.caseRunState() != CaseRunAborted || len(unrun.Findings) != 0 {
+			t.Fatalf("unrun case = %+v, want an aborted ledger with no fabricated findings", unrun)
+		}
+		if got.Run.CaseOutcomes["c2"] != "missing_execution" {
+			t.Fatalf("unrun case outcome = %q, want the explicit missing execution", got.Run.CaseOutcomes["c2"])
+		}
+		if got.Run.CaseResources["c2"].Tokens != nil {
+			t.Fatal("an unrun case must not record a measured usage")
+		}
+		if violations := CheckCaseRun(&unrun); len(violations) != 0 {
+			t.Fatalf("unrun case ledger invariants = %+v, want none", violations)
+		}
+		if got.Run.Record.State != RunAborted {
+			t.Fatalf("state = %s, want %s", got.Run.Record.State, RunAborted)
+		}
+	})
+
+	t.Run("per-case exhaustion stays scoreable", func(t *testing.T) {
+		benchDir, manifest, policy := importTestInputs(t)
+		results := t.TempDir()
+		writeImportResult(t, results, `{"case":"c1","run":1,"plan_found":true,"plan_format":"table","budget_exhausted":true,"outcome":"budget_exhausted","tokens":5}`, importPlanTable, "")
+		complete := boundSuiteBudgetProvenance(manifest)
+		complete["execution_complete"] = true
+		writeImportProvenance(t, results, complete, map[string]any{"budget_exhausted": true})
+		got, err := ImportRun(results, benchDir, manifest, policy, "candidate", 1, "t1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Run.Record.State != RunAdjudicating || got.Run.CaseOutcomes["c1"] != "budget_exhausted" {
+			t.Fatalf("complete execution with a budgeted case = %s/%q, want %s with the case scored", got.Run.Record.State, got.Run.CaseOutcomes["c1"], RunAdjudicating)
+		}
+	})
+
+	t.Run("infrastructure failure is not a budget abort", func(t *testing.T) {
+		benchDir, manifest, policy := importTestInputs(t)
+		results := t.TempDir()
+		writeImportResult(t, results, `{"case":"c1","run":1,"failed":true,"fail_reason":"HTTP 503 from the model endpoint","tokens":5}`, "", "")
+		incomplete := boundSuiteBudgetProvenance(manifest)
+		writeImportProvenance(t, results, incomplete)
+		got, err := ImportRun(results, benchDir, manifest, policy, "candidate", 1, "t1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Run.Record.State != RunFailedInfrastructure {
+			t.Fatalf("state = %s, want %s for an external failure", got.Run.Record.State, RunFailedInfrastructure)
+		}
+	})
+
+	t.Run("invalid instrument keeps its stronger refusal", func(t *testing.T) {
+		benchDir, manifest, policy := importTestInputs(t)
+		results := t.TempDir()
+		writeImportResult(t, results, `{"case":"c1","run":1,"plan_found":true,"plan_format":"table","budget_exhausted":true,"outcome":"budget_exhausted","tokens":5}`, importPlanTable, "")
+		compromised := boundSuiteBudgetProvenance(manifest)
+		compromised["instrument_valid"] = false
+		writeImportProvenance(t, results, compromised, map[string]any{"budget_exhausted": true})
+		got, err := ImportRun(results, benchDir, manifest, policy, "candidate", 1, "t1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Run.Record.State != RunInvalid {
+			t.Fatalf("state = %s, want %s for an invalid instrument", got.Run.Record.State, RunInvalid)
+		}
+	})
 }

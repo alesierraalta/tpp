@@ -372,3 +372,25 @@ func hasTag(d ComparisonDecision, tag string) bool {
 	}
 	return false
 }
+
+// A budget abort is a hard completeness blocker (H7), not a metrics prerequisite: it is judged on
+// its own, so neither a short baseline nor a candidate that still reached k_min can hide it.
+func TestDecideBudgetAbortBlocksWithoutMetricsPrerequisites(t *testing.T) {
+	issues := repeatedIssues(20, Low, Correctness, IssueTP, IssueTP)
+	states := allStates(20, IssueTP)
+
+	in := decisionTestInput(issues, decisionTestSide{states: states}, decisionTestSide{states: states})
+	in.Baseline.Runs = in.Baseline.Runs[:1]
+	in.Candidate.Runs[0].State, in.Candidate.Runs[0].AbortReason = RunAborted, "budget"
+	if got := Decide(in); got.Verdict != "FAIL" || got.Category != "COMPLETENESS" || !hasBlocker(got, "H7") {
+		t.Fatalf("budget abort under a short baseline = %+v", got)
+	}
+
+	in = decisionTestInput(issues, decisionTestSide{states: states}, decisionTestSide{states: states})
+	aborted := in.Candidate.Runs[0]
+	aborted.State, aborted.AbortReason, aborted.Data = RunAborted, "budget", RunData{}
+	in.Candidate.Runs = append(in.Candidate.Runs, aborted)
+	if got := Decide(in); got.Verdict != "FAIL" || got.Category != "COMPLETENESS" || !hasBlocker(got, "H7") {
+		t.Fatalf("budget abort beside completed runs = %+v", got)
+	}
+}

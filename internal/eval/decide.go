@@ -116,8 +116,10 @@ func Decide(in DecisionInput) ComparisonDecision {
 		decision.Reasons = append(decision.Reasons, "I12 precondition failed: model, runner, or environment differs across runs")
 		return decision
 	}
-	if decision.K.Candidate < in.Manifest.Replicates.KMin && hasBudgetAbort(in.Candidate.Runs) {
-		addBlocker("H7", "COMPLETENESS", fmt.Sprintf("candidate completed %d runs, below k_min %d, after a budget abort", decision.K.Candidate, in.Manifest.Replicates.KMin))
+	// A budget abort is a completeness blocker on its own terms, not a metrics prerequisite: it is
+	// judged before the k_min check so no short side can turn it into a mere NO_DECISION.
+	if hasBudgetAbort(in.Candidate.Runs) {
+		addBlocker("H7", "COMPLETENESS", fmt.Sprintf("candidate has a run aborted on budget: %d completed runs, k_min %d", decision.K.Candidate, in.Manifest.Replicates.KMin))
 		finalizeDecision(&decision, in)
 		return decision
 	}

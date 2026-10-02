@@ -16,8 +16,9 @@ type Imported struct {
 }
 
 type importedAggregate struct {
-	Model      string           `json:"model"`
-	Provenance bench.Provenance `json:"provenance"`
+	Model           string           `json:"model"`
+	BudgetExhausted bool             `json:"budget_exhausted"`
+	Provenance      bench.Provenance `json:"provenance"`
 }
 
 type importedResult struct {
@@ -51,6 +52,7 @@ func ImportRun(resultsDir, benchDir string, manifest Manifest, policy Policy, ha
 	if aggregate.Model == "" {
 		aggregate.Model = aggregate.Provenance.Model
 	}
+	suiteAborted := suiteBudgetAbort(aggregate)
 	components := HarnessComponents{
 		SkillsDigest:    aggregate.Provenance.SkillsDigest,
 		Runner:          aggregate.Provenance.Runner,
@@ -92,6 +94,21 @@ func ImportRun(resultsDir, benchDir string, manifest Manifest, policy Policy, ha
 		}
 		caseDir := filepath.Join(resultsDir, caseID, fmt.Sprint(replicate))
 		resultData, err := os.ReadFile(filepath.Join(caseDir, "result.json"))
+		if err != nil && suiteAborted && os.IsNotExist(err) {
+			// The suite budget stopped the run before this case started: it never executed, so its
+			// ledger records the abort with no findings and no usage rather than a measured zero.
+			cr := CaseRun{Case: caseID, Issues: issues}
+			if err := appendCaseTransition(&cr, CaseRunCreated, CaseRunRunning, ts, ""); err != nil {
+				return Imported{}, err
+			}
+			if err := appendCaseTransition(&cr, CaseRunRunning, CaseRunAborted, ts, "suite budget exhausted before this case ran"); err != nil {
+				return Imported{}, err
+			}
+			stored.CaseControls[caseID] = key.IsCleanControl()
+			stored.CaseOutcomes[caseID] = "missing_execution"
+			stored.CaseRuns[caseID] = cr
+			continue
+		}
 		if err != nil {
 			return Imported{}, fmt.Errorf("read result for case %s: %w", caseID, err)
 		}
@@ -220,6 +237,14 @@ func ImportRun(resultsDir, benchDir string, manifest Manifest, policy Policy, ha
 		}
 		stored.CaseRuns[caseID] = cr
 	}
+	// A suite whose own budget ran out never measured the whole reading, so the run is ABORTED on
+	// budget (spec 5.4): that is the state the comparator reads as the hard completeness blocker.
+	// A run already carrying a stronger terminal state keeps it, so an invalid instrument, a leak
+	// or an infrastructure failure is never relabelled as a budget abort.
+	if suiteAborted && stored.Record.State == RunAdjudicating {
+		stored.Record.State = RunAborted
+		stored.Record.AbortReason = "budget"
+	}
 	// Provenance that does not prove a valid, complete, budget-supported execution may never
 	// become a COMPLETED record (spec 15): land it INVALID with the reason. Cases already
 	// dispositioned failed or invalid set a terminal state of their own.
@@ -228,6 +253,22 @@ func ImportRun(resultsDir, benchDir string, manifest Manifest, policy Policy, ha
 		stored.Record.AbortReason = reason
 	}
 	return Imported{Run: stored}, nil
+}
+
+// suiteBudgetAbort reports whether the harness's own suite budget stopped a manifest-bound
+// reading: the aggregate says a budget ran out, the runner proves a valid instrument and a
+// supported budget, and the execution never completed. A case that ran out of its own budget
+// leaves the execution complete and is scored (spec 5.3), so it never lands here; an invalid
+// instrument or an unverified budget keeps the stronger invalid handling (spec 15).
+func suiteBudgetAbort(aggregate importedAggregate) bool {
+	p := aggregate.Provenance
+	if !aggregate.BudgetExhausted || p.ManifestSHA256 == "" {
+		return false
+	}
+	if p.InstrumentValid == nil || !*p.InstrumentValid || p.BudgetStatus != "supported" {
+		return false
+	}
+	return p.ExecutionComplete != nil && !*p.ExecutionComplete
 }
 
 // provenanceCompromised names why a manifest-bound reading may not become a COMPLETED record:

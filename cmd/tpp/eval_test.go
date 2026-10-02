@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -13,10 +14,11 @@ import (
 	"github.com/alesierraalta/tpp/internal/eval"
 )
 
-func TestBenchEvalCLIImportAdjudicateCompareAndVerify(t *testing.T) {
-	bin := buildCLI(t)
-	root := t.TempDir()
-	benchDir := filepath.Join(root, "bench")
+// writeEvalCLIFixture writes a two-case benchmark, its sealed manifest and sealed policy, and
+// returns the benchmark, manifest and policy paths.
+func writeEvalCLIFixture(t *testing.T, root string) (benchDir, manifestPath, policyPath string) {
+	t.Helper()
+	benchDir = filepath.Join(root, "bench")
 	canary := "0123456789abcdef0123456789abcdef"
 	for _, caseID := range []string{"c1", "c2"} {
 		caseDir := filepath.Join(benchDir, "cases", caseID)
@@ -69,7 +71,7 @@ func TestBenchEvalCLIImportAdjudicateCompareAndVerify(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifestPath, policyPath := filepath.Join(root, "manifest.json"), filepath.Join(root, "policy.json")
+	manifestPath, policyPath = filepath.Join(root, "manifest.json"), filepath.Join(root, "policy.json")
 	writeCanonical := func(path string, value any) {
 		t.Helper()
 		data, err := eval.CanonicalJSON(value)
@@ -82,6 +84,13 @@ func TestBenchEvalCLIImportAdjudicateCompareAndVerify(t *testing.T) {
 	}
 	writeCanonical(manifestPath, manifest)
 	writeCanonical(policyPath, policy)
+	return benchDir, manifestPath, policyPath
+}
+
+func TestBenchEvalCLIImportAdjudicateCompareAndVerify(t *testing.T) {
+	bin := buildCLI(t)
+	root := t.TempDir()
+	benchDir, manifestPath, policyPath := writeEvalCLIFixture(t, root)
 
 	for _, side := range []string{"baseline", "candidate"} {
 		resultsDir := filepath.Join(root, side+"-results")
@@ -1061,5 +1070,182 @@ func TestBenchEvalConfirmRefusesAnIssueWhoseVariantWasNeverChecked(t *testing.T)
 	}
 	if string(eventsAfter) != string(eventsBefore) {
 		t.Fatal("refused confirm appended events")
+	}
+}
+
+// A suite whose own budget ran out never measured the whole candidate, so the built CLI must carry
+// the abort through import and report the hard completeness blocker H7 — never a fabricated
+// candidate metric, a missing-file error, or a plain NO_DECISION.
+func TestBenchEvalCLICompareReportsBudgetAbortAsCompletenessFailure(t *testing.T) {
+	bin := buildCLI(t)
+	root := t.TempDir()
+	benchDir, manifestPath, policyPath := writeEvalCLIFixture(t, root)
+	manifest, err := eval.LoadManifest(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	emptyPlan := "## Findings\n\n| Id | Finding | Type | Location | Evidence | Severity |\n|---|---|---|---|---|---|\n"
+	plan := emptyPlan + "| F1 | observed concern | boundary | src/a.go:10 | - | high |\n"
+	writeSide := func(name string, suiteBudgetStop bool) string {
+		t.Helper()
+		resultsDir := filepath.Join(root, name+"-results")
+		if err := os.MkdirAll(resultsDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		provenance := map[string]any{
+			"model": "model", "runner": "pi", "agent_config": bench.ConfigBench,
+			"skills_digest": "sha256:skills", "environment": "linux/amd64",
+		}
+		aggregate := map[string]any{"model": "model", "provenance": provenance}
+		if suiteBudgetStop {
+			// What internal/bench/run.go seals when the suite budget stops the run: the manifest
+			// binding, a valid instrument, a supported budget, and an execution that never finished.
+			provenance["manifest_sha256"] = manifest.ManifestSHA256
+			provenance["instrument_valid"] = true
+			provenance["execution_complete"] = false
+			provenance["budget_status"] = "supported"
+			aggregate["budget_exhausted"] = true
+		}
+		aggregateData, err := json.Marshal(aggregate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(resultsDir, "aggregate.json"), aggregateData, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		// c2 runs in the baseline only: under the suite budget stop it never started, so the
+		// runner kept no result for it.
+		cases := []string{"c1"}
+		if !suiteBudgetStop {
+			cases = append(cases, "c2")
+		}
+		for _, caseID := range cases {
+			caseRunDir := filepath.Join(resultsDir, caseID, "1")
+			if err := os.MkdirAll(caseRunDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			result := bench.Result{Case: caseID, Run: 1, PlanFound: true, PlanFormat: bench.FormatTable, CostUSD: 0.1, Seconds: 2}
+			if caseID == "c1" {
+				// The budgeted case did spend tokens before it ran out.
+				spent := 120
+				result.Tokens = &spent
+				if suiteBudgetStop {
+					result.BudgetExhausted, result.Outcome = true, "budget_exhausted"
+				}
+			}
+			if caseID == "c2" {
+				measured := 0
+				result.Tokens = &measured
+			}
+			resultData, err := json.Marshal(result)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(caseRunDir, "result.json"), resultData, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			casePlan := emptyPlan
+			if caseID == "c1" {
+				casePlan = plan
+			}
+			if err := os.WriteFile(filepath.Join(caseRunDir, "test-plan.md"), []byte(casePlan), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return resultsDir
+	}
+
+	baselineEval, candidateEval := filepath.Join(root, "baseline-eval"), filepath.Join(root, "candidate-eval")
+	if out, code := runCLI(t, bin, "bench", "eval", "import", "--results", writeSide("baseline", false), "--manifest", manifestPath, "--policy", policyPath, "--harness", "baseline", "--replicate", "1", "--out", baselineEval, "--bench-dir", benchDir); code != 0 {
+		t.Fatalf("baseline import exited %d:\n%s", code, out)
+	}
+	if out, code := runCLI(t, bin, "bench", "eval", "adjudicate", "--eval", filepath.Join(baselineEval, "run-1"), "--case", "c1", "--finding", "c1-f1", "--outcome", "FP", "--by", "reviewer", "--reason", "verified false positive"); code != 0 {
+		t.Fatalf("adjudicate exited %d:\n%s", code, out)
+	}
+	if out, code := runCLI(t, bin, "bench", "eval", "close", "--eval", filepath.Join(baselineEval, "run-1")); code != 0 {
+		t.Fatalf("close exited %d:\n%s", code, out)
+	}
+	// The candidate that ran out of suite budget imports as an abort, not as an import failure.
+	if out, code := runCLI(t, bin, "bench", "eval", "import", "--results", writeSide("candidate", true), "--manifest", manifestPath, "--policy", policyPath, "--harness", "candidate", "--replicate", "1", "--out", candidateEval, "--bench-dir", benchDir); code != 0 {
+		t.Fatalf("candidate budget-abort import exited %d:\n%s", code, out)
+	}
+	candidateRun, err := os.ReadFile(filepath.Join(candidateEval, "run-1", "run.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var abortRecord struct {
+		State        string            `json:"state"`
+		AbortReason  string            `json:"abort_reason"`
+		CaseOutcomes map[string]string `json:"case_outcomes"`
+		Data         struct {
+			Cases []json.RawMessage `json:"cases"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(candidateRun, &abortRecord); err != nil {
+		t.Fatal(err)
+	}
+	if abortRecord.State != "ABORTED" || abortRecord.AbortReason != "budget" {
+		t.Fatalf("candidate run record = state %q reason %q, want ABORTED on budget", abortRecord.State, abortRecord.AbortReason)
+	}
+	if abortRecord.CaseOutcomes["c2"] != "missing_execution" || len(abortRecord.Data.Cases) != 0 {
+		t.Fatalf("candidate run kept %q for the unrun case and %d metrics", abortRecord.CaseOutcomes["c2"], len(abortRecord.Data.Cases))
+	}
+
+	comparisonDir := filepath.Join(root, "comparison")
+	out, code := runCLI(t, bin, "bench", "eval", "compare", "--baseline", baselineEval, "--candidate", candidateEval, "--manifest", manifestPath, "--policy", policyPath, "--out", comparisonDir)
+	if code == 0 {
+		t.Fatalf("compare must fail on the aborted candidate, got exit 0:\n%s", out)
+	}
+	if !strings.Contains(out, "H7") || !strings.Contains(out, "FAIL") {
+		t.Fatalf("compare report does not carry the completeness blocker:\n%s", out)
+	}
+	decisionData, err := os.ReadFile(filepath.Join(comparisonDir, "decision.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decision struct {
+		Verdict  string
+		Category string
+		Blockers []struct {
+			ID     string
+			Detail string
+		} `json:"blockers"`
+	}
+	if err := json.Unmarshal(decisionData, &decision); err != nil {
+		t.Fatal(err)
+	}
+	if decision.Verdict != "FAIL" || decision.Category != "COMPLETENESS" || len(decision.Blockers) == 0 || decision.Blockers[0].ID != "H7" {
+		t.Fatalf("decision = %s/%s blockers %+v, want FAIL/COMPLETENESS with H7", decision.Verdict, decision.Category, decision.Blockers)
+	}
+
+	// The abort may excuse findings the run never adjudicated, never the integrity of the ledger:
+	// rewriting a state in the authoritative event log must be detected, not read as the same H7.
+	eventsPath := filepath.Join(candidateEval, "run-1", "c1", "events.jsonl")
+	events, err := os.ReadFile(eventsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tampered := regexp.MustCompile(`"new_state":"[A-Z_]+"`).ReplaceAllString(string(events), `"new_state":"TAMPERED_STATE"`)
+	if tampered == string(events) {
+		t.Fatalf("no event state found to tamper in %s", eventsPath)
+	}
+	if err := os.WriteFile(eventsPath, []byte(tampered), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tamperedDir := filepath.Join(root, "comparison-tampered")
+	tamperedOut, tamperedCode := runCLI(t, bin, "bench", "eval", "compare", "--baseline", baselineEval, "--candidate", candidateEval, "--manifest", manifestPath, "--policy", policyPath, "--out", tamperedDir)
+	if tamperedCode == 0 || tamperedOut == out {
+		t.Fatalf("a tampered aborted ledger must not read as the ordinary H7:\n%s", tamperedOut)
+	}
+	tamperedDecision, err := os.ReadFile(filepath.Join(tamperedDir, "decision.json"))
+	if err != nil {
+		t.Fatalf("tampered compare produced no decision to inspect: %v\n%s", err, tamperedOut)
+	}
+	if string(tamperedDecision) == string(decisionData) {
+		t.Fatal("a tampered aborted ledger produced a decision byte-identical to the untampered H7")
+	}
+	if !strings.Contains(string(tamperedDecision)+tamperedOut, "I9") && !strings.Contains(string(tamperedDecision)+tamperedOut, "H5") &&
+		!strings.Contains(string(tamperedDecision)+tamperedOut, "I11") {
+		t.Fatalf("tampering went unreported:\n%s\n%s", tamperedOut, tamperedDecision)
 	}
 }

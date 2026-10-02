@@ -121,6 +121,17 @@ guarantee splits three ways:
 
 More honesty notes travel with every manifest-bound reading:
 
+- **A suite that runs out of budget is aborted, not scored.** A case that spends its own deadline
+  is still scored (`budget_exhausted`, Issues not found are FN), but a suite stop means units never
+  ran: the aggregate seals `budget_exhausted` with `execution_complete: false`, and
+  `bench eval import` lands that replicate `ABORTED` with `abort_reason: budget` instead of
+  `INVALID`. Cases the stop reached before they started keep no `result.json`; their ledgers are
+  recorded `ABORTED` with the explicit outcome `missing_execution` and no findings or usage, so
+  the abort reaches the comparison as the hard completeness blocker H7 (FAIL, COMPLETENESS)
+  rather than as fabricated candidate numbers or a missing-file error. An invalid instrument or an
+  unverified budget keeps the stronger `INVALID` reading, and an external infrastructure failure
+  stays `FAILED_INFRASTRUCTURE`.
+
 - **The case deadline stops work cooperatively, not preemptively.** The scaffold's file copy, its
   git subprocesses, the fixture suite and the agent are all bound to the case's context: a
   cancellation is checked before any work starts, between walked paths and between IO chunks, and

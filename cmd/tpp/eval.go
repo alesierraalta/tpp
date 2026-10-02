@@ -898,9 +898,16 @@ func loadEvalSide(evalDir string) (eval.Side, []string, error) {
 		if side.Label == "" {
 			side.Label, side.HarnessID = stored.HarnessLabel, record.HarnessID
 		}
+		// An aborted run never reached adjudication, so findings left pending are the honest
+		// consequence of the abort, not an instrument defect; that one requirement is waived and
+		// nothing else — the log must still verify, transitions must still be legal and the
+		// duplicate/equivalence graph must still hold, so corruption is never read as an abort.
 		for _, caseID := range sortedCaseIDs(stored.CaseRuns) {
 			caseRun := stored.CaseRuns[caseID]
 			for _, violation := range eval.CheckCaseRun(&caseRun) {
+				if record.State == eval.RunAborted && violation.ID == "I8" {
+					continue
+				}
 				record.InvariantViolations = append(record.InvariantViolations, caseID+": "+violation.ID+": "+violation.Detail)
 			}
 			inputPaths = append(inputPaths, filepath.Join(runDir, caseID, "caserun.json"), filepath.Join(runDir, caseID, "events.jsonl"))

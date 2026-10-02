@@ -102,7 +102,7 @@ func TestUpdateWithAFakeGoRunsTheInstallArgv(t *testing.T) {
 	fakeBin := t.TempDir()
 	argsFile := filepath.Join(fakeBin, "go-args")
 	gobinFile := filepath.Join(fakeBin, "go-gobin")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > '" + argsFile + "'\nprintf '%s' \"$GOBIN\" > '" + gobinFile + "'\n"
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > '" + argsFile + "'\nprintf '%s' \"$GOBIN\" > '" + gobinFile + "'\n: > \"$GOBIN/tsp\"\n"
 	if err := os.WriteFile(filepath.Join(fakeBin, "go"), []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake go: %v", err)
 	}
@@ -135,6 +135,9 @@ func TestUpdateWithAFakeGoRunsTheInstallArgv(t *testing.T) {
 	wantDir, _ := filepath.EvalSymlinks(filepath.Dir(bin))
 	if string(gobin) != wantDir {
 		t.Fatalf("go install ran with GOBIN=%q, want the running binary's directory %q", gobin, wantDir)
+	}
+	if r, err := filepath.EvalSymlinks(bin); err != nil || r != filepath.Join(wantDir, "tsp") {
+		t.Fatalf("running tpp resolves to %q (err %v), want it symlinked to the fresh install %s (issue #144)", r, err, filepath.Join(wantDir, "tsp"))
 	}
 }
 

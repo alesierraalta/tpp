@@ -18,6 +18,7 @@ import (
 	"github.com/alesierraalta/tpp/internal/assets"
 	"github.com/alesierraalta/tpp/internal/bench"
 	"github.com/alesierraalta/tpp/internal/buildinfo"
+	"github.com/alesierraalta/tpp/internal/eval"
 	"github.com/alesierraalta/tpp/internal/evidence"
 	plancheck "github.com/alesierraalta/tpp/internal/plan"
 	"github.com/alesierraalta/tpp/internal/sanitize"
@@ -2518,5 +2519,145 @@ func TestBenchManifestBuildAndVerifyCLI(t *testing.T) {
 	out, code = runCLI(t, bin, "bench", "manifest", "verify", manifestPath, "--bench-dir", benchDir)
 	if code != 1 || !strings.Contains(out, "c1") {
 		t.Fatalf("mismatched manifest verify = %d, %q; want exit 1 naming c1", code, out)
+	}
+}
+
+// benchRunManifestFixture lays out two node cases and seals a manifest over case-a only, the way
+// a corpus author publishes one: the second case exists in the bench dir but is not selected.
+func benchRunManifestFixture(t *testing.T) (string, string) {
+	t.Helper()
+	benchDir := t.TempDir()
+	canary := "0123456789abcdef0123456789abcdef"
+	for _, id := range []string{"case-a", "case-b"} {
+		caseDir := filepath.Join(benchDir, "cases", id)
+		for p, body := range map[string]string{
+			"package.json":     `{"name":"fx","type":"module","scripts":{"test":"node --test"}}`,
+			"src/a.mjs":        "export const add = (a, b) => a + b;\n",
+			"tests/a.test.mjs": "import { test } from 'node:test';\nimport assert from 'node:assert/strict';\nimport { add } from '../src/a.mjs';\ntest('adds', () => assert.equal(add(1, 2), 3));\n",
+		} {
+			full := filepath.Join(caseDir, "fixture", p)
+			if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.MkdirAll(filepath.Join(caseDir, "fix"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		key := `{"schema":2,"id":"` + id + `","language":"node","suite":"node --test","surface":"library","control":"clean","canary":"` + canary + `","defects":[]}`
+		if err := os.WriteFile(filepath.Join(caseDir, "KEY.json"), []byte(key), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	spec := eval.ManifestSpec{
+		Benchmark: "CORE", Version: "1.0", Status: "draft", Created: "2026-01-01T00:00:00Z",
+		ChangeReason: "test", KeySchema: 2, Cases: []string{"case-a"}, DetectionCriteriaVersion: "dc-1",
+		MetricConfig: eval.MetricConfig{WeightedRecallW: 0.5, CILevel: 0.9, EarlyStopCILevel: 0.95, BootstrapResamples: 100, BootstrapSeed: 7, Consolidation: "strict-majority"},
+		Replicates:   eval.Replicates{KMin: 1, KTarget: 1, KMax: 1},
+		Budgets: eval.Budgets{MaxCases: 2, MaxAttemptsPerCase: 1, MaxRetries: 1, MaxTokensPerCaseRun: 100,
+			MaxCostPerCaseRunUSD: 1, MaxCostSuiteUSD: 1, MaxRuntimePerCaseRunSeconds: 60,
+			MaxRuntimeSuiteSeconds: 600, Verdicts: []string{"PASS"}},
+		Seeds: map[string]int64{"case_order": 7}, Canary: canary,
+	}
+	manifest, err := eval.BuildManifest(benchDir, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err = manifest.Seal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := eval.CanonicalJSON(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(t.TempDir(), "manifest.json")
+	if err := os.WriteFile(manifestPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return benchDir, manifestPath
+}
+
+// The built binary's manifest-bound preflight: the manifest's exact case set and budgets are the
+// only arguments, every conflicting flag is refused before anything runs, a case changed after
+// sealing is caught pre-run, and a real dry run selects exactly the sealed cases with no agent
+// and no credentials (HOME isolated, no API).
+func TestBenchRunManifestPreflightCLI(t *testing.T) {
+	bin := buildCLI(t)
+	env := []string{"HOME=" + t.TempDir(), "CLAUDE_CONFIG_DIR=", "PI_CODING_AGENT_DIR="}
+	probes := []struct {
+		name     string
+		args     []string
+		tamper   bool
+		wantCode int
+		wantOut  string
+		dryRun   bool
+	}{
+		{name: "exact case selection in a dry run", args: []string{"--dry-run"}, wantCode: 3, dryRun: true},
+		{name: "cases flag conflicts with the exact case set", args: []string{"--cases", "bench/cases/*"}, wantCode: 2, wantOut: "conflicts with the manifest's exact case set"},
+		{name: "runs flag conflicts with k_target", args: []string{"--runs", "2"}, wantCode: 2, wantOut: "conflicts with manifest k_target=1"},
+		{name: "retries flag conflicts with the retry budget", args: []string{"--retries", "0"}, wantCode: 2, wantOut: "--retries conflicts"},
+		{name: "concurrency flag conflicts with serial scheduling", args: []string{"--concurrency", "4"}, wantCode: 2, wantOut: "--concurrency=1"},
+		{name: "timeout flag conflicts with the case budget", args: []string{"--timeout", "5s"}, wantCode: 2, wantOut: "--timeout conflicts"},
+		{name: "cost flag conflicts with the suite budget", args: []string{"--max-cost-usd", "9"}, wantCode: 2, wantOut: "--max-cost-usd conflicts"},
+		{name: "turn cap is not defined by the manifest", args: []string{"--max-turns", "5"}, wantCode: 2, wantOut: "not defined by the manifest"},
+		{name: "a case changed after sealing is caught pre-run", tamper: true, wantCode: 1, wantOut: "manifest cases do not match"},
+	}
+	for _, probe := range probes {
+		t.Run(probe.name, func(t *testing.T) {
+			benchDir, manifestPath := benchRunManifestFixture(t)
+			if probe.tamper {
+				keyPath := filepath.Join(benchDir, "cases", "case-a", "KEY.json")
+				raw, err := os.ReadFile(keyPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(keyPath, append(raw, ' '), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			outDir := t.TempDir()
+			args := append([]string{"bench", "run", "--manifest", manifestPath, "--bench-dir", benchDir, "--out", outDir}, probe.args...)
+			out, code := runCLIEnv(t, bin, env, args...)
+			if code != probe.wantCode {
+				t.Fatalf("exit = %d, want %d:\n%s", code, probe.wantCode, out)
+			}
+			if probe.wantOut != "" && !strings.Contains(out, probe.wantOut) {
+				t.Fatalf("output does not contain %q:\n%s", probe.wantOut, out)
+			}
+			if !probe.dryRun {
+				return
+			}
+			data, err := os.ReadFile(filepath.Join(outDir, "aggregate.json"))
+			if err != nil {
+				t.Fatalf("dry run must record its aggregate: %v", err)
+			}
+			var agg struct {
+				Cases []struct {
+					Case string `json:"case"`
+				} `json:"cases"`
+				Provenance struct {
+					ManifestSHA256 string `json:"manifest_sha256"`
+				} `json:"provenance"`
+			}
+			if err := json.Unmarshal(data, &agg); err != nil {
+				t.Fatal(err)
+			}
+			if len(agg.Cases) != 1 || agg.Cases[0].Case != "case-a" {
+				t.Fatalf("cases = %+v, want exactly the sealed case-a (case-b exists unselected)", agg.Cases)
+			}
+			if agg.Provenance.ManifestSHA256 == "" {
+				t.Fatal("a manifest-bound run must record the manifest digest in its provenance")
+			}
+			if _, err := os.Stat(filepath.Join(outDir, "summary.md")); err != nil {
+				t.Fatalf("dry run must write its summary: %v", err)
+			}
+			result, err := os.ReadFile(filepath.Join(outDir, "case-a", "1", "result.json"))
+			if err != nil || !strings.Contains(string(result), "dry-run: agent not spawned") {
+				t.Fatalf("the case must run its fixture suite and spawn no agent (err %v): %s", err, result)
+			}
+		})
 	}
 }

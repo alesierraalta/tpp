@@ -5,6 +5,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -1472,12 +1474,13 @@ func configModeFor(runner, agentConfig string) string {
 
 func runBenchRun(args []string) int {
 	fs := flag.NewFlagSet("bench run", flag.ContinueOnError)
+	manifestPath := fs.String("manifest", "", "sealed benchmark manifest; selects its exact cases and budgets")
 	cases := fs.String("cases", "bench/cases/*", "glob of case directories (each with fixture/ and KEY.json)")
 	runner := fs.String("runner", bench.RunnerPi, "agent runner: pi (default) or claude (last resort)")
 	model := fs.String("model", "", "model for the agent runs; empty uses the runner's default ("+
 		bench.DefaultModel(bench.RunnerPi)+" for pi, "+bench.DefaultModel(bench.RunnerClaude)+" for claude)")
 	runs := fs.Int("runs", 1, "runs per case")
-	maxTurns := fs.Int("max-turns", 70, "agent turn cap per run")
+	maxTurns := fs.Int("max-turns", 70, "agent turn cap per run (claude runner only; the pi runner has no turn cap)")
 	timeout := fs.Duration("timeout", 30*time.Minute, "agent wall-clock cap per run")
 	suiteTimeout := fs.Duration("suite-timeout", 10*time.Minute, "fixture suite cap")
 	maxCost := fs.Float64("max-cost-usd", 0, "stop when the cumulative cost reaches this (0 = no ceiling)")
@@ -1492,9 +1495,78 @@ func runBenchRun(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	provided := make(map[string]bool)
+	fs.Visit(func(f *flag.Flag) { provided[f.Name] = true })
 	if !bench.KnownRunner(*runner) {
 		fmt.Fprintf(os.Stderr, "bench run: unknown runner %q: use %s or %s\n", *runner, bench.RunnerPi, bench.RunnerClaude)
 		return 2
+	}
+	var manifest *eval.Manifest
+	var caseIDs []string
+	var budgetIdentity string
+	var caseTimeout, suiteWallTimeout time.Duration
+	var maxAttemptsPerCase, maxTokensPerCaseRun int
+	var maxCostPerCaseRun float64
+	if *manifestPath != "" {
+		loaded, err := eval.LoadManifest(*manifestPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "bench run: %v\n", err)
+			return 1
+		}
+		manifest = &loaded
+		if mismatches := eval.VerifyCases(*benchDir, loaded); len(mismatches) != 0 {
+			fmt.Fprintf(os.Stderr, "bench run: manifest cases do not match %s: %s\n", *benchDir, strings.Join(mismatches, ", "))
+			return 1
+		}
+		if err := validateManifestRun(loaded, *runner); err != nil {
+			fmt.Fprintf(os.Stderr, "bench run: %v\n", err)
+			return 1
+		}
+		caseIDs = make([]string, len(loaded.Cases))
+		for i, c := range loaded.Cases {
+			caseIDs[i] = c.ID
+		}
+		if provided["cases"] && !sameCaseIDs(*cases, caseIDs) {
+			fmt.Fprintln(os.Stderr, "bench run: --cases conflicts with the manifest's exact case set")
+			return 2
+		}
+		if provided["runs"] && *runs != loaded.Replicates.KTarget {
+			fmt.Fprintf(os.Stderr, "bench run: --runs=%d conflicts with manifest k_target=%d\n", *runs, loaded.Replicates.KTarget)
+			return 2
+		}
+		caseTimeout = time.Duration(loaded.Budgets.MaxRuntimePerCaseRunSeconds) * time.Second
+		suiteWallTimeout = time.Duration(loaded.Budgets.MaxRuntimeSuiteSeconds) * time.Second
+		if provided["timeout"] && *timeout != caseTimeout {
+			fmt.Fprintln(os.Stderr, "bench run: --timeout conflicts with manifest per-case runtime budget")
+			return 2
+		}
+		if provided["suite-timeout"] && *suiteTimeout != caseTimeout {
+			fmt.Fprintln(os.Stderr, "bench run: --suite-timeout conflicts with manifest per-case runtime budget")
+			return 2
+		}
+		if provided["max-cost-usd"] && *maxCost != loaded.Budgets.MaxCostSuiteUSD {
+			fmt.Fprintln(os.Stderr, "bench run: --max-cost-usd conflicts with manifest suite cost budget")
+			return 2
+		}
+		if provided["retries"] && *retries != loaded.Budgets.MaxRetries {
+			fmt.Fprintln(os.Stderr, "bench run: --retries conflicts with manifest retry budget")
+			return 2
+		}
+		if provided["concurrency"] && *workers != 1 {
+			fmt.Fprintln(os.Stderr, "bench run: manifest-bound scheduling requires --concurrency=1 to bound suite-cost overshoot")
+			return 2
+		}
+		if provided["max-turns"] && *maxTurns != 70 {
+			fmt.Fprintln(os.Stderr, "bench run: --max-turns is not defined by the manifest and cannot be overridden")
+			return 2
+		}
+		*runs = loaded.Replicates.KTarget
+		*timeout, *suiteTimeout = caseTimeout, caseTimeout
+		*maxCost, *retries, *workers = loaded.Budgets.MaxCostSuiteUSD, loaded.Budgets.MaxRetries, 1
+		maxAttemptsPerCase = loaded.Budgets.MaxAttemptsPerCase
+		maxTokensPerCaseRun = loaded.Budgets.MaxTokensPerCaseRun
+		maxCostPerCaseRun = loaded.Budgets.MaxCostPerCaseRunUSD
+		budgetIdentity = resolvedBudgetIdentity(loaded, caseIDs)
 	}
 	if *model == "" {
 		*model = bench.DefaultModel(*runner)
@@ -1538,14 +1610,27 @@ func runBenchRun(args []string) int {
 	if cfgDir != "" {
 		skillFile = filepath.Join(cfgDir, "skills", "test-strategy", "SKILL.md")
 	}
-	_, code := bench.Run(bench.Options{
-		CasesGlob: *cases, Model: *model, Runner: *runner, Runs: *runs, MaxTurns: *maxTurns,
-		Timeout:      *timeout,
-		SuiteTimeout: *suiteTimeout, MaxCostUSD: *maxCost, Out: *out, BenchDir: *benchDir,
-		SkillFile: skillFile,
-		ConfigDir: cfgDir, BinDir: selfDir(), Workers: *workers, ConfigMode: configModeFor(*runner, *agentConfig),
-		DryRun: *dryRun, Keep: *keep, Retries: *retries, RetryDelay: *retryDelay, Log: os.Stdout,
-	})
+	options := bench.Options{
+		CasesGlob: *cases, CaseIDs: caseIDs, Model: *model, Runner: *runner, Runs: *runs, MaxTurns: *maxTurns,
+		Timeout: *timeout, SuiteTimeout: *suiteTimeout, WallTimeout: suiteWallTimeout,
+		MaxAttemptsPerCase: maxAttemptsPerCase, MaxTokensPerCaseRun: maxTokensPerCaseRun,
+		MaxCostPerCaseRunUSD: maxCostPerCaseRun, MaxCostUSD: *maxCost, Out: *out, BenchDir: *benchDir,
+		SkillFile: skillFile, ConfigDir: cfgDir, BinDir: selfDir(), Workers: *workers,
+		ConfigMode: configModeFor(*runner, *agentConfig), DryRun: *dryRun, Keep: *keep,
+		Retries: *retries, RetryDelay: *retryDelay, Log: os.Stdout,
+	}
+	if manifest != nil {
+		options.StrictManifest, options.ManifestSHA256 = true, manifest.ManifestSHA256
+		options.ManifestSuite, options.ManifestVersion = manifest.Benchmark, manifest.Version
+		options.BudgetIdentity = budgetIdentity
+		options.PostRunCheck = func() error {
+			if mismatches := eval.VerifyCases(*benchDir, *manifest); len(mismatches) != 0 {
+				return fmt.Errorf("manifest cases changed during execution: %s", strings.Join(mismatches, ", "))
+			}
+			return nil
+		}
+	}
+	_, code := bench.Run(options)
 	// The results line is a promise about a file: a run that matched no case, or one whose record could not be
 	// written, has no summary to point at, and the operator is sent to a path that does not exist.
 	summaryPath := filepath.Join(*out, "summary.md")
@@ -1553,6 +1638,62 @@ func runBenchRun(args []string) int {
 		fmt.Printf("results: %s\n", summaryPath)
 	}
 	return code
+}
+
+func validateManifestRun(m eval.Manifest, runner string) error {
+	if m.ManifestSHA256 == "" || len(m.Cases) == 0 {
+		return fmt.Errorf("manifest must be sealed and select at least one case")
+	}
+	if m.Replicates.KMin < 1 || m.Replicates.KMin > m.Replicates.KTarget || m.Replicates.KTarget > m.Replicates.KMax {
+		return fmt.Errorf("manifest replicate bounds are invalid")
+	}
+	b := m.Budgets
+	if b.MaxCases < 1 || len(m.Cases) > b.MaxCases || b.MaxAttemptsPerCase < 1 || b.MaxRetries < 0 || b.MaxRuntimePerCaseRunSeconds < 1 || b.MaxRuntimeSuiteSeconds < 1 {
+		return fmt.Errorf("manifest has an absent or invalid required case, attempt, retry, or runtime budget")
+	}
+	if b.MaxTokensPerCaseRun < 0 || b.MaxCostPerCaseRunUSD < 0 || b.MaxCostSuiteUSD < 0 {
+		return fmt.Errorf("manifest resource budgets must not be negative")
+	}
+	if !bench.KnownRunner(runner) {
+		return fmt.Errorf("runner %q has no manifest budget support", runner)
+	}
+	// Pi and Claude expose final usage in the response formats parsed by the bench; cost/token thresholds
+	// are observable after a response, not provider-enforced mid-response limits.
+	return nil
+}
+
+func sameCaseIDs(value string, ids []string) bool {
+	parts := strings.Split(value, ",")
+	if len(parts) != len(ids) {
+		return false
+	}
+	for i, part := range parts {
+		if strings.TrimSpace(part) != ids[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// resolvedBudgetIdentity digests the budgets the manifest actually defines — cases, replicates,
+// attempts, retries, and the runtime and resource ceilings. The turn cap is deliberately absent:
+// it is not a manifest budget (the manifest cannot define one) and only the claude runner enforces
+// it, so hashing it into the identity would claim an enforcement the pi runner does not have.
+func resolvedBudgetIdentity(m eval.Manifest, ids []string) string {
+	b := m.Budgets
+	resolved := struct {
+		Manifest                  string
+		Cases                     []string
+		Runs, Retries, Attempts   int
+		Tokens                    int
+		CaseCost, SuiteCost       float64
+		CaseRuntime, SuiteRuntime int
+	}{m.ManifestSHA256, ids, m.Replicates.KTarget, b.MaxRetries, b.MaxAttemptsPerCase,
+		b.MaxTokensPerCaseRun, b.MaxCostPerCaseRunUSD, b.MaxCostSuiteUSD,
+		b.MaxRuntimePerCaseRunSeconds, b.MaxRuntimeSuiteSeconds}
+	data, _ := json.Marshal(resolved)
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 func runBenchScore(args []string) int {

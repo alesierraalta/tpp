@@ -87,6 +87,60 @@ Trimming the corpus is the lever that does cost quality. Of the fifteen cases, t
 different numbers across the four skill versions measured so far; only `n01` and `n05` were
 identical every time. There is little to remove.
 
+### Manifest budgets: enforced, observed, unsupported
+
+`tpp bench run --manifest` binds a run to a sealed manifest. What the binding can and cannot
+guarantee splits three ways:
+
+- **One deadline per case run, from scaffold to score.** The per-case runtime budget
+  (`max_runtime_per_case_run`) is a single deadline opened when the scheduled case run starts,
+  before the fixture scaffold: the fixture-suite scaffold phase, every agent attempt and its retry
+  sleeps, and the discrimination afterwards are all bounded by the budget that remains — a retry
+  does not reset it, and spending it is recorded as `budget_exhausted`, not an infrastructure
+  retry or an invalid case. The suite wall clock (`max_runtime`) is a separate, outer deadline
+  that composes as the parent of each per-case deadline; the fixture-suite cap (`--suite-timeout`)
+  bounds one fixture-suite execution and is not a second whole-case window. A manifest-bound run
+  is serial (`--concurrency` is refused unless it is 1) so parallel attempts cannot overshoot the
+  suite ceiling together.
+- **Observed after each response.** Cost and token ceilings (per case run and per suite) are
+  checked after each *complete* agent response, never during one: the response that crosses a
+  threshold may overshoot it by up to one response's spend. They are observed thresholds, not
+  hard caps, and nothing in the bench claims them as enforced limits. A retry spends from the
+  same case and suite budgets as the first attempt.
+- **Discovered after the call, failing closed.** Usage a backend does not report stays unknown —
+  never a measured zero. When the manifest requires that usage, the case is marked invalid, the
+  provenance records `budget_status: unsupported` with the reason, the run exits partial, and
+  `bench compare` refuses the reading. A failed attempt that omitted the usage still takes its
+  declared retries before that verdict, and a later attempt that reports usage cannot complete the
+  reading — the aggregate spend stays unknown, never a sum of the attempts that did report. A
+  successful attempt omitting it stops the case at once: unsupported is not infrastructure and
+  earns no retry. This is post-call discovery: it guarantees no *unknown*
+  spend is recorded as within budget, not that a runaway response is stopped before it is paid
+  for. A preflight promise about spend can be no better than the parsers behind it, so strict
+  enforcement is claimed nowhere it cannot be kept.
+
+More honesty notes travel with every manifest-bound reading:
+
+- **The case deadline stops work cooperatively, not preemptively.** The scaffold's file copy, its
+  git subprocesses, the fixture suite and the agent are all bound to the case's context: a
+  cancellation is checked before any work starts, between walked paths and between IO chunks, and
+  the subprocesses are killed by their contexts, so the rest of the case's work stops at the next
+  operation boundary once the deadline passes. What no Go program can cancel is a single local
+  filesystem syscall that has already blocked inside the kernel: if that read or write does not
+  return on its own, it returns when the kernel finishes it — possibly after the deadline — and
+  only then does the harness observe the cancellation. A budget that claimed to preempt an
+  already-blocked kernel I/O would promise an enforcement Go does not have; the runtime budget
+  promises cooperative cancellation between operations and the killing of the subprocesses it
+  starts, nothing more.
+- **The turn cap is a claude feature.** `--max-turns` reaches the claude runner only; the pi
+  runner has no turn-cap flag. The budget identity therefore hashes no turn cap, and a bound pi
+  reading carries a `budget_limitations` entry saying turns are bounded only by the deadlines.
+- **The I6 post-run check invalidates.** Cases are re-verified against the manifest after the
+  run: a case changed mid-run records `instrument_valid: false`, the run exits partial, and
+  `bench compare` refuses the reading while `bench eval import` lands it `INVALID` — it can
+  never become comparable data. A reading sealed under a different manifest is refused at
+  import outright rather than relabelled.
+
 ## Scoring
 
 The runner copies `fixture/` into a fresh workspace, runs the flow under evaluation there, and

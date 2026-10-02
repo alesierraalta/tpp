@@ -22,9 +22,11 @@ import (
 const (
 	// DefaultBaseURL is the public Go module proxy the check queries.
 	DefaultBaseURL = "https://proxy.golang.org"
-	modulePath     = "github.com/alesierraalta/tpp"
-	cacheFileName  = "update-check.json"
-	checkTimeout   = 5 * time.Second
+	// The project was renamed to tsp: this last tpp release checks and installs the tsp module, so an
+	// existing install reaches the new name through update.
+	modulePath    = "github.com/alesierraalta/tsp"
+	cacheFileName = "update-check.json"
+	checkTimeout  = 5 * time.Second
 )
 
 // ErrCheck marks every failure to learn the latest version from the proxy, so the CLI can tell
@@ -222,7 +224,7 @@ func InstallCommand(latest string) string {
 }
 
 func installArgs(latest string) []string {
-	return []string{"install", modulePath + "/cmd/tpp@" + latest}
+	return []string{"install", modulePath + "/cmd/tsp@" + latest}
 }
 
 // RunInstall looks `go` up and runs the install through the injected seams: production wires

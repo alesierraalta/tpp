@@ -75,7 +75,7 @@ func TestUpdateWithoutGoPrintsTheInstallCommand(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("update without go = %d, want 0\n%s", code, out)
 	}
-	want := "go install github.com/alesierraalta/tpp/cmd/tpp@v99.0.0"
+	want := "go install github.com/alesierraalta/tsp/cmd/tsp@v99.0.0"
 	if !strings.Contains(out, want) {
 		t.Fatalf("output missing the exact install command %q:\n%s", want, out)
 	}
@@ -118,12 +118,13 @@ func TestUpdateWithAFakeGoRunsTheInstallArgv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fake go was never run: %v", err)
 	}
-	want := "install\ngithub.com/alesierraalta/tpp/cmd/tpp@v99.0.0\n"
+	// The project was renamed: the bridge release updates into the tsp module and binary.
+	want := "install\ngithub.com/alesierraalta/tsp/cmd/tsp@v99.0.0\n"
 	if string(argv) != want {
 		t.Fatalf("install argv = %q, want %q", argv, want)
 	}
-	if !strings.Contains(out, "tpp version") {
-		t.Fatalf("success must point at confirming in a new shell:\n%s", out)
+	if !strings.Contains(out, "tsp version") || !strings.Contains(out, "tsp sync") {
+		t.Fatalf("success must point at the renamed binary: confirm with tsp version and run tsp sync:\n%s", out)
 	}
 	// The release must replace the binary that is running, not land in a GOBIN that PATH or the Stop hook
 	// never reach (issue #144).

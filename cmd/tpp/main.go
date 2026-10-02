@@ -400,7 +400,7 @@ func runUpdate(args []string) int {
 		fmt.Fprintln(os.Stderr, "update:", err)
 		return 1
 	}
-	fmt.Printf("installed %s; restart your shell and run `tpp version` there to confirm\n", result.Latest)
+	fmt.Printf("installed tsp %s (tpp is now tsp) into %s; restart your shell, confirm with `tsp version`, then run `tsp sync` to move your hooks to tsp\n", result.Latest, gobin)
 	return 0
 }
 

@@ -43,7 +43,7 @@ func TestCheckAnswersHowTheInstalledBuildStands(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			buildinfo.Version = tc.installed
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path != "/github.com/alesierraalta/tpp/@latest" {
+				if r.URL.Path != "/github.com/alesierraalta/tsp/@latest" {
 					t.Errorf("proxy path = %q, want the module's @latest endpoint", r.URL.Path)
 				}
 				fmt.Fprintf(w, `{"Version":%q}`, tc.served)
@@ -165,7 +165,7 @@ func TestLoadCacheWithoutACheckIsEmpty(t *testing.T) {
 // command `go` would run, so a user can copy it without editing.
 func TestInstallCommandIsTheExactGoInstallLine(t *testing.T) {
 	got := InstallCommand("v1.2.3")
-	want := "go install github.com/alesierraalta/tpp/cmd/tpp@v1.2.3"
+	want := "go install github.com/alesierraalta/tsp/cmd/tsp@v1.2.3"
 	if got != want {
 		t.Fatalf("InstallCommand = %q, want %q", got, want)
 	}

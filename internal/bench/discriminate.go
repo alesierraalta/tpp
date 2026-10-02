@@ -2,6 +2,8 @@ package bench
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -315,4 +317,133 @@ func attemptsForDefect(d Defect) int {
 		}
 	}
 	return 1
+}
+
+// safeArtifactFile resolves a recorded artifact path under root, for persistence and replay
+// verification alike. Only a plain relative path is accepted; the target must be a regular file —
+// a symlink or a directory is refused before anything reads it; and both the lexical path and its
+// resolved form must stay inside root, so a directory symlink cannot turn a recorded path into a
+// read outside the root it was recorded against.
+func safeArtifactFile(root, rel string) (string, error) {
+	if rel == "" || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("artifact path %q is not a relative path", rel)
+	}
+	clean := filepath.Clean(filepath.FromSlash(rel))
+	if clean == "." || escapesRoot(clean) {
+		return "", fmt.Errorf("artifact path %q escapes %q", rel, root)
+	}
+	full := filepath.Join(root, clean)
+	if r, err := filepath.Rel(root, full); err != nil || escapesRoot(r) {
+		return "", fmt.Errorf("artifact path %q escapes %q", rel, root)
+	}
+	st, err := os.Lstat(full)
+	if err != nil {
+		return "", err
+	}
+	if !st.Mode().IsRegular() {
+		return "", fmt.Errorf("artifact %q is not a regular file", rel)
+	}
+	rootReal, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", err
+	}
+	fullReal, err := filepath.EvalSymlinks(full)
+	if err != nil {
+		return "", err
+	}
+	if r, err := filepath.Rel(rootReal, fullReal); err != nil || escapesRoot(r) {
+		return "", fmt.Errorf("artifact %q resolves outside %q", rel, root)
+	}
+	return full, nil
+}
+
+// escapesRoot reports whether a cleaned relative path leaves the root it was joined to.
+func escapesRoot(rel string) bool {
+	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// saveTestArtifacts persists the changed test files a catch check listed, under artifactDir at
+// their workspace-relative paths, recording each entry with the sha256 of the bytes written and
+// returning the list in path order, so the same run always records the same digest input. Every
+// path is validated against the workspace first and every copy lands atomically: a source that is
+// not a regular file inside the workspace is refused, never read.
+func saveTestArtifacts(ws, artifactDir string, tests []string) ([]TestArtifact, error) {
+	artifacts := make([]TestArtifact, 0, len(tests))
+	for _, rel := range tests {
+		src, err := safeArtifactFile(ws, rel)
+		if err != nil {
+			return nil, err
+		}
+		data, err := os.ReadFile(src)
+		if err != nil {
+			return nil, err
+		}
+		dst := filepath.Join(artifactDir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return nil, err
+		}
+		if err := writeFileAtomic(dst, data, 0o644); err != nil {
+			return nil, err
+		}
+		sum := sha256.Sum256(data)
+		artifacts = append(artifacts, TestArtifact{Path: filepath.ToSlash(rel), SHA256: hex.EncodeToString(sum[:])})
+	}
+	sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].Path < artifacts[j].Path })
+	return artifacts, nil
+}
+
+// DiscriminateSavedTests replays the catch check a run recorded, from the artifacts persisted
+// beside its result. Every recorded path and sha256 is verified first; then a fresh temporary
+// workspace is built from fixture/ plus exactly those saved test bytes — never the key and never
+// the fix tree — and the ordinary Discriminate oracle runs against it. It needs no original
+// workspace: a reading's catch outcome stays independently verifiable from the artifact directory
+// alone, and an empty artifact list replays the same answer as no agent test files: nothing caught.
+func DiscriminateSavedTests(caseDir, artifactDir string, key Key, artifacts []TestArtifact, timeout time.Duration) (CatchResult, error) {
+	ws, err := restoreTestWorkspace(caseDir, artifactDir, artifacts)
+	if err != nil {
+		return CatchResult{}, err
+	}
+	defer os.RemoveAll(ws)
+	return Discriminate(caseDir, ws, key, timeout), nil
+}
+
+// restoreTestWorkspace verifies each artifact against its recorded digest and lays fixture/ plus
+// the saved test bytes into a fresh temporary workspace. A verification failure removes the
+// workspace it was building, so a refused artifact set leaves nothing behind to replay.
+func restoreTestWorkspace(caseDir, artifactDir string, artifacts []TestArtifact) (string, error) {
+	ws, err := os.MkdirTemp("", "tpp-replay-")
+	if err != nil {
+		return "", err
+	}
+	fail := func(err error) (string, error) {
+		_ = os.RemoveAll(ws)
+		return "", err
+	}
+	if err := copyTree(filepath.Join(caseDir, FixtureDir), ws); err != nil {
+		return fail(err)
+	}
+	ordered := append([]TestArtifact(nil), artifacts...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Path < ordered[j].Path })
+	for _, a := range ordered {
+		src, err := safeArtifactFile(artifactDir, a.Path)
+		if err != nil {
+			return fail(err)
+		}
+		data, err := os.ReadFile(src)
+		if err != nil {
+			return fail(err)
+		}
+		sum := sha256.Sum256(data)
+		if got := hex.EncodeToString(sum[:]); !strings.EqualFold(got, a.SHA256) {
+			return fail(fmt.Errorf("artifact %q: recorded sha256 %s, persisted bytes hash to %s", a.Path, a.SHA256, got))
+		}
+		dst := filepath.Join(ws, filepath.FromSlash(a.Path))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return fail(err)
+		}
+		if err := os.WriteFile(dst, data, 0o644); err != nil {
+			return fail(err)
+		}
+	}
+	return ws, nil
 }

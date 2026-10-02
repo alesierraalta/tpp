@@ -3,6 +3,8 @@ package bench
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -1116,5 +1118,160 @@ func TestTurnCapLimitationIsRecordedForPiOnly(t *testing.T) {
 	claude := provenanceFor(RunnerClaude)
 	if hasTurnCapNote(claude) {
 		t.Fatalf("claude limitations = %v, the claude runner enforces the turn cap", claude.BudgetLimitations)
+	}
+}
+
+// A manifest run persists the changed test files the catch check listed before the workspace is
+// cleaned away: the sha256 in result.json hashes to what test-artifacts/ holds, so the outcome is
+// verifiable from content alone. A run whose agent wrote no tests records an empty list — an
+// answer, not a missing field — and a legacy run persists no snapshots at all.
+func TestManifestRunPersistsTestArtifactsAndLegacyRunsDoNot(t *testing.T) {
+	benchDir := strictCaseBench(t)
+	caseDir := filepath.Join(benchDir, "cases", "case-a")
+	// The case's one defect hides behind an input the happy path never exercises: the fixture
+	// suite stays green, fix/all corrects it, and an agent test asserting the fixed behaviour
+	// catches it.
+	fixture := filepath.Join(caseDir, "fixture", "src", "a.mjs")
+	if err := os.WriteFile(fixture, []byte("export const add = (a, b) => (a === 0 ? 0 : a + b);\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fixAll := filepath.Join(caseDir, "fix", "all", "src", "a.mjs")
+	if err := os.MkdirAll(filepath.Dir(fixAll), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fixAll, []byte("export const add = (a, b) => a + b;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	found := plan(
+		"| F1 | `src/a.mjs:1` adding zero returns zero | M | yes | E1 | open | me | - | - |\n",
+		"| E1 | d1 | run | add(0,5) | 0 | none | observe | ok |\n",
+	)
+	agentTest := "import { test } from 'node:test';\nimport assert from 'node:assert/strict';\n" +
+		"import { add } from '../src/a.mjs';\ntest('adds from zero', () => assert.equal(add(0, 5), 5));\n"
+	agent := func(t *testing.T, withTest bool) Agent {
+		return func(_ context.Context, ws string, _ Key, _ Options) (AgentResult, error) {
+			writePlan(t, ws, found)
+			if withTest {
+				full := filepath.Join(ws, "tests", "agent.test.mjs")
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					return AgentResult{}, err
+				}
+				if err := os.WriteFile(full, []byte(agentTest), 0o644); err != nil {
+					return AgentResult{}, err
+				}
+			}
+			return AgentResult{Result: "found the defect"}, nil
+		}
+	}
+	readResult := func(t *testing.T, out string) Result {
+		t.Helper()
+		raw, err := os.ReadFile(filepath.Join(out, "case-a", "1", "result.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var saved Result
+		if err := json.Unmarshal(raw, &saved); err != nil {
+			t.Fatal(err)
+		}
+		return saved
+	}
+	t.Run("manifest run", func(t *testing.T) {
+		out := t.TempDir()
+		if _, code := Run(strictOptions(benchDir, out, agent(t, true))); code != 0 {
+			t.Fatalf("exit code %d, want 0 for a clean manifest run", code)
+		}
+		runDir := filepath.Join(out, "case-a", "1")
+		saved := readResult(t, out)
+		if !saved.Catch.Checked || len(saved.Catch.TestFiles) != 1 || saved.Catch.TestFiles[0] != "tests/agent.test.mjs" {
+			t.Fatalf("catch = %+v, want the generated test file listed", saved.Catch)
+		}
+		if _, err := os.Stat(filepath.Join(runDir, "ws")); !os.IsNotExist(err) {
+			t.Fatalf("workspace still present (stat err = %v): the snapshot must land before the workspace is cleaned away", err)
+		}
+		if len(saved.TestArtifacts) != 1 {
+			t.Fatalf("test_artifacts = %+v, want the one persisted test file", saved.TestArtifacts)
+		}
+		art := saved.TestArtifacts[0]
+		if art.Path != "tests/agent.test.mjs" {
+			t.Fatalf("artifact path = %q, want the workspace-relative test path", art.Path)
+		}
+		data, err := os.ReadFile(filepath.Join(runDir, "test-artifacts", filepath.FromSlash(art.Path)))
+		if err != nil {
+			t.Fatalf("persisted artifact: %v", err)
+		}
+		if string(data) != agentTest {
+			t.Fatalf("persisted bytes = %q, want the test file the agent wrote", data)
+		}
+		sum := sha256.Sum256(data)
+		if got := hex.EncodeToString(sum[:]); got != art.SHA256 {
+			t.Fatalf("recorded sha256 = %s, persisted bytes hash to %s: the artifact must verify by content", art.SHA256, got)
+		}
+	})
+	t.Run("manifest run with no agent tests", func(t *testing.T) {
+		out := t.TempDir()
+		if _, code := Run(strictOptions(benchDir, out, agent(t, false))); code != 0 {
+			t.Fatalf("exit code %d, want 0", code)
+		}
+		saved := readResult(t, out)
+		if saved.TestArtifacts == nil {
+			t.Fatal("no agent tests must be recorded as an empty list, not a missing field")
+		}
+		if len(saved.TestArtifacts) != 0 {
+			t.Fatalf("test_artifacts = %+v, want empty", saved.TestArtifacts)
+		}
+		if _, err := os.Stat(filepath.Join(out, "case-a", "1", "test-artifacts")); !os.IsNotExist(err) {
+			t.Fatalf("test-artifacts created with nothing to persist (stat err = %v)", err)
+		}
+	})
+	t.Run("legacy run", func(t *testing.T) {
+		out := t.TempDir()
+		legacy := Options{CasesGlob: caseDir, Runs: 1, Timeout: time.Minute, SuiteTimeout: time.Minute,
+			Out: out, BenchDir: t.TempDir(), Agent: agent(t, true)}
+		if _, code := Run(legacy); code != 0 {
+			t.Fatalf("exit code %d, want 0", code)
+		}
+		saved := readResult(t, out)
+		if saved.TestArtifacts != nil {
+			t.Fatalf("test_artifacts = %+v, want nil: a legacy run persists no snapshots", saved.TestArtifacts)
+		}
+		if _, err := os.Stat(filepath.Join(out, "case-a", "1", "test-artifacts")); !os.IsNotExist(err) {
+			t.Fatalf("legacy run wrote test-artifacts (stat err = %v)", err)
+		}
+	})
+}
+
+// A snapshot that cannot be taken fails the manifest reading closed: the result is invalid with
+// the reason on disk, and the instrument is marked invalid, so no comparison can read the run as
+// a successful one whose test evidence simply never appeared.
+func TestManifestSnapshotFailureInvalidatesTheResultAndInstrument(t *testing.T) {
+	out := t.TempDir()
+	ws := filepath.Join(out, "case-a", "1", "ws")
+	saved := filepath.Join(ws, "tests", "d1.sh")
+	if err := os.MkdirAll(filepath.Dir(saved), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The listed test file is a symlink: a snapshot may persist regular files only.
+	if err := os.Symlink(filepath.Join(ws, "d1.sh.real"), saved); err != nil {
+		t.Fatal(err)
+	}
+	res := Result{Case: "case-a", Run: 1, Total: 1, Workspace: ws, Catch: CatchResult{TestFiles: []string{"tests/d1.sh"}}}
+	opts := Options{StrictManifest: true, Log: io.Discard, runtime: &runRuntime{instrumentValid: true, executionComplete: true}}
+	got := finish(res, opts, false)
+	if !got.Invalid || !strings.Contains(got.InvalidReason, "test artifact") {
+		t.Fatalf("result = %+v, want invalid with the snapshot failure reason", got)
+	}
+	if opts.runtime.instrumentValid {
+		t.Fatal("the manifest instrument must be invalid when the test evidence cannot be persisted")
+	}
+	raw, err := os.ReadFile(filepath.Join(out, "case-a", "1", "result.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var onDisk Result
+	if err := json.Unmarshal(raw, &onDisk); err != nil {
+		t.Fatal(err)
+	}
+	if !onDisk.Invalid {
+		t.Fatalf("result.json = %+v, want the invalid verdict persisted", onDisk)
 	}
 }

@@ -31,6 +31,14 @@ type DefectResult struct {
 	Row           string `json:"row,omitempty"` // the finding row that matched, for audit
 }
 
+// TestArtifact is one changed agent test file kept beside the result: its workspace-relative path
+// and the sha256 of the bytes persisted under test-artifacts/, so a run's test evidence can be
+// verified by content hash and replayed after the workspace is gone.
+type TestArtifact struct {
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+}
+
 // Result is the score of one workspace against its key.
 type Result struct {
 	Case                 string         `json:"case"`
@@ -80,6 +88,10 @@ type Result struct {
 	ClaimedPinned   int         `json:"claimed_pinned"`    // defects whose finding names a pinning test
 	Caught          int         `json:"caught"`            // defects some agent test distinguishes (fixture vs fix)
 	Catch           CatchResult `json:"catch"`
+	// TestArtifacts is the persisted copy of the changed test files the catch check listed, as
+	// relative path plus sha256. A manifest run records it even when empty — no agent test file is
+	// an answer; a legacy run persists no snapshot and leaves it null.
+	TestArtifacts []TestArtifact `json:"test_artifacts"`
 }
 
 var (

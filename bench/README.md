@@ -140,6 +140,14 @@ More honesty notes travel with every manifest-bound reading:
   `bench compare` refuses the reading while `bench eval import` lands it `INVALID` — it can
   never become comparable data. A reading sealed under a different manifest is refused at
   import outright rather than relabelled.
+- **The test evidence is kept beside the result.** Before a manifest run removes a workspace it
+  persists every changed test file the catch check listed under
+  `<results>/<case>/<run>/test-artifacts/<relative path>`, written atomically, and `result.json`
+  records each relative path with the sha256 of the bytes kept (`test_artifacts`; an empty list
+  means the agent wrote no test file, while a legacy run — which persists no snapshots — leaves
+  it null). The files land before `result.json` is written, a snapshot that cannot be taken marks
+  the run invalid and the instrument with it, and `DiscriminateSavedTests` replays the catch
+  check from those artifacts alone — verifying every path and digest — once the workspace is gone.
 
 ## Scoring
 

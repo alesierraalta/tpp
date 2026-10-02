@@ -1,6 +1,8 @@
 package bench
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -173,6 +175,105 @@ func TestDiscriminateMultiDefectWithoutKeepVariantIsUncheckable(t *testing.T) {
 	if len(got.Notes) == 0 {
 		t.Fatal("missing variant not reported")
 	}
+}
+
+// A run's catch outcome stays replayable after its workspace is gone: the snapshot keeps the
+// changed test bytes, the digests are verified, and the oracle answers the same way from a fresh
+// workspace built out of fixture/ plus those bytes.
+func TestReplayingSavedTestsAfterWorkspaceRemovalCatchesTheSameDefect(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs sh")
+	}
+	caseDir, key := shellCase(t)
+	key.Defects = key.Defects[:1] // one planted issue: the pristine fixture is where it remains
+	ws := agentWorkspace(t, caseDir, map[string]string{"tests/d1.sh": "grep -q D1=ok src.txt\n"})
+	original := Discriminate(caseDir, ws, key, 30*time.Second)
+	if !original.Checked || !original.Caught["D1"] || len(original.TestFiles) != 1 {
+		t.Fatalf("setup: the generated test must catch D1 before the snapshot: %+v", original)
+	}
+	artifactDir := filepath.Join(t.TempDir(), "test-artifacts")
+	artifacts, err := saveTestArtifacts(ws, artifactDir, original.TestFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(ws); err != nil { // the run cleans its workspace away after the snapshot
+		t.Fatal(err)
+	}
+	replay, err := DiscriminateSavedTests(caseDir, artifactDir, key, artifacts, 30*time.Second)
+	if err != nil {
+		t.Fatalf("replay after the workspace is gone: %v", err)
+	}
+	if !replay.Checked || !replay.Caught["D1"] || replay.Count() != original.Count() || replay.AllGreen != original.AllGreen {
+		t.Fatalf("replay = %+v, want the same catch outcome the run measured (%+v)", replay, original)
+	}
+	if len(replay.TestFiles) != 1 || replay.TestFiles[0] != "tests/d1.sh" {
+		t.Fatalf("replayed test files = %v, want the one saved test file", replay.TestFiles)
+	}
+}
+
+// A replay counts only what the run recorded: bytes that no longer hash to the recorded sha256, a
+// path that escapes the artifact root, and a file swapped for a symlink are each refused before
+// anything outside the root is read or a replay workspace is built.
+func TestReplayRefusesTamperedEscapingAndSymlinkedArtifacts(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs sh")
+	}
+	caseDir, key := shellCase(t)
+	ws := agentWorkspace(t, caseDir, map[string]string{"tests/d1.sh": "grep -q D1=ok src.txt\n"})
+	setup := func(t *testing.T) (artifactDir, saved string, artifacts []TestArtifact) {
+		t.Helper()
+		artifactDir = filepath.Join(t.TempDir(), "test-artifacts")
+		saved = filepath.Join(artifactDir, "tests", "d1.sh")
+		artifacts, err := saveTestArtifacts(ws, artifactDir, []string{"tests/d1.sh"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return artifactDir, saved, artifacts
+	}
+	refused := func(t *testing.T, artifactDir string, artifacts []TestArtifact) {
+		t.Helper()
+		replay, err := DiscriminateSavedTests(caseDir, artifactDir, key, artifacts, 30*time.Second)
+		if err == nil {
+			t.Fatalf("replay accepted the artifact set it must refuse: %+v", replay)
+		}
+		if replay.Checked {
+			t.Fatalf("a refused artifact set must yield no catch outcome: %+v", replay)
+		}
+	}
+	t.Run("altered bytes", func(t *testing.T) {
+		artifactDir, saved, artifacts := setup(t)
+		if err := os.WriteFile(saved, []byte("grep -q D2=ok src.txt\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		refused(t, artifactDir, artifacts)
+	})
+	t.Run("path escape", func(t *testing.T) {
+		artifactDir, _, _ := setup(t)
+		outside := filepath.Join(filepath.Dir(artifactDir), "outside.sh")
+		body := []byte("grep -q D1=ok src.txt\n")
+		if err := os.WriteFile(outside, body, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		sum := sha256.Sum256(body) // the digest is right, so only the path check can refuse it
+		escaped := []TestArtifact{{Path: "../outside.sh", SHA256: hex.EncodeToString(sum[:])}}
+		refused(t, artifactDir, escaped)
+	})
+	t.Run("symlinked artifact", func(t *testing.T) {
+		artifactDir, saved, artifacts := setup(t)
+		// The link's target carries exactly the recorded bytes: only the symlink refusal stands
+		// between this artifact set and a replay.
+		outside := filepath.Join(filepath.Dir(artifactDir), "outside.sh")
+		if err := os.WriteFile(outside, []byte("grep -q D1=ok src.txt\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(saved); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, saved); err != nil {
+			t.Fatal(err)
+		}
+		refused(t, artifactDir, artifacts)
+	})
 }
 
 func TestIsTestFile(t *testing.T) {

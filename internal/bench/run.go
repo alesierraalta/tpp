@@ -943,6 +943,10 @@ func merge(res, scored Result) Result {
 	scored.Failed, scored.FailReason = res.Failed, res.FailReason
 	scored.BudgetExhausted, scored.Outcome = res.BudgetExhausted, res.Outcome
 	scored.Notes = append(res.Notes, scored.Notes...)
+	// The persisted test evidence is a property of the run, not of a re-scoring of it: a rescore
+	// re-derives the plan and the catch, but the bytes the original run kept are still the bytes
+	// it kept, and dropping them would leave its artifact list unbindable.
+	scored.TestArtifacts = res.TestArtifacts
 	return scored
 }
 
@@ -961,6 +965,21 @@ func finish(res Result, opts Options, keepWS bool) Result {
 			if err := os.WriteFile(filepath.Join(dir, "test-plan.md"), data, 0o644); err != nil {
 				res.Notes = append(res.Notes, "the plan could not be kept beside the result: "+err.Error())
 			}
+		}
+	}
+	// A manifest run's test evidence lands before the record that names it: the bytes the catch
+	// check listed are persisted beside the result, and only then is result.json written —
+	// atomically — so the digests it carries always describe files that are already there, even
+	// though the workspace below them is about to be removed. A snapshot that cannot be taken
+	// fails the reading closed: the result is invalid and the manifest instrument with it, never
+	// a successful run whose evidence does not exist.
+	if opts.StrictManifest {
+		artifacts, err := saveTestArtifacts(res.Workspace, filepath.Join(dir, "test-artifacts"), res.Catch.TestFiles)
+		if err != nil {
+			res.Invalid, res.InvalidReason = true, "test artifact snapshot failed: "+err.Error()
+			noteSnapshotFailure(opts, err)
+		} else {
+			res.TestArtifacts = artifacts
 		}
 	}
 	if err := writeJSON(filepath.Join(dir, "result.json"), res); err != nil {
@@ -1025,6 +1044,18 @@ func listCases(glob string) ([]string, error) {
 	return dirs, nil
 }
 
+// noteSnapshotFailure fails the manifest instrument closed: the run's test evidence could not be
+// persisted, so nothing this run measured can become comparable data, whatever else it recorded.
+func noteSnapshotFailure(opts Options, err error) {
+	fmt.Fprintf(opts.Log, "test artifact snapshot failed: %v\n", err)
+	if opts.runtime == nil {
+		return
+	}
+	opts.runtime.mu.Lock()
+	defer opts.runtime.mu.Unlock()
+	opts.runtime.instrumentValid = false
+}
+
 func writeJSON(path string, v any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -1033,7 +1064,37 @@ func writeJSON(path string, v any) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(data, '\n'), 0o644)
+	return writeFileAtomic(path, append(data, '\n'), 0o644)
+}
+
+// writeFileAtomic lands data through a temporary file beside the target and renames it into
+// place, so a reader never sees a half-written record and an interrupted write leaves the
+// previous file — or none — instead of a truncated one.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(name)
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		os.Remove(name)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(name)
+		return err
+	}
+	if err := os.Rename(name, path); err != nil {
+		os.Remove(name)
+		return err
+	}
+	return nil
 }
 
 // Summary renders the aggregate as the markdown table written to summary.md.

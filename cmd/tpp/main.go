@@ -1300,6 +1300,8 @@ func runBench(args []string) int {
 		return runBenchRescore(args[1:])
 	case "adjudicate":
 		return runBenchAdjudicate(args[1:])
+	case "eval":
+		return runBenchEval(args[1:])
 	case "manifest":
 		return runBenchManifest(args[1:])
 	default:

@@ -45,3 +45,32 @@ func TestParseStreamErrorResult(t *testing.T) {
 		t.Fatalf("success result flagged as error: %+v", ok)
 	}
 }
+
+// The documented Claude result-event usage keys decide what the run may claim: a present zero is
+// a measured zero, and an absent key is unknown — never a measured zero.
+func TestParseStreamUsageKeysAndUnknownUsage(t *testing.T) {
+	result := func(fields string) AgentResult {
+		t.Helper()
+		return ParseStream(strings.NewReader(`{"type":"result","subtype":"success","is_error":false,"result":"done","num_turns":1` + fields + `}` + "\n"))
+	}
+	full := result(`,"total_cost_usd":0.5,"usage":{"input_tokens":10,"output_tokens":20,"cache_creation_input_tokens":3,"cache_read_input_tokens":4,"total_tokens":37}`)
+	if !full.CostKnown || full.CostUSD != 0.5 || !full.TokensKnown || full.Tokens != 37 {
+		t.Fatalf("documented usage keys not read: %+v", full)
+	}
+	parts := result(`,"usage":{"input_tokens":7,"output_tokens":3}`)
+	if !parts.TokensKnown || parts.Tokens != 10 {
+		t.Fatalf("part keys without total_tokens must sum: %+v", parts)
+	}
+	zero := result(`,"total_cost_usd":0,"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}`)
+	if !zero.CostKnown || zero.CostUSD != 0 || !zero.TokensKnown || zero.Tokens != 0 {
+		t.Fatalf("present zeros are a measured zero, not unknown: %+v", zero)
+	}
+	unknown := result(`,"usage":{}`)
+	if unknown.CostKnown || unknown.TokensKnown {
+		t.Fatalf("missing usage keys must stay unknown, not measured zero: %+v", unknown)
+	}
+	none := result("")
+	if none.CostKnown || none.TokensKnown {
+		t.Fatalf("an event without usage or cost must be unknown: %+v", none)
+	}
+}

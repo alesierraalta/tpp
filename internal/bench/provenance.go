@@ -23,18 +23,27 @@ import (
 // Provenance is the instrument a reading was taken with. Two numbers are comparable only when
 // these agree; a comparison that cannot say which of them moved is not a delta.
 type Provenance struct {
-	MetricsVersion int    `json:"metrics_version"`
-	Scorer         string `json:"scorer"` // build revision that produced the numbers
-	Model          string `json:"model"`
-	Runner         string `json:"runner"` // pi | claude
-	SkillVersion   string `json:"skill_version"`
-	Corpus         string `json:"corpus"` // digest of cases, requests and runs per case
-	Cases          int    `json:"cases"`
-	Runs           int    `json:"runs"`                    // runs per case
-	AgentConfig    string `json:"agent_config"`            // bench | inherited | custom | unspecified
-	SkillsDigest   string `json:"skills_digest,omitempty"` // digest of the skills a throwaway config carried
-	Environment    string `json:"environment"`             // os/arch of the instrument
-	SuiteTools     string `json:"suite_tools,omitempty"`   // node and go versions the suites ran with
+	MetricsVersion          int      `json:"metrics_version"`
+	Scorer                  string   `json:"scorer"` // build revision that produced the numbers
+	Model                   string   `json:"model"`
+	Runner                  string   `json:"runner"` // pi | claude
+	SkillVersion            string   `json:"skill_version"`
+	Corpus                  string   `json:"corpus"` // digest of cases, requests and runs per case
+	Cases                   int      `json:"cases"`
+	Runs                    int      `json:"runs"`                    // runs per case
+	AgentConfig             string   `json:"agent_config"`            // bench | inherited | custom | unspecified
+	SkillsDigest            string   `json:"skills_digest,omitempty"` // digest of the skills a throwaway config carried
+	Environment             string   `json:"environment"`             // os/arch of the instrument
+	SuiteTools              string   `json:"suite_tools,omitempty"`   // node and go versions the suites ran with
+	ManifestSHA256          string   `json:"manifest_sha256,omitempty"`
+	ManifestVersion         string   `json:"manifest_version,omitempty"`
+	ManifestSuite           string   `json:"manifest_suite,omitempty"`
+	BudgetIdentity          string   `json:"budget_identity,omitempty"`
+	BudgetStatus            string   `json:"budget_status,omitempty"` // supported | unsupported
+	BudgetUnsupportedReason string   `json:"budget_unsupported_reason,omitempty"`
+	BudgetLimitations       []string `json:"budget_limitations,omitempty"`
+	InstrumentValid         *bool    `json:"instrument_valid,omitempty"`
+	ExecutionComplete       *bool    `json:"execution_complete,omitempty"`
 }
 
 // Agent-config modes identify whether a run used the isolated benchmark configuration or an operator-owned one.
@@ -236,6 +245,29 @@ func provenanceForRun(opts Options, corpus string, cases int) Provenance {
 	}
 	if opts.ConfigDir != "" {
 		p.SkillsDigest, _ = SkillsDigest(opts.ConfigDir)
+	}
+	if opts.StrictManifest {
+		p.ManifestSHA256, p.ManifestVersion, p.ManifestSuite, p.BudgetIdentity = opts.ManifestSHA256, opts.ManifestVersion, opts.ManifestSuite, opts.BudgetIdentity
+		valid, complete := true, true
+		if opts.runtime != nil {
+			opts.runtime.mu.Lock()
+			valid, complete = opts.runtime.instrumentValid, opts.runtime.executionComplete
+			p.BudgetUnsupportedReason = opts.runtime.budgetUnsupported
+			if p.BudgetUnsupportedReason != "" {
+				p.BudgetStatus = "unsupported"
+			} else {
+				p.BudgetStatus = "supported"
+			}
+			opts.runtime.mu.Unlock()
+		}
+		p.InstrumentValid, p.ExecutionComplete = &valid, &complete
+		if opts.MaxCostUSD > 0 || opts.MaxCostPerCaseRunUSD > 0 || opts.MaxTokensPerCaseRun > 0 {
+			p.BudgetLimitations = []string{"cost and token thresholds are checked after each complete agent response; the response that crosses a threshold may overshoot it"}
+		}
+		if effectiveRunner(opts.Runner) == RunnerPi {
+			p.BudgetLimitations = append(p.BudgetLimitations, "the pi runner has no turn-cap flag: a turn cap is not enforced for pi and turns are bounded only by the case and suite deadlines")
+		}
+		p.Cases = len(opts.CaseIDs)
 	}
 	return p
 }

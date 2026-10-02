@@ -60,6 +60,9 @@ func Compare(beforeDir, afterDir string) (Comparison, error) {
 
 func refuseProvenanceMismatch(before, after Aggregate) error {
 	beforeProvenance, afterProvenance := aggregateProvenance(before), aggregateProvenance(after)
+	if err := refuseManifestBinding(beforeProvenance, afterProvenance); err != nil {
+		return err
+	}
 	checks := []func(Provenance, Provenance) error{
 		refuseMetricsVersion,
 		refuseModel,
@@ -73,6 +76,37 @@ func refuseProvenanceMismatch(before, after Aggregate) error {
 		if err := check(beforeProvenance, afterProvenance); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func refuseManifestBinding(before, after Provenance) error {
+	beforeBound, afterBound := before.ManifestSHA256 != "", after.ManifestSHA256 != ""
+	if !beforeBound && !afterBound {
+		return nil
+	}
+	if beforeBound != afterBound {
+		return fmt.Errorf("manifest-bound and legacy unbound readings cannot be compared")
+	}
+	for _, side := range []struct {
+		name string
+		p    Provenance
+	}{{"before", before}, {"after", after}} {
+		if side.p.InstrumentValid == nil || !*side.p.InstrumentValid {
+			return fmt.Errorf("%s manifest-bound instrument is invalid or lacks validity evidence", side.name)
+		}
+		if side.p.BudgetStatus != "supported" {
+			return fmt.Errorf("%s manifest-bound budget support is not verified: %s", side.name, side.p.BudgetUnsupportedReason)
+		}
+		if side.p.ExecutionComplete == nil || !*side.p.ExecutionComplete {
+			return fmt.Errorf("%s manifest-bound execution is incomplete", side.name)
+		}
+	}
+	if before.ManifestSHA256 != after.ManifestSHA256 {
+		return fmt.Errorf("different manifest digests: before %s, after %s", before.ManifestSHA256, after.ManifestSHA256)
+	}
+	if before.BudgetIdentity != after.BudgetIdentity {
+		return fmt.Errorf("different resolved manifest budget identities: before %s, after %s", before.BudgetIdentity, after.BudgetIdentity)
 	}
 	return nil
 }

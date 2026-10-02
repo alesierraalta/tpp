@@ -76,9 +76,29 @@ type piEvent struct {
 // piUsage is the per-message usage Pi reports; the cost is what a paid model spends on that
 // message, so the run's cost is their sum.
 type piUsage struct {
-	Cost struct {
-		Total float64 `json:"total"`
+	Input       *int `json:"input"`
+	Output      *int `json:"output"`
+	CacheRead   *int `json:"cacheRead"`
+	CacheWrite  *int `json:"cacheWrite"`
+	TotalTokens *int `json:"totalTokens"`
+	Cost        struct {
+		Total *float64 `json:"total"`
 	} `json:"cost"`
+}
+
+func piTokens(usage piUsage) (int, bool) {
+	if usage.TotalTokens != nil {
+		return *usage.TotalTokens, true
+	}
+	var total int
+	known := false
+	for _, part := range []*int{usage.Input, usage.Output, usage.CacheRead, usage.CacheWrite} {
+		if part != nil {
+			total += *part
+			known = true
+		}
+	}
+	return total, known
 }
 
 // ParsePiStream reads Pi's JSON event stream into the same AgentResult the Claude parser fills.
@@ -89,6 +109,7 @@ type piUsage struct {
 // is what an error event looks like here; the last assistant message decides the outcome.
 func ParsePiStream(r io.Reader) AgentResult {
 	var out AgentResult
+	costComplete, tokensComplete, usageSeen := true, true, false
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 1024*1024), 64*1024*1024)
 	for sc.Scan() {
@@ -111,7 +132,17 @@ func ParsePiStream(r io.Reader) AgentResult {
 			if ev.Message.Role != "assistant" {
 				continue
 			}
-			out.CostUSD += ev.Message.Usage.Cost.Total
+			usageSeen = true
+			if ev.Message.Usage.Cost.Total == nil {
+				costComplete = false
+			} else {
+				out.CostUSD += *ev.Message.Usage.Cost.Total
+			}
+			if count, ok := piTokens(ev.Message.Usage); ok {
+				out.Tokens += count
+			} else {
+				tokensComplete = false
+			}
 			if ev.Message.StopReason == "error" || ev.Message.StopReason == "aborted" {
 				out.IsError = true
 				out.ErrorText = strings.TrimSpace(ev.Message.ErrorMessage)
@@ -125,6 +156,9 @@ func ParsePiStream(r io.Reader) AgentResult {
 				out.Result = text
 			}
 		}
+	}
+	if usageSeen {
+		out.CostKnown, out.TokensKnown = costComplete, tokensComplete
 	}
 	return out
 }

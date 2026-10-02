@@ -268,3 +268,23 @@ func TestCompareAllowsLegacyAggregatesWithEqualCounts(t *testing.T) {
 		t.Fatalf("legacy aggregates with equal counts must compare: %v", err)
 	}
 }
+
+func TestCompareRejectsInvalidManifestBoundInstrument(t *testing.T) {
+	writeBound := func(dir string, valid bool) string {
+		t.Helper()
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		body := fmt.Sprintf(`{"corpus":"sha256:corpus","cases":[{"case":"a","total":1}],"provenance":{"metrics_version":2,"model":"model","runner":"pi","skill_version":"skill","corpus":"sha256:corpus","cases":1,"runs":1,"agent_config":"bench","environment":"linux/amd64","manifest_sha256":"sha256:manifest","instrument_valid":%t,"execution_complete":true,"budget_status":"supported"}}`, valid)
+		path := filepath.Join(dir, "aggregate.json")
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+	before := writeBound(filepath.Join(t.TempDir(), "before"), false)
+	after := writeBound(filepath.Join(t.TempDir(), "after"), true)
+	if _, err := Compare(before, after); err == nil || !strings.Contains(err.Error(), "instrument") {
+		t.Fatalf("invalid manifest-bound instrument must be refused, got %v", err)
+	}
+}

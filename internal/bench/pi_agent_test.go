@@ -72,6 +72,40 @@ func TestPiStreamSumsTheCostOfEveryAssistantMessage(t *testing.T) {
 	}
 }
 
+// The documented Pi usage wire keys decide what the run may claim: a present zero is a measured
+// zero, and a missing key is unknown — never a measured zero.
+func TestPiStreamUsageKeysAndUnknownUsage(t *testing.T) {
+	assistant := func(usage string) AgentResult {
+		t.Helper()
+		stream := `{"type":"session","version":3,"id":"s","cwd":"/w"}` + "\n" +
+			`{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"ok"}],"usage":` + usage + `,"stopReason":"stop"}}` + "\n"
+		return ParsePiStream(strings.NewReader(stream))
+	}
+	full := assistant(`{"input":10,"output":20,"cacheRead":5,"cacheWrite":2,"totalTokens":37,"cost":{"total":0.25}}`)
+	if !full.CostKnown || full.CostUSD != 0.25 || !full.TokensKnown || full.Tokens != 37 {
+		t.Fatalf("documented usage keys not read: %+v", full)
+	}
+	parts := assistant(`{"input":7,"output":3,"cost":{"total":0}}`)
+	if !parts.TokensKnown || parts.Tokens != 10 {
+		t.Fatalf("part keys without totalTokens must sum: %+v", parts)
+	}
+	if !parts.CostKnown || parts.CostUSD != 0 {
+		t.Fatalf("a present zero cost is a measured zero, not unknown: %+v", parts)
+	}
+	unknownCost := assistant(`{"input":7,"output":3}`)
+	if unknownCost.CostKnown || unknownCost.CostUSD != 0 {
+		t.Fatalf("a missing cost.total must stay unknown, not measured zero: %+v", unknownCost)
+	}
+	unknownTokens := assistant(`{"cost":{"total":0.01}}`)
+	if unknownTokens.TokensKnown || unknownTokens.Tokens != 0 {
+		t.Fatalf("missing token keys must stay unknown, not measured zero: %+v", unknownTokens)
+	}
+	noAssistant := ParsePiStream(strings.NewReader(`{"type":"session","version":3,"id":"s","cwd":"/w"}` + "\n"))
+	if noAssistant.CostKnown || noAssistant.TokensKnown {
+		t.Fatalf("a stream without an assistant message must be unknown: %+v", noAssistant)
+	}
+}
+
 // Pi reports a failed model call as an assistant message whose stop reason is "error": its print
 // mode writes that message's reason and exits non-zero. The free model does not fail on demand, so
 // this is the one hand-written event, shaped like the recorded ones above.

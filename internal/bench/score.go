@@ -54,6 +54,10 @@ type Result struct {
 	LedgerRows           int            `json:"ledger_rows"`
 	Notes                []string       `json:"notes,omitempty"`
 	CostUSD              float64        `json:"cost_usd"`
+	CostKnown            bool           `json:"cost_known"`
+	Tokens               *int           `json:"tokens,omitempty"`
+	BudgetExhausted      bool           `json:"budget_exhausted,omitempty"`
+	Outcome              string         `json:"outcome,omitempty"`
 	Turns                int            `json:"turns"`
 	Seconds              float64        `json:"seconds"`
 	Invalid              bool           `json:"invalid"`

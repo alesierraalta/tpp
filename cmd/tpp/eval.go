@@ -128,7 +128,7 @@ func runBenchEvalAdjudicate(args []string) int {
 	c3Text := fs.String("c3", "", "mechanism fact: true, false, or unknown")
 	c4Text := fs.String("c4-shows", "", "evidence shows failure fact: true, false, or unknown")
 	equivalent := fs.String("equivalent-to", "", "equivalent finding ID")
-	outcome := fs.String("outcome", "", "unmatched outcome")
+	outcome := fs.String("outcome", "", "unmatched outcome (CONFIRMED_NOVEL is refused until the verified proof workflow exists)")
 	by := fs.String("by", "", "adjudicator")
 	reason := fs.String("reason", "", "decision reason")
 	if fs.Parse(args) != nil {

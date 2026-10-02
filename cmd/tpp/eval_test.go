@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -1247,5 +1248,83 @@ func TestBenchEvalCLICompareReportsBudgetAbortAsCompletenessFailure(t *testing.T
 	if !strings.Contains(string(tamperedDecision)+tamperedOut, "I9") && !strings.Contains(string(tamperedDecision)+tamperedOut, "H5") &&
 		!strings.Contains(string(tamperedDecision)+tamperedOut, "I11") {
 		t.Fatalf("tampering went unreported:\n%s\n%s", tamperedOut, tamperedDecision)
+	}
+}
+
+// The built CLI must refuse an unverified --outcome CONFIRMED_NOVEL adjudication with
+// exit 1 and leave every persisted run file byte-identical.
+func TestBenchEvalCLIRefusesDirectConfirmedNovelUntilProofWorkflow(t *testing.T) {
+	bin := buildCLI(t)
+	root := t.TempDir()
+	benchDir, manifestPath, policyPath := writeEvalCLIFixture(t, root)
+	resultsDir := filepath.Join(root, "results")
+	if err := os.MkdirAll(resultsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	aggregate := bench.Aggregate{Model: "model", Provenance: bench.Provenance{
+		Model: "model", Runner: "pi", AgentConfig: bench.ConfigBench,
+		SkillsDigest: "sha256:skills", Environment: "linux/amd64",
+	}}
+	aggregateData, err := json.Marshal(aggregate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(resultsDir, "aggregate.json"), aggregateData, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	emptyPlan := "## Findings\n\n| Id | Finding | Type | Location | Evidence | Severity |\n|---|---|---|---|---|---|\n"
+	findingPlan := emptyPlan + "| F1 | observed concern | boundary | src/a.go:10 | - | high |\n"
+	for _, caseID := range []string{"c1", "c2"} {
+		caseRunDir := filepath.Join(resultsDir, caseID, "1")
+		if err := os.MkdirAll(caseRunDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		result := bench.Result{Case: caseID, Run: 1, PlanFound: true, PlanFormat: bench.FormatTable, CostUSD: 0.1, Seconds: 2}
+		resultData, err := json.Marshal(result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(caseRunDir, "result.json"), resultData, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		plan := emptyPlan
+		if caseID == "c1" {
+			plan = findingPlan
+		}
+		if err := os.WriteFile(filepath.Join(caseRunDir, "test-plan.md"), []byte(plan), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	evalDir := filepath.Join(root, "eval")
+	if out, code := runCLI(t, bin, "bench", "eval", "import", "--results", resultsDir, "--manifest", manifestPath, "--policy", policyPath, "--harness", "baseline", "--replicate", "1", "--out", evalDir, "--bench-dir", benchDir); code != 0 {
+		t.Fatalf("import exited %d:\n%s", code, out)
+	}
+	runDir := filepath.Join(evalDir, "run-1")
+	tracked := []string{
+		filepath.Join(runDir, "run.json"),
+		filepath.Join(runDir, "c1", "caserun.json"),
+		filepath.Join(runDir, "c1", "events.jsonl"),
+	}
+	before := make(map[string][]byte, len(tracked))
+	for _, path := range tracked {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before[path] = data
+	}
+	out, code := runCLI(t, bin, "bench", "eval", "adjudicate", "--eval", runDir, "--case", "c1", "--finding", "c1-f1",
+		"--outcome", "CONFIRMED_NOVEL", "--by", "reviewer", "--reason", "looks novel")
+	if code != 1 || !strings.Contains(out, "CONFIRMED_NOVEL") || !strings.Contains(out, "proof") {
+		t.Fatalf("adjudicate --outcome CONFIRMED_NOVEL exited %d, want refusal naming the required proof:\n%s", code, out)
+	}
+	for _, path := range tracked {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(before[path], data) {
+			t.Fatalf("refused adjudicate mutated %s", path)
+		}
 	}
 }

@@ -128,6 +128,11 @@ func (cr *CaseRun) Decide(decision Decision) error {
 	if level != LevelNone && decision.UnmatchedOutcome != "" {
 		return fmt.Errorf("unmatched outcome is only allowed for a NONE match")
 	}
+	// Interim fail-closed guard: a direct CONFIRMED_NOVEL cannot end a finding before
+	// the independently verified novel proof/backlog workflow exists (pending).
+	if decision.UnmatchedOutcome == FindingConfirmedNovel {
+		return fmt.Errorf("direct CONFIRMED_NOVEL confirmation is refused: independently verified novel proof and backlog registration are required (proof workflow pending)")
+	}
 	switch cr.caseRunState() {
 	case CaseRunScored:
 		if _, err := cr.Log.Append(Event{Entity: EntityCaseRun, ID: cr.Case, Kind: EventTransition, PreviousState: string(CaseRunScored), NewState: string(CaseRunAdjudicating), TS: decision.TS}); err != nil {

@@ -713,3 +713,88 @@ func equalDomains(a, b []Domain) bool {
 	}
 	return true
 }
+
+// pendingCaseRun admits a one-finding case whose finding awaits adjudication.
+func pendingCaseRun(t *testing.T) *CaseRun {
+	t.Helper()
+	cr := &CaseRun{Case: "case", Issues: []Issue{{Case: "case", ID: "D1"}}, Findings: []Finding{{ID: "f1", Row: 1}}}
+	if err := cr.Admit("1"); err != nil {
+		t.Fatal(err)
+	}
+	return cr
+}
+
+// An unverified direct CONFIRMED_NOVEL decision must be refused before Decide mutates
+// the log; every other unmatched outcome keeps deciding.
+func TestDirectConfirmedNovelRefusedUntilProofWorkflow(t *testing.T) {
+	cr := pendingCaseRun(t)
+	before, err := json.Marshal(cr.Log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := len(cr.Log.Events)
+	err = cr.Decide(Decision{FindingID: "f1", UnmatchedOutcome: FindingConfirmedNovel, By: "reviewer", TS: "2", Reason: "looks novel"})
+	if err == nil || !strings.Contains(err.Error(), "CONFIRMED_NOVEL") || !strings.Contains(err.Error(), "proof") {
+		t.Fatalf("Decide() error = %v, want CONFIRMED_NOVEL refusal naming the required novel proof", err)
+	}
+	after, err := json.Marshal(cr.Log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cr.Log.Events) != count || !bytes.Equal(before, after) {
+		t.Fatalf("refused decision mutated the log: events %d -> %d", count, len(cr.Log.Events))
+	}
+	if got := cr.FindingState("f1"); got != FindingPendingAdjudication {
+		t.Fatalf("finding state after refusal = %s, want PENDING_ADJUDICATION", got)
+	}
+	if err := cr.Decide(Decision{FindingID: "f1", UnmatchedOutcome: FindingFP, By: "reviewer", TS: "3", Reason: "false positive"}); err != nil {
+		t.Fatalf("FP decision must stay accepted: %v", err)
+	}
+	if got := cr.FindingState("f1"); got != FindingFP {
+		t.Fatalf("finding state = %s, want FP", got)
+	}
+}
+
+// The normal unmatched route with no outcome still parks the finding at NOVEL_CANDIDATE
+// for the future proof workflow.
+func TestUnmatchedWithoutOutcomeStaysNovelCandidate(t *testing.T) {
+	cr := pendingCaseRun(t)
+	if err := cr.Decide(Decision{FindingID: "f1", By: "reviewer", TS: "2", Reason: "no match"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := cr.FindingState("f1"); got != FindingNovelCandidate {
+		t.Fatalf("finding state = %s, want NOVEL_CANDIDATE", got)
+	}
+}
+
+// TestHistoricalConfirmedNovelLogStillVerifiesAndReconstructs is an explicit migration
+// fixture: a valid old-schema history recorded before the interim refusal must keep
+// verifying, reading and reconstructing. It is built only through Log.Append, never
+// through the refused Decide path.
+func TestHistoricalConfirmedNovelLogStillVerifiesAndReconstructs(t *testing.T) {
+	cr := pendingCaseRun(t)
+	decision := Decision{FindingID: "f1", UnmatchedOutcome: FindingConfirmedNovel, By: "reviewer", TS: "2", Reason: "verified novel"}
+	payload, err := json.Marshal(decision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	history := []Event{
+		{Entity: EntityFinding, ID: "f1", Kind: EventDecide, PreviousState: string(FindingPendingAdjudication), NewState: string(FindingUnmatched), Reason: decision.Reason, TS: decision.TS, Adjudicator: decision.By, Payload: payload},
+		{Entity: EntityFinding, ID: "f1", Kind: EventTransition, PreviousState: string(FindingUnmatched), NewState: string(FindingNovelCandidate), TS: decision.TS, Payload: payload},
+		{Entity: EntityFinding, ID: "f1", Kind: EventDecide, PreviousState: string(FindingNovelCandidate), NewState: string(FindingConfirmedNovel), Reason: decision.Reason, TS: decision.TS, Adjudicator: decision.By, Payload: payload},
+	}
+	for _, event := range history {
+		if _, err := cr.Log.Append(event); err != nil {
+			t.Fatalf("append historical %s event: %v", event.NewState, err)
+		}
+	}
+	if err := cr.Log.Verify(); err != nil {
+		t.Fatalf("historical log must verify: %v", err)
+	}
+	if got := cr.FindingState("f1"); got != FindingConfirmedNovel {
+		t.Fatalf("reconstructed finding state = %s, want CONFIRMED_NOVEL", got)
+	}
+	if got := cr.Log.States()[EntityFinding+":f1"]; got != string(FindingConfirmedNovel) {
+		t.Fatalf("folded state = %q, want CONFIRMED_NOVEL", got)
+	}
+}

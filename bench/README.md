@@ -375,6 +375,13 @@ tpp bench eval compare --baseline <dir> --candidate <dir> --manifest <m> --polic
 tpp bench eval verify  --comparison <dir>
 ```
 
+`adjudicate --outcome CONFIRMED_NOVEL` is refused as an interim fail-closed guard: it exits 1,
+writes nothing, and requires the independently verified novel proof and backlog registration that
+the proof workflow (pending) will implement — an unverified confirmation may not end a finding.
+An unmatched decision without an outcome still parks the finding at `NOVEL_CANDIDATE`, and run
+logs that already contain a `CONFIRMED_NOVEL` event keep verifying, reading and reconstructing
+unchanged.
+
 **Confirmation comes after import and adjudication, before close.** While the run record is
 `ADJUDICATING`, every Issue whose current primary finding still lacks a recorded reproduction
 confirmation is *missing*. `close` collects `MissingReproductionConfirmations` for each case

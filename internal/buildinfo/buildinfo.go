@@ -8,7 +8,7 @@ import (
 
 // Version is the release this build was cut from. It is overridable at build time:
 // -ldflags "-X github.com/alesierraalta/tpp/internal/buildinfo.Version=v1.2.3".
-var Version = "0.5.0"
+var Version = "0.5.1"
 
 // Commit is the revision `make build` reads from git, as "<sha>" or "<sha>+dirty". It wins over the
 // stamp Go embeds, which misses a linked worktree and, inside another repository, names that

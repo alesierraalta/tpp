@@ -4,8 +4,8 @@ description: "Trigger: haz test stragety, haz test strategy, test-strategy, haz 
 license: Apache-2.0
 metadata:
   author: "alesierraalta"
-  version: "0.4.1"
-  requires_tpp: "0.5.0"
+  version: "0.4.2"
+  requires_tpp: "0.5.1"
   scope: [common]
   auto_invoke: "Any request to test something: infer scope and mode from repo state, build or resume the persisted plan, execute it through specialized testing skills"
 ---
@@ -23,7 +23,7 @@ This skill decides WHICH targets and routes; siblings do the work.
 
 ## Tooling
 
-Written for `tpp 0.5.0` (`tpp version` prints the build). Build it with `make build` (writes
+Written for `tpp 0.5.1` (`tpp version` prints the build). Build it with `make build` (writes
 `bin/tpp`) and put it on `PATH`, or use `go install github.com/alesierraalta/tpp/cmd/tpp@latest` once published. Without the binary, fall back and say so in the report, since a
 hand-applied gate is a weaker claim than the binary's:
 

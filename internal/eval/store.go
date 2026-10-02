@@ -186,6 +186,23 @@ func ReproFromEvents(caseRun CaseRun) map[string]ReproOutcome {
 	return outcomes
 }
 
+// ConfirmationDigests returns the recorded artifact digest of each Issue's effective reproduction
+// confirmation, keyed by the Issue event id: the latest canonically valid confirmation per Issue,
+// exactly the set ReproFromEvents honors. Malformed confirmations are skipped as they are there,
+// so callers can validate the recorded binding without decoding payloads themselves.
+func ConfirmationDigests(caseRun CaseRun) map[string]string {
+	digests := make(map[string]string)
+	for _, event := range caseRun.Log.Events {
+		if event.Entity != EntityIssue || event.Kind != EventConfirm {
+			continue
+		}
+		if payload, err := decodeConfirmation(event); err == nil {
+			digests[event.ID] = payload.ArtifactDigest
+		}
+	}
+	return digests
+}
+
 type runFile struct {
 	K                   int                         `json:"k"`
 	State               RunState                    `json:"state"`

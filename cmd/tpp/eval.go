@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -12,12 +14,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alesierraalta/tpp/internal/bench"
 	"github.com/alesierraalta/tpp/internal/eval"
 )
 
 func runBenchEval(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: tpp bench eval <import|pending|adjudicate|reopen|close|compare|verify>")
+		fmt.Fprintln(os.Stderr, "usage: tpp bench eval <import|pending|adjudicate|confirm|reopen|close|compare|verify>")
 		return 2
 	}
 	switch args[0] {
@@ -27,6 +30,8 @@ func runBenchEval(args []string) int {
 		return runBenchEvalPending(args[1:])
 	case "adjudicate":
 		return runBenchEvalAdjudicate(args[1:])
+	case "confirm":
+		return runBenchEvalConfirm(args[1:])
 	case "reopen":
 		return runBenchEvalReopen(args[1:])
 	case "close":
@@ -187,6 +192,339 @@ func runBenchEvalAdjudicate(args []string) int {
 	return 0
 }
 
+// pendingConfirmation is one Issue's replayed confirmation outcome, held in memory until every
+// case has verified and replayed.
+type pendingConfirmation struct {
+	issueID        string
+	outcome        string
+	artifactDigest string
+	attempts       int
+}
+
+// confirmationBinding is the canonical set of reproducible inputs a confirmation is recorded over:
+// the source result that binds the snapshot paths and their hashes, the sealed manifest the run is
+// bound to, and the manifest's digests for this case's key, fixture and fix trees. The recorded
+// artifact digest is the sha256 of this struct's canonical JSON, so it changes whenever any of the
+// inputs does.
+type confirmationBinding struct {
+	ResultSHA256      string `json:"result_sha256"`
+	ManifestSHA256    string `json:"manifest_sha256"`
+	KeySHA256         string `json:"key_sha256"`
+	FixtureTreeSHA256 string `json:"fixture_tree_sha256"`
+	FixTreeSHA256     string `json:"fix_tree_sha256"`
+}
+
+// runBenchEvalConfirm records the reproduction confirmation for every primary finding that still
+// lacks one. It refuses unless the run is adjudicating and manifest-bound with its sealed manifest
+// intact and leak-free; it verifies every saved snapshot against the source result's metadata and
+// replays the local catch oracle from those bytes — never a model, never an agent — before any
+// event is appended or any state is saved.
+func runBenchEvalConfirm(args []string) int {
+	fs := evalFlagSet("bench eval confirm")
+	runDir := fs.String("eval", "", "evaluation run directory")
+	benchDir := fs.String("bench-dir", "bench", "benchmark directory")
+	if fs.Parse(args) != nil {
+		return 2
+	}
+	if fs.NArg() != 0 || *runDir == "" {
+		fmt.Fprintln(os.Stderr, "bench eval confirm: requires --eval")
+		return 2
+	}
+	stored, err := eval.LoadRun(*runDir)
+	if err != nil {
+		return evalCommandError("confirm", err)
+	}
+	// Preflight the existing record before anything else: every case's event chain must verify and
+	// every recorded confirmation must still bind to the current source, so a corrupt log or a moved
+	// source fails here with the run byte-identical on disk — before any replay, append, or save.
+	for _, caseID := range sortedCaseIDs(stored.CaseRuns) {
+		caseRun := stored.CaseRuns[caseID]
+		if err := caseRun.Log.Verify(); err != nil {
+			return evalCommandError("confirm", fmt.Errorf("case %s event chain: %w", caseID, err))
+		}
+	}
+	if err := validateConfirmationBindings(stored); err != nil {
+		return evalCommandError("confirm", err)
+	}
+	// The order is import → adjudicate → confirm → close: only an adjudicating run may record a
+	// confirmation, and only a manifest-bound one can honestly claim an independent re-run.
+	if stored.Record.State != eval.RunAdjudicating {
+		return evalCommandError("confirm", fmt.Errorf("run is in state %q; reproduction is confirmed only while the run is %q, before close", stored.Record.State, eval.RunAdjudicating))
+	}
+	if stored.Record.ManifestSHA256 == "" || stored.ManifestPath == "" {
+		return evalCommandError("confirm", fmt.Errorf("run is not bound to a stored sealed manifest; a legacy unbound run cannot claim independently confirmed reproduction"))
+	}
+	if stored.Record.AbortReason != "" {
+		return evalCommandError("confirm", fmt.Errorf("run provenance does not prove a valid and complete execution: %s", stored.Record.AbortReason))
+	}
+	if len(stored.Record.Leaks) > 0 {
+		leak := stored.Record.Leaks[0]
+		return evalCommandError("confirm", fmt.Errorf("run records %d leak(s) (first: %s at %s:%d); leaked evidence cannot be confirmed", len(stored.Record.Leaks), leak.Kind, leak.Source, leak.Line))
+	}
+	manifest, err := eval.LoadManifest(stored.ManifestPath)
+	if err != nil {
+		return evalCommandError("confirm", err)
+	}
+	if manifest.ManifestSHA256 != stored.Record.ManifestSHA256 {
+		return evalCommandError("confirm", fmt.Errorf("stored run manifest digest %s does not match the sealed manifest %s", stored.Record.ManifestSHA256, manifest.ManifestSHA256))
+	}
+	if mismatches := eval.VerifyCases(*benchDir, manifest); len(mismatches) > 0 {
+		return evalCommandError("confirm", fmt.Errorf("benchmark cases do not match the sealed manifest: %s", strings.Join(mismatches, ", ")))
+	}
+	if manifest.Budgets.MaxRuntimePerCaseRunSeconds <= 0 {
+		return evalCommandError("confirm", fmt.Errorf("manifest per-case runtime budget is missing; refusing an unbounded replay"))
+	}
+	timeout := time.Duration(manifest.Budgets.MaxRuntimePerCaseRunSeconds) * time.Second
+
+	// Preflight every case first: artifact verification and the local replay all happen in memory,
+	// and nothing is appended or saved until every artifact verified and every replay returned a
+	// decisive CatchResult.
+	type plannedCase struct {
+		caseID  string
+		pending []pendingConfirmation
+	}
+	var plan []plannedCase
+	for _, caseID := range sortedCaseIDs(stored.CaseRuns) {
+		caseRun := stored.CaseRuns[caseID]
+		missing, err := caseRun.MissingReproductionConfirmations()
+		if err != nil {
+			return evalCommandError("confirm", err)
+		}
+		if len(missing) == 0 {
+			continue
+		}
+		pending, err := planCaseConfirmations(stored, manifest, *benchDir, caseID, missing, timeout)
+		if err != nil {
+			return evalCommandError("confirm", err)
+		}
+		plan = append(plan, plannedCase{caseID: caseID, pending: pending})
+	}
+	if len(plan) == 0 {
+		fmt.Println("already confirmed: 0 updated")
+		return 0
+	}
+	ts := time.Now().UTC().Format(time.RFC3339Nano)
+	total := 0
+	for _, item := range plan {
+		caseRun := stored.CaseRuns[item.caseID]
+		for _, confirmation := range item.pending {
+			if err := caseRun.RecordReproductionConfirmation(confirmation.issueID, confirmation.outcome, confirmation.artifactDigest, confirmation.attempts, ts); err != nil {
+				// The in-memory ledger is discarded with this error: events reach disk only after
+				// every case recorded successfully.
+				return evalCommandError("confirm", fmt.Errorf("case %s: %w", item.caseID, err))
+			}
+			total++
+		}
+		stored.CaseRuns[item.caseID] = caseRun
+	}
+	if err := eval.SaveRun(*runDir, stored); err != nil {
+		return evalCommandError("confirm", err)
+	}
+	fmt.Printf("confirmed %d reproduction issue(s) in %d case(s)\n", total, len(plan))
+	return 0
+}
+
+// planCaseConfirmations preflights one case: it loads the sealed KEY v2 and the source result,
+// verifies every saved snapshot against the result's own metadata, checks each missing Issue is
+// confirmable, and replays the local catch oracle from the saved bytes.
+func planCaseConfirmations(stored eval.StoredRun, manifest eval.Manifest, benchDir, caseID string, missing []string, timeout time.Duration) ([]pendingConfirmation, error) {
+	fail := func(err error) ([]pendingConfirmation, error) { return nil, fmt.Errorf("case %s: %w", caseID, err) }
+	var manifestCase eval.ManifestCase
+	for _, candidate := range manifest.Cases {
+		if candidate.ID == caseID {
+			manifestCase = candidate
+			break
+		}
+	}
+	if manifestCase.ID == "" {
+		return fail(fmt.Errorf("case is not in the sealed manifest"))
+	}
+	caseDir := filepath.Join(benchDir, "cases", caseID)
+	key, err := bench.LoadKey(caseDir)
+	if err != nil {
+		return fail(err)
+	}
+	sourceDir := filepath.Join(stored.SourceResultsDir, caseID, fmt.Sprint(stored.K))
+	resultPath := filepath.Join(sourceDir, "result.json")
+	result, err := readSourceResult(resultPath)
+	if err != nil {
+		return fail(err)
+	}
+	// The run's manifest binding is the provenance this confirmation stands on: with the sealed
+	// manifest it binds the key and both trees, and the result binds every snapshot path and hash
+	// that VerifiedTestArtifacts now checks against the files on disk.
+	artifactDir := filepath.Join(sourceDir, "test-artifacts")
+	if _, err := bench.VerifiedTestArtifacts(artifactDir, result.Catch, result.TestArtifacts); err != nil {
+		return fail(err)
+	}
+	resultDigest, err := eval.Digest(resultPath)
+	if err != nil {
+		return fail(err)
+	}
+	artifactDigest, err := confirmationArtifactDigest(resultDigest, manifest, manifestCase)
+	if err != nil {
+		return fail(err)
+	}
+	for _, issueID := range missing {
+		if err := requireCatchOracle(key, caseID, issueID); err != nil {
+			return fail(err)
+		}
+	}
+	// Preflight the fixed versions the replay needs before any command runs: the catch check is
+	// decisive only on fix/all and, for a multi-defect case, on fix/keep-<ID> per Issue. A missing
+	// variant means the Issue was never checked and must be refused, never recorded as
+	// NOT_REPRODUCED from an absent outcome.
+	if st, err := os.Stat(filepath.Join(caseDir, bench.FixDir, "all")); err != nil || !st.IsDir() {
+		return fail(fmt.Errorf("no fix/all directory; the catch check cannot run"))
+	}
+	if len(key.Defects) > 1 {
+		for _, issueID := range missing {
+			if st, err := os.Stat(filepath.Join(caseDir, bench.FixDir, "keep-"+issueID)); err != nil || !st.IsDir() {
+				return fail(fmt.Errorf("no fix/keep-%s directory; issue %s/%s was never checked and cannot be confirmed", issueID, caseID, issueID))
+			}
+		}
+	}
+	// The replay rebuilds a workspace from fixture/ plus exactly the saved test bytes — the key
+	// never enters it, and every artifact path is confined to the artifact root — then runs the
+	// ordinary fixed-version oracle against it. No model and no agent is invoked.
+	replay, err := bench.DiscriminateSavedTests(caseDir, artifactDir, key, result.TestArtifacts, timeout)
+	if err != nil {
+		return fail(err)
+	}
+	if !replay.Checked {
+		detail := strings.Join(replay.Notes, "; ")
+		if detail == "" {
+			detail = "the fixed version was not checked"
+		}
+		return fail(fmt.Errorf("the catch replay checked nothing (%s); incomplete reproduction evidence", detail))
+	}
+	pending := make([]pendingConfirmation, 0, len(missing))
+	for _, issueID := range missing {
+		// With saved tests, an absent Caught entry means the Issue never produced an outcome
+		// (variant missing, oracle failed or never ran): that is missing evidence, not a negative
+		// one, and it is refused above or here rather than downgrading the primary. With no saved
+		// tests at all, nothing distinguished any Issue — NOT_REPRODUCED with attempts 0 is the
+		// explicit answer that case records.
+		if len(result.TestArtifacts) > 0 {
+			if _, checked := replay.Caught[issueID]; !checked {
+				return fail(fmt.Errorf("issue %s/%s has no checked outcome after the replay; refusing to record a guess", caseID, issueID))
+			}
+		}
+		outcome := string(eval.NotReproduced)
+		if replay.Caught[issueID] {
+			outcome = string(eval.Reproduced)
+		}
+		pending = append(pending, pendingConfirmation{
+			issueID: issueID, outcome: outcome, artifactDigest: artifactDigest,
+			attempts: replay.Attempts[issueID],
+		})
+	}
+	return pending, nil
+}
+
+// requireCatchOracle refuses any Issue whose reproduction needs more than the local replay: the
+// `catch` oracle is confirmed from the saved agent test bytes alone, while a `command` oracle
+// would have to execute the key's reproduction command in an environment no snapshot rebuilds —
+// only `catch` may be confirmed here, and anything else fails closed.
+func requireCatchOracle(key bench.Key, caseID, issueID string) error {
+	for _, defect := range key.Defects {
+		if defect.ID != issueID {
+			continue
+		}
+		if defect.Reproduction == nil || !defect.Reproduction.Applies {
+			return fmt.Errorf("issue %s/%s: the sealed key does not apply reproduction, so there is nothing to confirm", caseID, issueID)
+		}
+		if defect.Reproduction.Oracle != "catch" {
+			return fmt.Errorf("issue %s/%s: reproduction oracle %q is not supported by confirm: only the %q oracle replays from saved test bytes", caseID, issueID, defect.Reproduction.Oracle, "catch")
+		}
+		return nil
+	}
+	return fmt.Errorf("issue %s/%s has no defect in the sealed key", caseID, issueID)
+}
+
+// confirmationArtifactDigest hashes the canonical confirmation binding into the sha256 digest the
+// confirmation event records.
+func confirmationArtifactDigest(resultDigest string, manifest eval.Manifest, manifestCase eval.ManifestCase) (string, error) {
+	data, err := eval.CanonicalJSON(confirmationBinding{
+		ResultSHA256: resultDigest, ManifestSHA256: manifest.ManifestSHA256, KeySHA256: manifestCase.KeySHA256,
+		FixtureTreeSHA256: manifestCase.FixtureTreeSHA256, FixTreeSHA256: manifestCase.FixTreeSHA256,
+	})
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
+// readSourceResult reads a source result.json; confirm and the close digest map parse the same
+// file, so snapshots are always validated against the metadata the run recorded.
+func readSourceResult(path string) (bench.Result, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return bench.Result{}, fmt.Errorf("read source result %s: %w", path, err)
+	}
+	var result bench.Result
+	if err := json.Unmarshal(data, &result); err != nil {
+		return bench.Result{}, fmt.Errorf("parse source result %s: %w", path, err)
+	}
+	return result, nil
+}
+
+// validateConfirmationBindings refuses a run whose recorded confirmations no longer bind to the
+// current source inputs. Confirm records the sha256 over the source result in place when the
+// confirmation was appended, together with the sealed manifest and the case's key/fixture/fix
+// digests — one shared formula in confirmationArtifactDigest — and the confirmation stays bound
+// to those inputs: editing the source afterwards must not silently rebind it. Cases without an
+// effective confirmation are skipped, so a legacy run never loads a manifest here. The recorded
+// digest is evidence of the original inputs, not a signature over them.
+func validateConfirmationBindings(stored eval.StoredRun) error {
+	type recordedConfirmation struct{ caseID, issueID, digest string }
+	var recorded []recordedConfirmation
+	for _, caseID := range sortedCaseIDs(stored.CaseRuns) {
+		for issueID, digest := range eval.ConfirmationDigests(stored.CaseRuns[caseID]) {
+			recorded = append(recorded, recordedConfirmation{caseID: caseID, issueID: issueID, digest: digest})
+		}
+	}
+	if len(recorded) == 0 {
+		return nil
+	}
+	if stored.ManifestPath == "" || stored.Record.ManifestSHA256 == "" {
+		return fmt.Errorf("confirmations exist but the run is not bound to a stored sealed manifest")
+	}
+	manifest, err := eval.LoadManifest(stored.ManifestPath)
+	if err != nil {
+		return err
+	}
+	if manifest.ManifestSHA256 != stored.Record.ManifestSHA256 {
+		return fmt.Errorf("confirmation binding: stored run manifest digest %s does not match the sealed manifest %s", stored.Record.ManifestSHA256, manifest.ManifestSHA256)
+	}
+	for _, entry := range recorded {
+		var manifestCase eval.ManifestCase
+		for _, candidate := range manifest.Cases {
+			if candidate.ID == entry.caseID {
+				manifestCase = candidate
+				break
+			}
+		}
+		if manifestCase.ID == "" {
+			return fmt.Errorf("confirmation binding: case %s is not in the sealed manifest", entry.caseID)
+		}
+		resultPath := filepath.Join(stored.SourceResultsDir, entry.caseID, fmt.Sprint(stored.K), "result.json")
+		resultDigest, err := eval.Digest(resultPath)
+		if err != nil {
+			return fmt.Errorf("case %s: recompute confirmation binding: %w", entry.caseID, err)
+		}
+		binding, err := confirmationArtifactDigest(resultDigest, manifest, manifestCase)
+		if err != nil {
+			return err
+		}
+		if entry.digest != binding {
+			return fmt.Errorf("case %s issue %s: confirmation binding %s does not match the current source binding %s; the inputs changed after confirm", entry.caseID, entry.issueID, entry.digest, binding)
+		}
+	}
+	return nil
+}
+
 func runBenchEvalReopen(args []string) int {
 	fs := evalFlagSet("bench eval reopen")
 	runDir := fs.String("eval", "", "evaluation run directory")
@@ -253,6 +591,32 @@ func runBenchEvalClose(args []string) int {
 	}
 	if stored.Record.State != eval.RunAdjudicating {
 		return evalCommandError("close", fmt.Errorf("run cannot close from state %q", stored.Record.State))
+	}
+	// A manifest-bound run may not close past an unconfirmed primary: the confirmation is the
+	// reproducibility evidence the metrics derive from, so every case must carry it first. A legacy
+	// unbound run keeps the old behavior — it never claimed a confirmation to require.
+	if stored.Record.ManifestSHA256 != "" || stored.ManifestPath != "" {
+		var missingCases []string
+		for _, caseID := range sortedCaseIDs(stored.CaseRuns) {
+			caseRun := stored.CaseRuns[caseID]
+			missing, err := caseRun.MissingReproductionConfirmations()
+			if err != nil {
+				return evalCommandError("close", err)
+			}
+			if len(missing) > 0 {
+				missingCases = append(missingCases, fmt.Sprintf("%s: %s", caseID, strings.Join(missing, ", ")))
+			}
+		}
+		if len(missingCases) > 0 {
+			fmt.Fprintf(os.Stderr, "bench eval close: reproduction confirmations missing; run `tpp bench eval confirm --eval %s` first: %s\n", *runDir, strings.Join(missingCases, "; "))
+			return 1
+		}
+	}
+	// The authoritative inputs are validated before anything mutates: a corrupted snapshot or
+	// result, an unreadable manifest or policy, or a broken event chain must fail with the run still
+	// ADJUDICATING on disk rather than completed without its states and metrics.
+	if err := preflightClose(stored); err != nil {
+		return evalCommandError("close", err)
 	}
 	violations := make([]string, 0)
 	data := eval.RunData{ID: fmt.Sprintf("run-%d", stored.K), Cases: make([]eval.CaseResult, 0, len(stored.CaseRuns))}
@@ -523,6 +887,12 @@ func loadEvalSide(evalDir string) (eval.Side, []string, error) {
 			if err != nil {
 				return eval.Side{}, nil, fmt.Errorf("validate completed run %s artifacts: %w", runDir, err)
 			}
+			// The digest artifacts validate first, then the binding: a completed run whose source
+			// moved after its confirmations is refused even when states/metrics were regenerated to
+			// match the moved inputs.
+			if err := validateConfirmationBindings(stored); err != nil {
+				return eval.Side{}, nil, fmt.Errorf("validate completed run %s confirmation: %w", runDir, err)
+			}
 			inputPaths = append(inputPaths, paths...)
 		}
 		if side.Label == "" {
@@ -667,18 +1037,42 @@ func digestInputs(paths []string) ([]inputDigest, error) {
 	return inputs, nil
 }
 
-func closeInputDigests(stored eval.StoredRun, runDir string) (map[string]string, error) {
-	paths := []string{filepath.Join(runDir, "run.json")}
+// closeSourceInputs collects the authoritative external inputs a close binds: each case's source
+// result files with every saved snapshot verified against the result's own metadata, plus the
+// recorded manifest and policy. The checks live here so close can preflight these inputs before it
+// mutates anything and the digest map can reuse the same validation.
+func closeSourceInputs(stored eval.StoredRun) ([]string, error) {
+	var paths []string
 	for _, caseID := range sortedCaseIDs(stored.CaseRuns) {
-		caseDir := filepath.Join(runDir, caseID)
-		paths = append(paths, filepath.Join(caseDir, "caserun.json"), filepath.Join(caseDir, "events.jsonl"))
 		sourceDir := filepath.Join(stored.SourceResultsDir, caseID, fmt.Sprint(stored.K))
+		var sourceResult *bench.Result
 		for _, name := range []string{"result.json", "test-plan.md", "agent.log"} {
 			path := filepath.Join(sourceDir, name)
 			if _, err := os.Stat(path); err == nil {
 				paths = append(paths, path)
+				if name == "result.json" {
+					result, err := readSourceResult(path)
+					if err != nil {
+						return nil, fmt.Errorf("case %s: %w", caseID, err)
+					}
+					sourceResult = &result
+				}
 			} else if !os.IsNotExist(err) {
 				return nil, err
+			}
+		}
+		// Every saved test snapshot the result claims is accepted only after its path and bytes
+		// verify against the result's own metadata: an unknown path, a missing file, or bytes that
+		// changed fail closed. A legacy result persists no snapshot (null) and claims none; a
+		// manifest run records its list even when empty.
+		if sourceResult != nil && sourceResult.TestArtifacts != nil {
+			artifactDir := filepath.Join(sourceDir, "test-artifacts")
+			saved, err := bench.VerifiedTestArtifacts(artifactDir, sourceResult.Catch, sourceResult.TestArtifacts)
+			if err != nil {
+				return nil, fmt.Errorf("case %s: %w", caseID, err)
+			}
+			for _, rel := range saved {
+				paths = append(paths, filepath.Join(artifactDir, filepath.FromSlash(rel)))
 			}
 		}
 	}
@@ -688,6 +1082,50 @@ func closeInputDigests(stored eval.StoredRun, runDir string) (map[string]string,
 	if stored.PolicyPath != "" {
 		paths = append(paths, stored.PolicyPath)
 	}
+	return paths, nil
+}
+
+// preflightClose validates the authoritative inputs before any CaseRun.Close or completed-state
+// write: every existing event chain must verify, and every external input the close will bind must
+// parse, verify and read. A refusal leaves the disk run exactly as it was — ADJUDICATING, event
+// logs byte-identical, no states or metrics artifact — so restoring the input makes the ordinary
+// close succeed without hand-editing metadata. This is validation-first ordering within one
+// invocation, not protection against a concurrent writer landing changes between this check and
+// the writes that follow; a fault in the writes themselves after a clean preflight is the separate
+// crash-consistency question.
+func preflightClose(stored eval.StoredRun) error {
+	external, err := closeSourceInputs(stored)
+	if err != nil {
+		return err
+	}
+	if _, err := digestInputs(external); err != nil {
+		return err
+	}
+	for _, caseID := range sortedCaseIDs(stored.CaseRuns) {
+		caseRun := stored.CaseRuns[caseID]
+		if err := caseRun.Log.Verify(); err != nil {
+			return fmt.Errorf("case %s event chain: %w", caseID, err)
+		}
+	}
+	// Hash/schema first, then binding: a recorded confirmation must still bind to the current
+	// source inputs, or the close would seal a claim its inputs no longer support.
+	if err := validateConfirmationBindings(stored); err != nil {
+		return err
+	}
+	return nil
+}
+
+func closeInputDigests(stored eval.StoredRun, runDir string) (map[string]string, error) {
+	paths := []string{filepath.Join(runDir, "run.json")}
+	for _, caseID := range sortedCaseIDs(stored.CaseRuns) {
+		caseDir := filepath.Join(runDir, caseID)
+		paths = append(paths, filepath.Join(caseDir, "caserun.json"), filepath.Join(caseDir, "events.jsonl"))
+	}
+	external, err := closeSourceInputs(stored)
+	if err != nil {
+		return nil, err
+	}
+	paths = append(paths, external...)
 	inputs, err := digestInputs(paths)
 	if err != nil {
 		return nil, err

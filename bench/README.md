@@ -148,6 +148,8 @@ More honesty notes travel with every manifest-bound reading:
   it null). The files land before `result.json` is written, a snapshot that cannot be taken marks
   the run invalid and the instrument with it, and `DiscriminateSavedTests` replays the catch
   check from those artifacts alone — verifying every path and digest — once the workspace is gone.
+  `bench eval confirm` replays them the same way when it records the evaluation ledger's
+  reproduction confirmations (see [The evaluation ledger](#the-evaluation-ledger)).
 
 ## Scoring
 
@@ -346,6 +348,63 @@ about the corpus as a claim about a distribution: the totals of one pass are not
 The digest identifies the measurement — the cases, the request each one is asked for, and the runs per
 case — so a reading that changed any of those is not comparable with one that did not, and `bench
 compare` refuses when the two digests differ.
+
+## The evaluation ledger
+
+`tpp bench eval import` turns one replicate's results into an adjudicable run; the order of the rest
+is fixed:
+
+```
+tpp bench eval import --results <dir> --manifest <m> --policy <p> --harness <label> \
+                      --replicate N --out <dir> [--bench-dir bench]
+tpp bench eval adjudicate --eval <runDir> --case <id> --finding <fid> ...
+tpp bench eval confirm --eval <runDir> [--bench-dir bench]   # after adjudication, before close
+tpp bench eval close   --eval <runDir>
+tpp bench eval compare --baseline <dir> --candidate <dir> --manifest <m> --policy <p> --out <dir>
+tpp bench eval verify  --comparison <dir>
+```
+
+**Confirmation comes after import and adjudication, before close.** While the run record is
+`ADJUDICATING`, every Issue whose current primary finding still lacks a recorded reproduction
+confirmation is *missing*. `close` collects `MissingReproductionConfirmations` for each case
+before any close mutation: if any are missing it refuses with the case and Issue ids, exits 1 and
+leaves the run `ADJUDICATING`. `confirm` records them, and re-invoking it with nothing missing
+appends nothing (`already confirmed: 0 updated`). A run stripped of its manifest binding is
+legacy: it never claimed a sealed manifest, so `close` keeps its old behavior for it and
+`confirm` refuses it outright — a legacy unbound run cannot claim independently confirmed
+reproduction.
+
+**What `confirm` replays, and what it never runs.** Confirm refuses unless the run is
+`ADJUDICATING`, manifest-bound with its stored sealed manifest digest exact and `VerifyCases`
+passing, leak-free, and carrying valid, complete provenance. For each missing Issue it loads the
+sealed KEY v2 and the source `result.json`, verifies every saved snapshot under
+`<results>/<case>/<K>/test-artifacts/` against the result's recorded paths and sha256 (containment
+and digest both checked; an unknown path, a missing file, or bytes that changed fail closed), and
+runs `DiscriminateSavedTests`: a fresh workspace built from `fixture/` plus exactly the saved agent
+test bytes, driven by the ordinary fixed-version oracle. The local oracle reads the bytes the run
+already saved and never reruns the model — no agent, no runner, and no API is invoked. Every case
+is preflighted and every oracle replayed in memory first; events are appended and state saved only
+after every artifact verified and every replay returned a decisive result.
+
+**Supported oracle: `catch` only.** An Issue whose reproduction oracle is `command` (or anything
+else) is refused by name: `confirm` never executes the key's reproduction command, because no
+snapshot rebuilds the environment it needs. Only the `catch` oracle is confirmable offline; an
+Issue whose reproduction does not apply needs no confirmation at all.
+
+**What is recorded.** Each confirmation is an append-only, hash-chained
+`confirm_reproduction` event whose payload carries the outcome, the attempt count from the replay's
+`Catch.Attempts` (0 is valid when there were no tests), and an artifact digest: the sha256 over a
+canonical struct of the source `result.json` digest (which binds the snapshot paths and hashes),
+the sealed manifest digest, and the manifest's key, fixture and fix tree digests for that case.
+`ReproFromEvents` maps the outcome to that Issue's primary finding only, and `MatchLevel` overlays
+C5 from the latest confirmation, so a failed confirmation can downgrade a TP primary to PD before
+close derives the final states. Confirmation events ride in the case's `events.jsonl` digest and
+every saved artifact file joins the close input digests, so `verify` and `compare` reject any later
+tamper of a snapshot, a result, or the ledger. No signature is provided: the artifact digest is
+evidence of the inputs the confirmation was recorded against, and `close` and every load of a
+completed run recompute it from the current source, refusing a confirmation whose source moved
+after the fact — an unchanged event stays bound to its original inputs, but a writer with access
+to both the source and the ledger could forge both.
 
 ## Rules
 

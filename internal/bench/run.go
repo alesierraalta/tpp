@@ -65,32 +65,55 @@ func runnerAgent(runner string) Agent {
 
 // Options configures a benchmark run.
 type Options struct {
-	CasesGlob    string
-	Model        string
-	Runner       string // which CLI spawns the agent: RunnerClaude (default) or RunnerPi
-	Runs         int
-	MaxTurns     int
-	Timeout      time.Duration
-	SuiteTimeout time.Duration
-	ConfigDir    string  // agent config directory (Claude config dir, or Pi agent dir); empty inherits the operator's
-	ConfigMode   string  // agent config mode: ConfigBench, ConfigInherited, or ConfigCustom
-	BinDir       string  // put first on the agent's PATH, so `tpp plan init` is the build under test
-	Workers      int     // cases run side by side; below 1 means one at a time
-	MaxCostUSD   float64 // 0 means no ceiling
-	Out          string
-	BenchDir     string
-	SkillFile    string // for the history's skill_version
-	DryRun       bool
-	Keep         bool
-	Retries      int           // agent retries on infrastructure failures (exit status, error result)
-	RetryDelay   time.Duration // pause before a retry, so a rate limit has time to lift
-	Agent        Agent         // nil means the selected runner's CLI
-	Log          io.Writer
+	CasesGlob            string
+	CaseIDs              []string // explicit selected cases; used instead of globbing by manifest-bound runs
+	Model                string
+	Runner               string // which CLI spawns the agent: RunnerClaude (default) or RunnerPi
+	Runs                 int
+	MaxTurns             int
+	Timeout              time.Duration
+	SuiteTimeout         time.Duration
+	WallTimeout          time.Duration
+	MaxAttemptsPerCase   int
+	MaxTokensPerCaseRun  int
+	MaxCostPerCaseRunUSD float64
+	ManifestSHA256       string
+	ManifestVersion      string
+	ManifestSuite        string
+	BudgetIdentity       string
+	StrictManifest       bool
+	PostRunCheck         func() error
+	ConfigDir            string  // agent config directory (Claude config dir, or Pi agent dir); empty inherits the operator's
+	ConfigMode           string  // agent config mode: ConfigBench, ConfigInherited, or ConfigCustom
+	BinDir               string  // put first on the agent's PATH, so `tpp plan init` is the build under test
+	Workers              int     // cases run side by side; below 1 means one at a time
+	MaxCostUSD           float64 // 0 means no ceiling
+	Out                  string
+	BenchDir             string
+	SkillFile            string // for the history's skill_version
+	DryRun               bool
+	Keep                 bool
+	Retries              int           // agent retries on infrastructure failures (exit status, error result)
+	RetryDelay           time.Duration // pause before a retry, so a rate limit has time to lift
+	Agent                Agent         // nil means the selected runner's CLI
+	Log                  io.Writer
+	runContext           context.Context
+	runtime              *runRuntime
 }
 
 // Agent runs the model once in a workspace; injected so tests never spawn claude. The case's key
 // travels with the call by value, so one case's request can never reach another's run.
 type Agent func(ctx context.Context, ws string, key Key, opts Options) (AgentResult, error)
+
+type runRuntime struct {
+	mu                sync.Mutex
+	suiteCost         float64
+	suiteExhausted    bool
+	budgetExhausted   bool
+	budgetUnsupported string
+	instrumentValid   bool
+	executionComplete bool
+}
 
 // Aggregate is the whole run's outcome. Recall and RecallCaught use defect-runs as their unit:
 // repeated runs contribute repeated denominator entries; the Unique* and RecallUnique fields are
@@ -117,12 +140,13 @@ type Aggregate struct {
 	LightActivated int `json:"light_activated"`
 	// MicroActivated counts the valid runs whose own plan is an activated micro plan, apart from
 	// LightActivated, so a reading can say how often the micro path ran and what it cost.
-	MicroActivated int    `json:"micro_activated"`
-	CostCeilingHit bool   `json:"cost_ceiling_hit"`
-	RescoredFrom   string `json:"rescored_from,omitempty"` // set when this aggregate re-reads another run with newer rules
-	RunTS          string `json:"run_ts,omitempty"`        // rescore: when the run it re-reads happened
-	SkillVersion   string `json:"skill_version,omitempty"` // rescore: the version that produced the run
-	Corpus         string `json:"corpus,omitempty"`        // digest of the measurement this run made: cases, requests, runs
+	MicroActivated  int    `json:"micro_activated"`
+	CostCeilingHit  bool   `json:"cost_ceiling_hit"`
+	BudgetExhausted bool   `json:"budget_exhausted,omitempty"`
+	RescoredFrom    string `json:"rescored_from,omitempty"` // set when this aggregate re-reads another run with newer rules
+	RunTS           string `json:"run_ts,omitempty"`        // rescore: when the run it re-reads happened
+	SkillVersion    string `json:"skill_version,omitempty"` // rescore: the version that produced the run
+	Corpus          string `json:"corpus,omitempty"`        // digest of the measurement this run made: cases, requests, runs
 	// Runs is how many times each case ran: three runs triple the defect denominator, so a reader can
 	// reconcile the counts without re-deriving them. A zero means the aggregate never recorded a run
 	// count — it was written before the field existed, or read from a file without one — so no reading can
@@ -215,6 +239,21 @@ type unit struct {
 func Run(opts Options) (Aggregate, int) {
 	opts = normalizeOptions(opts)
 	agg := Aggregate{TS: time.Now().UTC().Format(time.RFC3339), Out: opts.Out, Model: opts.Model, DryRun: opts.DryRun, Runs: opts.Runs}
+	if opts.StrictManifest {
+		if opts.ManifestSHA256 == "" || len(opts.CaseIDs) == 0 {
+			fmt.Fprintln(opts.Log, "manifest run requires a sealed digest and explicit case IDs")
+			return agg, 1
+		}
+		opts.runtime = &runRuntime{instrumentValid: true, executionComplete: true}
+	}
+	if opts.runContext == nil {
+		opts.runContext = context.Background()
+		if opts.WallTimeout > 0 {
+			var cancel context.CancelFunc
+			opts.runContext, cancel = context.WithTimeout(opts.runContext, opts.WallTimeout)
+			defer cancel()
+		}
+	}
 	caseDirs, found := resolveCaseDirs(opts)
 	if !found {
 		return agg, 1
@@ -226,6 +265,37 @@ func Run(opts Options) (Aggregate, int) {
 	units := buildUnits(caseDirs, opts.Runs)
 	results, skipped := runUnits(units, opts)
 	agg, corpus, code := tallyUnits(agg, units, results, skipped, opts)
+	if opts.runtime != nil {
+		opts.runtime.mu.Lock()
+		// Completion answers one question: did every selected unit run? Failed, invalid and
+		// budget-exhausted cases all ran and are dispositioned per case (spec 5.3/5.4); a skipped
+		// unit never ran, and a dry run measured nothing.
+		for i := range results {
+			if skipped[i] || opts.DryRun {
+				opts.runtime.executionComplete = false
+			}
+		}
+		opts.runtime.mu.Unlock()
+		if opts.PostRunCheck != nil {
+			if err := opts.PostRunCheck(); err != nil {
+				opts.runtime.mu.Lock()
+				opts.runtime.instrumentValid = false
+				opts.runtime.executionComplete = false
+				opts.runtime.mu.Unlock()
+				fmt.Fprintf(opts.Log, "manifest instrument invalid after execution: %v\n", err)
+			}
+		}
+		opts.runtime.mu.Lock()
+		agg.BudgetExhausted = opts.runtime.budgetExhausted
+		valid := opts.runtime.instrumentValid
+		complete := opts.runtime.executionComplete
+		opts.runtime.mu.Unlock()
+		if !valid || !complete {
+			if code == 0 {
+				code = ExitPartial
+			}
+		}
+	}
 	agg, code = finalizeRun(agg, corpus, code, opts)
 	return writeArtifacts(agg, code, caseDirs, opts)
 }
@@ -248,6 +318,29 @@ func normalizeOptions(opts Options) Options {
 // resolveCaseDirs turns the case globs into directories. A pattern list that matches nothing is not an empty run:
 // it is said out loud, and the run stops before it writes anything.
 func resolveCaseDirs(opts Options) ([]string, bool) {
+	if opts.StrictManifest || opts.CaseIDs != nil {
+		caseDirs := make([]string, 0, len(opts.CaseIDs))
+		seen := make(map[string]bool, len(opts.CaseIDs))
+		for _, id := range opts.CaseIDs {
+			if id == "" || id == "." || id == ".." || filepath.Base(id) != id || strings.ContainsAny(id, `/\\`) || seen[id] {
+				fmt.Fprintf(opts.Log, "invalid or repeated manifest case ID %q\n", id)
+				return nil, false
+			}
+			seen[id] = true
+			path := filepath.Join(opts.BenchDir, "cases", id)
+			info, err := os.Stat(path)
+			if err != nil || !info.IsDir() {
+				fmt.Fprintf(opts.Log, "manifest case %q is unavailable under %s\n", id, opts.BenchDir)
+				return nil, false
+			}
+			caseDirs = append(caseDirs, path)
+		}
+		if len(caseDirs) == 0 {
+			fmt.Fprintln(opts.Log, "manifest selects no cases")
+			return nil, false
+		}
+		return caseDirs, true
+	}
 	var patterns []string
 	for _, g := range strings.Split(opts.CasesGlob, ",") {
 		patterns = append(patterns, resolveCasesGlob(opts.BenchDir, strings.TrimSpace(g)))
@@ -295,6 +388,36 @@ func buildUnits(caseDirs []string, runs int) []unit {
 	return units
 }
 
+func noteBudgetExhausted(opts Options, suite bool) {
+	if opts.runtime == nil {
+		return
+	}
+	opts.runtime.mu.Lock()
+	opts.runtime.budgetExhausted = true
+	// A case that ran out of its own budget is scored as it stands (spec 5.3): every unit still
+	// executed, so the reading stays complete. Only a suite-level stop keeps units from running,
+	// and that is what makes the execution incomplete.
+	if suite {
+		opts.runtime.suiteExhausted = true
+		opts.runtime.executionComplete = false
+	}
+	opts.runtime.mu.Unlock()
+}
+
+func noteBudgetUnsupported(opts Options, reason string) {
+	if opts.runtime == nil {
+		return
+	}
+	opts.runtime.mu.Lock()
+	opts.runtime.instrumentValid = false
+	opts.runtime.executionComplete = false
+	opts.runtime.suiteExhausted = true
+	if opts.runtime.budgetUnsupported == "" {
+		opts.runtime.budgetUnsupported = reason
+	}
+	opts.runtime.mu.Unlock()
+}
+
 // runUnits schedules every unit and returns the results in unit order, plus which units the cost ceiling kept from
 // starting.
 //
@@ -309,6 +432,11 @@ func runUnits(units []unit, opts Options) ([]Result, []bool) {
 	var spentMu sync.Mutex
 	spent := 0.0
 	underCeiling := func() bool {
+		if opts.runtime != nil {
+			opts.runtime.mu.Lock()
+			defer opts.runtime.mu.Unlock()
+			return !opts.runtime.suiteExhausted && (opts.MaxCostUSD <= 0 || opts.runtime.suiteCost < opts.MaxCostUSD)
+		}
 		if opts.MaxCostUSD <= 0 {
 			return true
 		}
@@ -329,16 +457,24 @@ func runUnits(units []unit, opts Options) ([]Result, []bool) {
 			logf("[%s] skipped: %v\n", name, u.reason)
 			return Result{Case: name, Invalid: true, InvalidReason: u.reason}
 		}
+		if opts.runContext != nil && opts.runContext.Err() != nil {
+			skipped[i] = true
+			noteBudgetExhausted(opts, true)
+			return Result{}
+		}
 		if !underCeiling() {
 			skipped[i] = true
+			noteBudgetExhausted(opts, true)
 			return Result{}
 		}
 		res := runOnce(u.caseDir, u.key, u.run, opts)
 		logf("[%s #%d] reported %d/%d pinned %d caught %d/%d fp %d cost $%.3f turns %d%s%s\n",
 			name, u.run, res.Found, res.Total, res.ClaimedPinned, res.Caught, res.Total, res.FalsePositives, res.CostUSD, res.Turns, invalidTag(res), noPlanTag(res))
-		spentMu.Lock()
-		spent += res.CostUSD
-		spentMu.Unlock()
+		if opts.runtime == nil {
+			spentMu.Lock()
+			spent += res.CostUSD
+			spentMu.Unlock()
+		}
 		return res
 	})
 	return results, skipped
@@ -533,11 +669,52 @@ func runOnce(caseDir string, key Key, run int, opts Options) Result {
 	name := filepath.Base(caseDir)
 	ws := filepath.Join(opts.Out, name, fmt.Sprint(run), "ws")
 	res := Result{Case: name, Run: run, Total: len(key.Defects), Workspace: ws}
-	suite, err := Scaffold(caseDir, ws, key, opts.SuiteTimeout)
+	// One deadline for the whole case run, opened when this scheduled run starts: the fixture
+	// scaffold, the agent attempts and their retry sleeps, and the discrimination after them all
+	// draw from it, with the suite wall clock as its parent. A legacy run keeps its phase-scoped
+	// timeouts, so its scaffold and agent windows stay as they were.
+	caseCtx, caseCancel := opts.runContext, func() {}
+	if opts.StrictManifest {
+		caseCtx, caseCancel = context.WithTimeout(opts.runContext, opts.Timeout)
+	}
+	defer caseCancel()
+	suiteTimeout := opts.SuiteTimeout
+	if opts.StrictManifest {
+		if deadline, ok := caseCtx.Deadline(); ok {
+			remaining := time.Until(deadline)
+			if remaining <= 0 {
+				noteBudgetExhausted(opts, opts.runContext != nil && opts.runContext.Err() != nil)
+				return budgetResult(res, caseDir, ws, key, opts, caseCtx, "case or suite runtime deadline reached")
+			}
+			if suiteTimeout <= 0 || remaining < suiteTimeout {
+				suiteTimeout = remaining
+			}
+		}
+	}
+	// The scaffold draws from the same budget as the attempts after it: a manifest run hands the
+	// case's context to every copy and subprocess the scaffold starts, a legacy run scaffolds on
+	// contexts of its own exactly as it always has.
+	var suite SuiteResult
+	var err error
+	if opts.StrictManifest {
+		suite, err = ScaffoldContext(caseCtx, caseDir, ws, key, suiteTimeout)
+	} else {
+		suite, err = Scaffold(caseDir, ws, key, suiteTimeout)
+	}
 	res.Suite = suite
 	if err != nil {
+		if opts.StrictManifest && (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || caseCtx.Err() != nil || (opts.runContext != nil && opts.runContext.Err() != nil)) {
+			noteBudgetExhausted(opts, opts.runContext != nil && opts.runContext.Err() != nil)
+			return budgetResult(res, caseDir, ws, key, opts, caseCtx, "case or suite runtime deadline reached")
+		}
 		res.Invalid, res.InvalidReason = true, err.Error()
 		return finish(res, opts, true)
+	}
+	// A scaffold whose suite was killed because the shared deadline ran out has spent the case's
+	// budget: that is a recorded exhaustion, not a fixture suite that failed on its own.
+	if opts.StrictManifest && caseCtx.Err() != nil {
+		noteBudgetExhausted(opts, opts.runContext != nil && opts.runContext.Err() != nil)
+		return budgetResult(res, caseDir, ws, key, opts, caseCtx, "case or suite runtime deadline reached")
 	}
 	if !suite.Green {
 		res.Invalid, res.InvalidReason = true, fmt.Sprintf("fixture suite not green (exit %d)", suite.ExitCode)
@@ -550,25 +727,134 @@ func runOnce(caseDir string, key Key, run int, opts Options) Result {
 		return finish(res, opts, false)
 	}
 	started := time.Now()
+	// The agent's window sits under the case's deadline: a manifest run opens it once, here, and
+	// every attempt shares that single window — a retry can only tighten the shared budget the
+	// scaffold already spent, never reopen it. A legacy run keeps HEAD's per-attempt window: each
+	// attempt opens a fresh opts.Timeout on the background context, so an attempt that spends its
+	// whole window is retried into a fresh one instead of exhausting the case's retries.
+	var ctx context.Context
+	attemptCancel := func() {}
+	if opts.StrictManifest {
+		ctx, attemptCancel = context.WithTimeout(caseCtx, opts.Timeout)
+	}
+	defer func() { attemptCancel() }()
 	var ar AgentResult
+	caseCost, caseTokens, attempts := 0.0, 0, 0
+	allCostKnown, allTokensKnown := true, true
+	budgetReason := ""
+	unsupportedReason := ""
+	maxRetries := opts.Retries
+	if opts.MaxAttemptsPerCase > 0 && maxRetries >= opts.MaxAttemptsPerCase {
+		maxRetries = opts.MaxAttemptsPerCase - 1
+	}
 	for attempt := 0; ; attempt++ {
-		ctx, cancel := context.WithTimeout(context.Background(), opts.Timeout)
+		if !opts.StrictManifest {
+			var release context.CancelFunc
+			ctx, release = context.WithTimeout(context.Background(), opts.Timeout)
+			attemptCancel = release
+		}
+		attempts++
 		ar, err = opts.Agent(ctx, ws, key, opts)
-		cancel()
+		if !opts.StrictManifest {
+			attemptCancel()
+		}
 		res.CostUSD += ar.CostUSD
 		res.Turns += ar.Turns
+		if ar.CostKnown {
+			caseCost += ar.CostUSD
+			if opts.runtime != nil {
+				opts.runtime.mu.Lock()
+				opts.runtime.suiteCost += ar.CostUSD
+				suiteCost := opts.runtime.suiteCost
+				if opts.MaxCostUSD > 0 && suiteCost >= opts.MaxCostUSD {
+					opts.runtime.suiteExhausted = true
+					opts.runtime.budgetExhausted = true
+					opts.runtime.executionComplete = false
+				}
+				opts.runtime.mu.Unlock()
+			}
+		} else {
+			allCostKnown = false
+			if opts.StrictManifest && (opts.MaxCostUSD > 0 || opts.MaxCostPerCaseRunUSD > 0) {
+				unsupportedReason = "backend response omitted cost usage required by the manifest"
+			}
+		}
+		if ar.TokensKnown {
+			caseTokens += ar.Tokens
+		} else {
+			allTokensKnown = false
+			if opts.StrictManifest && opts.MaxTokensPerCaseRun > 0 {
+				unsupportedReason = "backend response omitted token usage required by the manifest"
+			}
+		}
 		writeAgentLog(filepath.Dir(ws), attempt, ar, err)
-		// A timeout is an infrastructure failure like any other: the agent hung or the provider stalled,
-		// so the run has no verdict for the case at all. Retrying it is bounded by --retries, and losing
-		// a case to a stall costs more than the second attempt.
 		infra := err != nil || ar.IsError || ar.TimedOut
-		if !infra || attempt >= opts.Retries {
+		// A manifest attempt runs on the case's shared window: once it is spent, there is no
+		// budget left to retry into. A legacy attempt owns its window, so its expiry decides
+		// nothing about the retry — HEAD retried any infrastructure failure within --retries,
+		// under a fresh window.
+		retryAllowed := infra && attempt < maxRetries && (!opts.StrictManifest || ctx.Err() == nil)
+		// Unknown usage fails closed only once the retries settle: a failed attempt still takes its
+		// declared retries, while a success missing required usage is unsupported, not infrastructure,
+		// and stops here without one.
+		if unsupportedReason != "" && !retryAllowed {
+			noteBudgetUnsupported(opts, unsupportedReason)
+			res.Invalid, res.InvalidReason = true, unsupportedReason
+			break
+		}
+		caseOver := (opts.MaxCostPerCaseRunUSD > 0 && caseCost >= opts.MaxCostPerCaseRunUSD) || (opts.MaxTokensPerCaseRun > 0 && caseTokens >= opts.MaxTokensPerCaseRun)
+		suiteOver := opts.MaxCostUSD > 0 && opts.runtime != nil && suiteCostReached(opts.runtime, opts.MaxCostUSD)
+		if caseOver || suiteOver {
+			budgetReason = "manifest resource budget reached"
+			res.BudgetExhausted = true
+			res.Outcome = "budget_exhausted"
+			noteBudgetExhausted(opts, suiteOver)
+			break
+		}
+		if opts.StrictManifest && ctx.Err() != nil {
+			budgetReason = "case or suite runtime deadline reached"
+			res.BudgetExhausted = true
+			res.Outcome = "budget_exhausted"
+			noteBudgetExhausted(opts, opts.runContext != nil && opts.runContext.Err() != nil)
+			break
+		}
+		if !retryAllowed {
 			break
 		}
 		res.Notes = append(res.Notes, fmt.Sprintf("attempt %d failed, retrying after %s", attempt+1, opts.RetryDelay))
-		time.Sleep(opts.RetryDelay)
+		if opts.RetryDelay > 0 {
+			if opts.StrictManifest {
+				// The pause is bounded by the shared window like the attempt before it.
+				timer := time.NewTimer(opts.RetryDelay)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+				case <-timer.C:
+				}
+			} else {
+				// Legacy kept HEAD's unconditional pause: an attempt's own window never cuts it.
+				time.Sleep(opts.RetryDelay)
+			}
+		}
 	}
 	res.Seconds = time.Since(started).Seconds()
+	res.CostKnown = allCostKnown && attempts > 0
+	if allTokensKnown && attempts > 0 {
+		res.Tokens = &caseTokens
+	}
+	if opts.StrictManifest && ctx.Err() != nil && !res.Invalid && !res.BudgetExhausted {
+		budgetReason = "case or suite runtime deadline reached"
+		res.BudgetExhausted = true
+		res.Outcome = "budget_exhausted"
+		noteBudgetExhausted(opts, opts.runContext != nil && opts.runContext.Err() != nil)
+	}
+	if budgetReason != "" {
+		res.Notes = append(res.Notes, budgetReason)
+		return budgetResult(res, caseDir, ws, key, opts, caseCtx, budgetReason)
+	}
+	if res.Invalid {
+		return finish(res, opts, true)
+	}
 	switch {
 	case ar.TimedOut:
 		res.Failed, res.FailReason = true, "agent timed out"
@@ -578,15 +864,60 @@ func runOnce(caseDir string, key Key, run int, opts Options) Result {
 		res.Failed, res.FailReason = true, "agent result is an error: "+tail(ar.ErrorText, 200)
 	}
 	if res.Failed {
-		// An agent that never ran is not a detection result; scoring it would read as recall 0.
 		res.Notes = append(res.Notes, res.FailReason)
 		return finish(res, opts, true)
 	}
 	res = merge(res, ScoreWorkspace(ws, key))
-	res.Catch = Discriminate(caseDir, ws, key, opts.SuiteTimeout)
+	res.Catch = Discriminate(caseDir, ws, key, boundedSuiteTimeout(opts, caseCtx))
 	res.Caught = res.Catch.Count()
-	// Misses of either measure keep their workspace so they can be classified.
 	return finish(res, opts, res.Recall < 1 || (res.Catch.Checked && res.Caught < res.Total))
+}
+
+func suiteCostReached(runtime *runRuntime, limit float64) bool {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	return runtime.suiteCost >= limit
+}
+
+// boundedSuiteTimeout is the time discrimination may take: the fixture-suite cap, tightened in a
+// manifest run to what remains of the shared per-case deadline, so post-agent work cannot reopen a
+// window the case budget has already closed.
+func boundedSuiteTimeout(opts Options, caseCtx context.Context) time.Duration {
+	bound := opts.SuiteTimeout
+	if !opts.StrictManifest {
+		return bound
+	}
+	deadlineCtx := caseCtx
+	if deadlineCtx == nil {
+		deadlineCtx = opts.runContext
+	}
+	if deadlineCtx != nil {
+		if deadline, ok := deadlineCtx.Deadline(); ok {
+			remaining := time.Until(deadline)
+			if remaining <= 0 {
+				return 0
+			}
+			if bound <= 0 || remaining < bound {
+				bound = remaining
+			}
+		}
+	}
+	return bound
+}
+
+func budgetResult(res Result, caseDir, ws string, key Key, opts Options, caseCtx context.Context, reason string) Result {
+	res.BudgetExhausted, res.Outcome = true, "budget_exhausted"
+	if reason != "" {
+		res.Notes = append(res.Notes, reason)
+	}
+	res = merge(res, ScoreWorkspace(ws, key))
+	if opts.runContext == nil || opts.runContext.Err() == nil {
+		if timeout := boundedSuiteTimeout(opts, caseCtx); timeout > 0 {
+			res.Catch = Discriminate(caseDir, ws, key, timeout)
+			res.Caught = res.Catch.Count()
+		}
+	}
+	return finish(res, opts, true)
 }
 
 // writeAgentLog keeps the tail of each attempt's raw stream beside result.json.
@@ -606,9 +937,11 @@ func writeAgentLog(dir string, attempt int, ar AgentResult, err error) {
 // merge keeps the run's bookkeeping fields and takes the scorer's fields.
 func merge(res, scored Result) Result {
 	scored.Case, scored.Run, scored.Workspace = res.Case, res.Run, res.Workspace
-	scored.CostUSD, scored.Turns, scored.Seconds = res.CostUSD, res.Turns, res.Seconds
+	scored.CostUSD, scored.CostKnown, scored.Tokens = res.CostUSD, res.CostKnown, res.Tokens
+	scored.Turns, scored.Seconds = res.Turns, res.Seconds
 	scored.Suite, scored.Invalid, scored.InvalidReason = res.Suite, res.Invalid, res.InvalidReason
 	scored.Failed, scored.FailReason = res.Failed, res.FailReason
+	scored.BudgetExhausted, scored.Outcome = res.BudgetExhausted, res.Outcome
 	scored.Notes = append(res.Notes, scored.Notes...)
 	return scored
 }
@@ -636,7 +969,7 @@ func finish(res Result, opts Options, keepWS bool) Result {
 		// workspace, which is the only copy of what the case produced.
 		res.Failed, res.FailReason = true, fmt.Sprintf("result.json could not be written: %v", err)
 	}
-	if !opts.Keep && !keepWS && !res.Invalid && !res.Failed {
+	if !opts.Keep && !keepWS && !res.Invalid && !res.Failed && !res.BudgetExhausted {
 		_ = os.RemoveAll(res.Workspace)
 		res.Workspace = ""
 	}

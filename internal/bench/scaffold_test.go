@@ -2,6 +2,7 @@ package bench
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -97,6 +98,26 @@ func TestParseCounts(t *testing.T) {
 func TestScaffoldRejectsMissingFixture(t *testing.T) {
 	if _, err := Scaffold(t.TempDir(), filepath.Join(t.TempDir(), "ws"), Key{Suite: "true"}, time.Second); err == nil {
 		t.Fatal("expected an error for a case without a fixture directory")
+	}
+}
+
+// A pre-canceled context stops the scaffold before it copies a byte or spawns anything: the
+// error it returns is the context's own cancellation, and the workspace it never touched
+// stays absent.
+func TestScaffoldContextStopsBeforeCopyOrSubprocessWhenCanceled(t *testing.T) {
+	caseDir := fakeCase(t)
+	key, err := LoadKey(caseDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws := filepath.Join(t.TempDir(), "ws")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := ScaffoldContext(ctx, caseDir, ws, key, time.Minute); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want the context's own cancellation", err)
+	}
+	if _, err := os.Stat(ws); !os.IsNotExist(err) {
+		t.Fatalf("workspace exists (stat err = %v): a pre-canceled scaffold must copy and spawn nothing", err)
 	}
 }
 

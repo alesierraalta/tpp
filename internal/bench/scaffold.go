@@ -33,8 +33,22 @@ const FixtureDir = "fixture"
 
 // Scaffold copies a case's fixture into ws, commits it, and returns the suite outcome.
 // The answer key is never copied: it lives beside the fixture, not inside it, and the copy is
-// verified afterwards.
+// verified afterwards. It is ScaffoldContext on a background context, so a non-manifest caller
+// scaffolds exactly as it always has.
 func Scaffold(caseDir, ws string, key Key, suiteTimeout time.Duration) (SuiteResult, error) {
+	return ScaffoldContext(context.Background(), caseDir, ws, key, suiteTimeout)
+}
+
+// ScaffoldContext is Scaffold under ctx: the copy, every git subprocess and the fixture suite
+// draw from the caller's deadline, so a manifest run's case budget reaches the scaffold phase
+// too. Cancellation is honored cooperatively — checked before any work, per walked path and per
+// IO chunk, with the git and suite subprocesses killed by their own context. A single filesystem
+// syscall already blocked in the kernel cannot be cancelled from Go: it returns when the kernel
+// finishes it, and only then does the scaffold observe the cancellation.
+func ScaffoldContext(ctx context.Context, caseDir, ws string, key Key, suiteTimeout time.Duration) (SuiteResult, error) {
+	if err := ctx.Err(); err != nil {
+		return SuiteResult{}, err
+	}
 	src := filepath.Join(caseDir, FixtureDir)
 	if st, err := os.Stat(src); err != nil || !st.IsDir() {
 		return SuiteResult{}, fmt.Errorf("case %s has no %s directory", caseDir, FixtureDir)
@@ -42,7 +56,7 @@ func Scaffold(caseDir, ws string, key Key, suiteTimeout time.Duration) (SuiteRes
 	if err := os.MkdirAll(ws, 0o755); err != nil {
 		return SuiteResult{}, err
 	}
-	if err := copyTree(src, ws); err != nil {
+	if err := copyTreeContext(ctx, src, ws); err != nil {
 		return SuiteResult{}, fmt.Errorf("copy fixture: %w", err)
 	}
 	if _, err := os.Stat(filepath.Join(ws, KeyFile)); err == nil {
@@ -57,11 +71,11 @@ func Scaffold(caseDir, ws string, key Key, suiteTimeout time.Duration) (SuiteRes
 		{"add", "-A"},
 		{"commit", "-qm", "fixture"},
 	} {
-		if out, err := gitRun(ws, args...); err != nil {
+		if out, err := gitRunContext(ctx, ws, args...); err != nil {
 			return SuiteResult{}, fmt.Errorf("git %s: %v: %s", args[0], err, strings.TrimSpace(out))
 		}
 	}
-	return RunSuite(ws, key.Suite, suiteTimeout)
+	return RunSuiteContext(ctx, ws, key.Suite, suiteTimeout)
 }
 
 // RunSuite executes the fixture suite command in ws and parses pass/fail counts best-effort. A command the
@@ -69,8 +83,19 @@ func Scaffold(caseDir, ws string, key Key, suiteTimeout time.Duration) (SuiteRes
 // command nobody wrote, because an unterminated quote is dropped rather than kept, so `sh -c "touch x` would
 // run `touch x` and the run would record a suite failure the fixture never had. The refused result keeps the
 // command it could not read, so the caller can report which suite was unreadable.
+// It is RunSuiteContext on a background context, so a non-manifest caller runs its suite as before.
 func RunSuite(ws, suite string, timeout time.Duration) (SuiteResult, error) {
+	return RunSuiteContext(context.Background(), ws, suite, timeout)
+}
+
+// RunSuiteContext runs the fixture suite under ctx with the phase's timeout layered on top: the
+// suite is killed when the caller's deadline or its own cap arrives, whichever is earlier, so a
+// manifest run's fixture suite can never outlive the case budget it runs inside.
+func RunSuiteContext(ctx context.Context, ws, suite string, timeout time.Duration) (SuiteResult, error) {
 	res := SuiteResult{Command: suite, ExitCode: -1}
+	if err := ctx.Err(); err != nil {
+		return res, err
+	}
 	fields, err := hookcmd.ShellWords(suite)
 	if err != nil {
 		return res, err
@@ -78,9 +103,9 @@ func RunSuite(ws, suite string, timeout time.Duration) (SuiteResult, error) {
 	if len(fields) == 0 {
 		return res, nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	suiteCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, fields[0], fields[1:]...)
+	cmd := exec.CommandContext(suiteCtx, fields[0], fields[1:]...)
 	cmd.Dir = ws
 	var buf bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &buf, &buf
@@ -122,8 +147,16 @@ func tail(s string, n int) string {
 	return s[len(s)-n:]
 }
 
+// gitRun runs a git subcommand the way the scaffold always has: 60 seconds of its own on a
+// background context. It is gitRunContext with that same background parent.
 func gitRun(dir string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	return gitRunContext(context.Background(), dir, args...)
+}
+
+// gitRunContext runs a git subcommand under ctx, capped at the 60 seconds the scaffold always
+// gave it: the child deadline is parented by ctx and can only tighten it, never reopen it.
+func gitRunContext(ctx context.Context, dir string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
@@ -132,9 +165,22 @@ func gitRun(dir string, args ...string) (string, error) {
 }
 
 // copyTree copies files and directories, following the source's permissions; symlinks are
-// skipped so a fixture cannot reach outside itself.
+// skipped so a fixture cannot reach outside itself. It is copyTreeContext on a background
+// context, so every non-manifest caller copies exactly as before.
 func copyTree(src, dst string) error {
+	return copyTreeContext(context.Background(), src, dst)
+}
+
+// copyTreeContext copies under ctx with cooperative cancellation: one check per walked path and
+// one per chunk written, so a canceled scaffold stops between operations instead of starting the
+// next one. This is a cooperation boundary, not preemption: a single read or write syscall
+// already blocked in the kernel cannot be cancelled from Go — it returns when the kernel
+// finishes it, possibly after the deadline — and only then is the cancellation observed.
+func copyTreeContext(ctx context.Context, src, dst string) error {
 	return filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
 		if err != nil {
 			return err
 		}
@@ -159,9 +205,26 @@ func copyTree(src, dst string) error {
 		if err != nil {
 			return err
 		}
-		if _, err := io.Copy(out, in); err != nil {
-			out.Close()
-			return err
+		buf := make([]byte, 32*1024)
+		for {
+			if cerr := ctx.Err(); cerr != nil {
+				out.Close()
+				return cerr
+			}
+			n, rerr := in.Read(buf)
+			if n > 0 {
+				if _, werr := out.Write(buf[:n]); werr != nil {
+					out.Close()
+					return werr
+				}
+			}
+			if rerr == io.EOF {
+				break
+			}
+			if rerr != nil {
+				out.Close()
+				return rerr
+			}
 		}
 		return out.Close()
 	})

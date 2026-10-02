@@ -614,3 +614,507 @@ func TestSummaryNamesDefectRunAndUniqueUnitsAndPending(t *testing.T) {
 		t.Fatalf("pending precision must be none, not 0.00:\n%s", got)
 	}
 }
+
+// A legacy (non-manifest) run keeps HEAD's per-attempt window: an attempt that spends its whole
+// timeout is an infrastructure failure like any other, and the retry it earns opens a fresh
+// window instead of inheriting the expired one. Only a manifest-bound run shares one deadline
+// across attempts — that is TestManifestPerCaseRuntimeIsOneDeadlineAcrossScaffoldAndAgent.
+func TestLegacyRetryAfterATimedOutAttemptGetsAFreshWindow(t *testing.T) {
+	requireNodeAndGit(t)
+	caseDir := fakeCaseNamed(t, t.TempDir(), "case-a")
+	const attemptWindow = 400 * time.Millisecond
+	type observation struct {
+		hasDeadline bool
+		remaining   time.Duration
+	}
+	var seen []observation
+	agent := func(ctx context.Context, _ string, _ Key, _ Options) (AgentResult, error) {
+		d, ok := ctx.Deadline()
+		obs := observation{hasDeadline: ok}
+		if ok {
+			obs.remaining = time.Until(d)
+		}
+		seen = append(seen, obs)
+		if len(seen) == 1 {
+			<-ctx.Done() // attempt 1 spends its whole window, like a stalled runner
+			return AgentResult{TimedOut: true}, nil
+		}
+		return AgentResult{Result: "retried under a fresh window"}, nil
+	}
+	agg, _ := Run(Options{
+		CasesGlob: caseDir, Runs: 1, Retries: 1, RetryDelay: 0,
+		Timeout: attemptWindow, SuiteTimeout: time.Minute,
+		Out: t.TempDir(), BenchDir: t.TempDir(), Agent: agent,
+	})
+	if len(seen) != 2 {
+		t.Fatalf("agent called %d times: a legacy attempt that spent its timeout must still earn its retry within --retries", len(seen))
+	}
+	if !seen[1].hasDeadline {
+		t.Fatal("attempt 2 has no deadline, want the fresh per-attempt window")
+	}
+	if seen[1].remaining < attemptWindow/2 {
+		t.Fatalf("attempt 2 sees %s left of a %s window: it must run under a fresh window, not the expired first one", seen[1].remaining, attemptWindow)
+	}
+	if len(agg.Cases) != 1 || agg.Cases[0].Failed {
+		t.Fatalf("case = %+v, want the successful retry recorded as a completed case", agg.Cases)
+	}
+}
+
+// A cancellation observed during scaffold stops the case before it copies a byte or spawns the
+// fixture suite or the agent, and the manifest run records that stop as budget_exhausted — a
+// deadline the harness honored cooperatively, never an invalid fixture or a failure.
+func TestStrictScaffoldCancellationStopsBeforeCopyAndIsBudgetExhausted(t *testing.T) {
+	requireNodeAndGit(t)
+	caseDir := fakeCase(t)
+	key, err := LoadKey(caseDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runCtx, cancel := context.WithCancel(context.Background())
+	cancel() // the parent budget is already spent when this case would run
+	out := t.TempDir()
+	calls := 0
+	agent := func(context.Context, string, Key, Options) (AgentResult, error) {
+		calls++
+		return AgentResult{Result: "must not run"}, nil
+	}
+	opts := Options{
+		StrictManifest: true, Timeout: time.Minute, SuiteTimeout: time.Minute,
+		Out: out, Agent: agent, runContext: runCtx,
+	}
+	res := runOnce(caseDir, key, 1, opts)
+	ws := filepath.Join(out, filepath.Base(caseDir), "1", "ws")
+	if _, err := os.Stat(ws); !os.IsNotExist(err) {
+		t.Fatalf("workspace exists (stat err = %v): a canceled scaffold must stop before it copies the fixture or runs any subprocess", err)
+	}
+	if calls != 0 {
+		t.Fatalf("agent called %d times: a canceled scaffold must stop the case before the agent runs", calls)
+	}
+	if !res.BudgetExhausted || res.Outcome != "budget_exhausted" {
+		t.Fatalf("case = %+v, want budget_exhausted for a cancellation during scaffold", res)
+	}
+	if res.Invalid || res.Failed {
+		t.Fatalf("a cancellation during scaffold is spent budget, not invalid or failed: %+v", res)
+	}
+}
+
+// strictCaseBench lays out a one-case benchmark a manifest-bound run can select.
+func strictCaseBench(t *testing.T) string {
+	t.Helper()
+	requireNodeAndGit(t)
+	benchDir := t.TempDir()
+	fakeCaseNamed(t, filepath.Join(benchDir, "cases"), "case-a")
+	return benchDir
+}
+
+func strictOptions(benchDir, out string, agent Agent) Options {
+	return Options{
+		StrictManifest: true, ManifestSHA256: "sha256:m", ManifestVersion: "1.0", ManifestSuite: "TEST",
+		CaseIDs: []string{"case-a"}, BudgetIdentity: "sha256:identity", Runs: 1,
+		Timeout: time.Minute, SuiteTimeout: time.Minute,
+		Out: out, BenchDir: benchDir, Agent: agent,
+	}
+}
+
+// setCaseSuite points a case's fixture suite at a command the test controls, the way a corpus
+// author writes it into the sealed key.
+func setCaseSuite(t *testing.T, caseDir, suite string) {
+	t.Helper()
+	path := filepath.Join(caseDir, KeyFile)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patched := strings.Replace(string(raw), `"suite":"node --test"`, `"suite":"`+suite+`"`, 1)
+	if patched == string(raw) {
+		t.Fatal("the suite command was never rewritten")
+	}
+	if err := os.WriteFile(path, []byte(patched), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The manifest's per-case runtime is one deadline for the whole case run: it opens when the
+// scheduled case starts, before the fixture scaffold, and the agent inherits what the scaffold
+// left of it. If scaffold and agent each got their own window, a slow fixture plus a full agent
+// timeout would spend twice the manifest's budget on one case.
+func TestManifestPerCaseRuntimeIsOneDeadlineAcrossScaffoldAndAgent(t *testing.T) {
+	requireNodeAndGit(t)
+	benchDir := strictCaseBench(t)
+	// The fixture suite deliberately eats a visible slice of the case budget before the agent runs.
+	setCaseSuite(t, filepath.Join(benchDir, "cases", "case-a"), "sleep 0.4")
+	const caseRuntime = time.Second
+	calls := 0
+	var agentDeadline time.Time
+	var remainingAtAgent time.Duration
+	deadlineSeen := false
+	agent := func(ctx context.Context, _ string, _ Key, _ Options) (AgentResult, error) {
+		calls++
+		agentDeadline, deadlineSeen = ctx.Deadline()
+		remainingAtAgent = time.Until(agentDeadline)
+		<-ctx.Done() // the agent runs until its deadline cancels it, like a live runner would
+		return AgentResult{TimedOut: true}, nil
+	}
+	opts := strictOptions(benchDir, t.TempDir(), agent)
+	opts.Timeout = caseRuntime
+	opts.SuiteTimeout = time.Minute // a looser fixture-suite cap must not become a second case window
+	opts.WallTimeout = time.Minute  // the outer wall clock is not the binding deadline here
+	opts.Retries = 2
+	start := time.Now()
+	agg, code := Run(opts)
+	elapsed := time.Since(start)
+	if !deadlineSeen {
+		t.Fatal("agent never observed a deadline")
+	}
+	// The scaffold's suite ran for 400ms before the agent was called: the agent's remaining budget
+	// must already be short by that much. A fresh window after the scaffold would still show (nearly)
+	// the full case runtime left.
+	if remainingAtAgent > caseRuntime-300*time.Millisecond {
+		t.Fatalf("agent sees %s left of a %s case budget after a 400ms fixture scaffold: scaffold and agent must spend one shared deadline, not two windows", remainingAtAgent, caseRuntime)
+	}
+	// No second window anywhere in the run: scaffold time plus a full case timeout would push the
+	// total past the case budget by (at least) the scaffold's slice.
+	if elapsed > caseRuntime+350*time.Millisecond {
+		t.Fatalf("run took %s for a %s per-case budget: the scaffold and the agent spent separate timeout windows", elapsed, caseRuntime)
+	}
+	if calls != 1 {
+		t.Fatalf("agent called %d times: deadline exhaustion must not earn an infrastructure retry", calls)
+	}
+	if len(agg.Cases) != 1 {
+		t.Fatalf("cases = %d, want the budget-exhausted case recorded", len(agg.Cases))
+	}
+	res := agg.Cases[0]
+	if !res.BudgetExhausted || res.Outcome != "budget_exhausted" {
+		t.Fatalf("case outcome = %+v, want budget_exhausted", res)
+	}
+	if res.Invalid || res.Failed {
+		t.Fatalf("a case that spent its runtime budget must be scored, not invalid or failed: %+v", res)
+	}
+	if !agg.BudgetExhausted {
+		t.Fatal("aggregate must carry the budget exhaustion")
+	}
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0: the case ran and was scored; only the case budget, not the suite wall clock, was reached", code)
+	}
+}
+
+// The suite wall clock stays an outer budget of its own: spent before a scheduled case can start,
+// the case never runs and the run records an incomplete, budget-exhausted stop. It composes as the
+// parent of each case's deadline, never as a replacement for it.
+func TestManifestSuiteWallClockStopsCasesThatHaveNotStarted(t *testing.T) {
+	requireNodeAndGit(t)
+	benchDir := strictCaseBench(t)
+	calls := 0
+	agent := func(context.Context, string, Key, Options) (AgentResult, error) {
+		calls++
+		return AgentResult{Result: "must not run"}, nil
+	}
+	opts := strictOptions(benchDir, t.TempDir(), agent)
+	opts.WallTimeout = time.Nanosecond // spent before the scheduler can launch the unit
+	agg, code := Run(opts)
+	if calls != 0 {
+		t.Fatalf("agent called %d times: a spent suite wall clock must stop cases before they start", calls)
+	}
+	if !agg.BudgetExhausted {
+		t.Fatal("aggregate must record the suite-level budget exhaustion")
+	}
+	if len(agg.Cases) != 0 {
+		t.Fatalf("cases = %d, want the never-started unit skipped, not recorded", len(agg.Cases))
+	}
+	if code == 0 {
+		t.Fatal("exit code must be non-zero: the suite stopped before every unit ran")
+	}
+}
+
+// A case whose own cost budget is spent stops right there, even when the attempt also failed:
+// the budget is the harness's own outcome (spec 5.3), not an infrastructure failure to retry,
+// and the run it ended stays a complete, scored reading.
+func TestManifestCostBudgetExhaustionBeatsAnInfraRetry(t *testing.T) {
+	benchDir := strictCaseBench(t)
+	calls := 0
+	agent := func(context.Context, string, Key, Options) (AgentResult, error) {
+		calls++
+		return AgentResult{CostUSD: 2, CostKnown: true}, fmt.Errorf("connection reset by peer")
+	}
+	opts := strictOptions(benchDir, t.TempDir(), agent)
+	opts.Retries, opts.MaxAttemptsPerCase, opts.MaxCostPerCaseRunUSD = 1, 2, 1
+	agg, code := Run(opts)
+	if calls != 1 {
+		t.Fatalf("agent called %d times: a spent budget must end the case before an infra retry", calls)
+	}
+	if len(agg.Cases) != 1 {
+		t.Fatalf("cases = %d, want the budget-exhausted case recorded", len(agg.Cases))
+	}
+	res := agg.Cases[0]
+	if !res.BudgetExhausted || res.Outcome != "budget_exhausted" {
+		t.Fatalf("case outcome = %+v, want budget_exhausted", res)
+	}
+	if res.Failed || res.Invalid {
+		t.Fatalf("a budget-exhausted case must be scored, not failed or invalid: %+v", res)
+	}
+	if !agg.BudgetExhausted || agg.Failed != 0 {
+		t.Fatalf("aggregate budget_exhausted=%t failed=%d, want the exhaustion visible and no failure", agg.BudgetExhausted, agg.Failed)
+	}
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0: every unit ran and was scored", code)
+	}
+}
+
+// Infrastructure failures are retried within the retry budget and, once it is spent, are excluded
+// from recall as failed — the opposite of a budget exhaustion, which is scored.
+func TestInfraFailuresAreRetriedThenExcludedNotBudgetExhausted(t *testing.T) {
+	benchDir := strictCaseBench(t)
+	calls := 0
+	agent := func(context.Context, string, Key, Options) (AgentResult, error) {
+		calls++
+		return AgentResult{}, fmt.Errorf("HTTP 429 rate limited")
+	}
+	opts := strictOptions(benchDir, t.TempDir(), agent)
+	opts.Retries, opts.MaxAttemptsPerCase, opts.RetryDelay = 1, 2, 0
+	agg, code := Run(opts)
+	if calls != 2 {
+		t.Fatalf("agent called %d times, want the first attempt retried once", calls)
+	}
+	res := agg.Cases[0]
+	if !res.Failed {
+		t.Fatalf("case = %+v, want failed after the retry budget", res)
+	}
+	if res.BudgetExhausted || agg.BudgetExhausted {
+		t.Fatalf("an infrastructure failure must never be recorded as budget_exhausted: %+v", res)
+	}
+	if agg.Failed != 1 || agg.Defects != 0 {
+		t.Fatalf("failed=%d defects=%d, want the failure excluded from recall", agg.Failed, agg.Defects)
+	}
+	if code != ExitPartial {
+		t.Fatalf("exit code = %d, want ExitPartial for an incomplete corpus", code)
+	}
+}
+
+// Retries spend from the same case budget as the first attempt: the manifest's token and cost
+// ceilings bound one case run, not one attempt.
+func TestRetryAttemptsShareTheCaseTokenAndCostBudget(t *testing.T) {
+	benchDir := strictCaseBench(t)
+	calls := 0
+	agent := func(context.Context, string, Key, Options) (AgentResult, error) {
+		calls++
+		return AgentResult{CostUSD: 0.6, CostKnown: true, Tokens: 100, TokensKnown: true}, fmt.Errorf("transient upstream error")
+	}
+	opts := strictOptions(benchDir, t.TempDir(), agent)
+	opts.Retries, opts.MaxAttemptsPerCase, opts.RetryDelay = 1, 2, 0
+	opts.MaxTokensPerCaseRun, opts.MaxCostPerCaseRunUSD = 150, 1
+	agg, _ := Run(opts)
+	if calls != 2 {
+		t.Fatalf("agent called %d times: the second attempt's spend must cross the shared budget", calls)
+	}
+	res := agg.Cases[0]
+	if !res.BudgetExhausted || res.Failed {
+		t.Fatalf("case = %+v, want budget_exhausted from the shared ceilings", res)
+	}
+	if res.Tokens == nil || *res.Tokens != 200 {
+		t.Fatalf("tokens = %v, want both attempts' 200 counted against one case budget", res.Tokens)
+	}
+	if res.CostUSD < 1.2-1e-9 {
+		t.Fatalf("cost = %f, want both attempts' 0.6+0.6 counted against one case budget", res.CostUSD)
+	}
+}
+
+// The suite ceiling is shared too: the attempt that pushes the suite over the line ends the case
+// and leaves the run incomplete, which is what makes the reading non-comparable afterwards.
+func TestSuiteCostCeilingCrossedByARetryEndsTheRunIncomplete(t *testing.T) {
+	benchDir := strictCaseBench(t)
+	calls := 0
+	agent := func(context.Context, string, Key, Options) (AgentResult, error) {
+		calls++
+		return AgentResult{CostUSD: 0.6, CostKnown: true, Tokens: 10, TokensKnown: true}, fmt.Errorf("transient upstream error")
+	}
+	opts := strictOptions(benchDir, t.TempDir(), agent)
+	opts.Retries, opts.MaxAttemptsPerCase, opts.RetryDelay = 1, 2, 0
+	opts.MaxCostUSD = 1
+	agg, code := Run(opts)
+	if calls != 2 {
+		t.Fatalf("agent called %d times: the retry's spend must cross the shared suite ceiling", calls)
+	}
+	if !agg.BudgetExhausted {
+		t.Fatal("suite ceiling crossing must be visible as budget_exhausted in the aggregate")
+	}
+	if code != ExitCostCeiling {
+		t.Fatalf("exit code = %d, want ExitCostCeiling: the suite stopped early on its ceiling", code)
+	}
+	if agg.Provenance.ExecutionComplete == nil || *agg.Provenance.ExecutionComplete {
+		t.Fatal("provenance must record the truncated execution as incomplete")
+	}
+}
+
+// A backend that reports no usage leaves the manifest's budgets unverifiable after the call:
+// the case is invalid with the unsupported reason, the provenance says so, and the exit code is
+// partial — the run fails closed instead of passing an unknown spend off as within budget.
+func TestManifestMissingUsageIsInvalidAndUnsupported(t *testing.T) {
+	benchDir := strictCaseBench(t)
+	calls := 0
+	agent := func(context.Context, string, Key, Options) (AgentResult, error) {
+		calls++
+		return AgentResult{Result: "answer without usage"}, nil
+	}
+	opts := strictOptions(benchDir, t.TempDir(), agent)
+	opts.MaxCostPerCaseRunUSD, opts.MaxTokensPerCaseRun = 1, 100
+	agg, code := Run(opts)
+	if calls != 1 {
+		t.Fatalf("agent called %d times: unknown usage must stop the case, not retry it", calls)
+	}
+	res := agg.Cases[0]
+	if !res.Invalid || !strings.Contains(res.InvalidReason, "usage") {
+		t.Fatalf("case = %+v, want invalid with the missing-usage reason", res)
+	}
+	if agg.Invalid != 1 {
+		t.Fatalf("invalid = %d, want the unsupported case counted invalid", agg.Invalid)
+	}
+	p := agg.Provenance
+	if p.BudgetStatus != "unsupported" || p.BudgetUnsupportedReason == "" {
+		t.Fatalf("budget status = %q (%q), want unsupported with a reason", p.BudgetStatus, p.BudgetUnsupportedReason)
+	}
+	if p.InstrumentValid == nil || *p.InstrumentValid {
+		t.Fatal("an unsupported reading must not claim a valid instrument")
+	}
+	if code != ExitPartial {
+		t.Fatalf("exit code = %d, want ExitPartial", code)
+	}
+}
+
+// An infrastructure failure whose response omitted usage is not a terminal unknown: it still takes
+// its declared retries, and the case fails closed afterwards — the later attempt's known usage can
+// neither complete the reading nor present the aggregate spend as known.
+func TestInfraFailureWithUnknownUsageIsRetriedAndStillFailsClosed(t *testing.T) {
+	benchDir := strictCaseBench(t)
+	calls := 0
+	agent := func(context.Context, string, Key, Options) (AgentResult, error) {
+		calls++
+		if calls == 1 {
+			return AgentResult{}, fmt.Errorf("connection reset by peer") // usage unknown
+		}
+		return AgentResult{Result: "answer with usage", CostUSD: 0.02, CostKnown: true, Tokens: 10, TokensKnown: true}, nil
+	}
+	opts := strictOptions(benchDir, t.TempDir(), agent)
+	opts.Retries, opts.MaxAttemptsPerCase, opts.RetryDelay = 1, 2, 0
+	opts.MaxCostPerCaseRunUSD, opts.MaxTokensPerCaseRun = 1, 100
+	agg, code := Run(opts)
+	if calls != 2 {
+		t.Fatalf("agent called %d times, want the unknown-usage infra failure retried once", calls)
+	}
+	res := agg.Cases[0]
+	if !res.Invalid || !strings.Contains(res.InvalidReason, "usage") {
+		t.Fatalf("case = %+v, want invalid with the missing-usage reason despite the later known usage", res)
+	}
+	if res.Failed {
+		t.Fatalf("case = %+v, want invalid/unsupported, not an infrastructure failure", res)
+	}
+	if res.CostKnown {
+		t.Fatal("cost_known = true: an unknown-usage attempt must leave the aggregate spend unknown")
+	}
+	if res.Tokens != nil {
+		t.Fatalf("tokens = %d, want nil: known attempts must not be summed into a complete total", *res.Tokens)
+	}
+	p := agg.Provenance
+	if p.BudgetStatus != "unsupported" || p.BudgetUnsupportedReason == "" {
+		t.Fatalf("budget status = %q (%q), want unsupported with a reason", p.BudgetStatus, p.BudgetUnsupportedReason)
+	}
+	if code != ExitPartial {
+		t.Fatalf("exit code = %d, want ExitPartial", code)
+	}
+}
+
+// Infrastructure failures with unknown usage that spend the whole retry allowance settle as
+// invalid/unsupported, not as the ordinary failed-after-retries reading: the spend stayed unknown,
+// so the run must fail closed either way it ends.
+func TestUnknownUsageExhaustingRetriesIsUnsupportedNotInfraFailure(t *testing.T) {
+	benchDir := strictCaseBench(t)
+	calls := 0
+	agent := func(context.Context, string, Key, Options) (AgentResult, error) {
+		calls++
+		return AgentResult{}, fmt.Errorf("HTTP 429 rate limited") // usage unknown every attempt
+	}
+	opts := strictOptions(benchDir, t.TempDir(), agent)
+	opts.Retries, opts.MaxAttemptsPerCase, opts.RetryDelay = 1, 2, 0
+	opts.MaxCostPerCaseRunUSD, opts.MaxTokensPerCaseRun = 1, 100
+	agg, code := Run(opts)
+	if calls != 2 {
+		t.Fatalf("agent called %d times, want the declared retry count honored before settling", calls)
+	}
+	res := agg.Cases[0]
+	if !res.Invalid || !strings.Contains(res.InvalidReason, "usage") {
+		t.Fatalf("case = %+v, want invalid with the missing-usage reason after the retries settled", res)
+	}
+	if res.Failed {
+		t.Fatalf("case = %+v, want invalid/unsupported instead of retry exhaustion reported as failed", res)
+	}
+	p := agg.Provenance
+	if p.BudgetStatus != "unsupported" || p.BudgetUnsupportedReason == "" {
+		t.Fatalf("budget status = %q (%q), want unsupported with a reason", p.BudgetStatus, p.BudgetUnsupportedReason)
+	}
+	if code != ExitPartial {
+		t.Fatalf("exit code = %d, want ExitPartial", code)
+	}
+}
+
+// A manifest case changed after the run (the I6 post-run check) invalidates the instrument: the
+// provenance records it, the exit code is partial, and the comparator refuses the reading.
+func TestPostRunCheckFailureInvalidatesProvenanceAndIsRefusedByCompare(t *testing.T) {
+	benchDir := strictCaseBench(t)
+	agent := func(context.Context, string, Key, Options) (AgentResult, error) {
+		return AgentResult{Result: "no plan in this answer", CostUSD: 0.01, CostKnown: true, Tokens: 10, TokensKnown: true}, nil
+	}
+	before := t.TempDir()
+	badOpts := strictOptions(benchDir, before, agent)
+	badOpts.PostRunCheck = func() error { return fmt.Errorf("manifest cases changed during execution: case-a") }
+	bad, badCode := Run(badOpts)
+	if badCode != ExitPartial {
+		t.Fatalf("exit code = %d, want ExitPartial after a failed post-run check", badCode)
+	}
+	if bad.Provenance.InstrumentValid == nil || *bad.Provenance.InstrumentValid {
+		t.Fatal("a failed post-run check must be recorded as an invalid instrument")
+	}
+	after := t.TempDir()
+	goodOpts := strictOptions(benchDir, after, agent)
+	goodOpts.PostRunCheck = func() error { return nil }
+	good, goodCode := Run(goodOpts)
+	if goodCode != 0 {
+		t.Fatalf("clean run exit code = %d, want 0", goodCode)
+	}
+	if good.Provenance.InstrumentValid == nil || !*good.Provenance.InstrumentValid ||
+		good.Provenance.ExecutionComplete == nil || !*good.Provenance.ExecutionComplete {
+		t.Fatalf("clean run provenance = %+v, want valid and complete", good.Provenance)
+	}
+	if _, err := Compare(before, after); err == nil || !strings.Contains(err.Error(), "instrument") {
+		t.Fatalf("a reading invalidated by the post-run check must be refused by compare, got %v", err)
+	}
+}
+
+// The budget identity no longer claims a turn cap, and the provenance says plainly which runner
+// can enforce one: pi cannot, so a manifest-bound pi reading carries the limitation.
+func TestTurnCapLimitationIsRecordedForPiOnly(t *testing.T) {
+	benchDir := strictCaseBench(t)
+	agent := func(context.Context, string, Key, Options) (AgentResult, error) {
+		return AgentResult{Result: "no plan", CostKnown: true, TokensKnown: true}, nil
+	}
+	provenanceFor := func(runner string) Provenance {
+		opts := strictOptions(benchDir, t.TempDir(), agent)
+		opts.Runner = runner
+		agg, _ := Run(opts)
+		return agg.Provenance
+	}
+	hasTurnCapNote := func(p Provenance) bool {
+		for _, limitation := range p.BudgetLimitations {
+			if strings.Contains(limitation, "turn cap") {
+				return true
+			}
+		}
+		return false
+	}
+	pi := provenanceFor(RunnerPi)
+	if !hasTurnCapNote(pi) {
+		t.Fatalf("pi limitations = %v, want the unenforced turn cap named", pi.BudgetLimitations)
+	}
+	claude := provenanceFor(RunnerClaude)
+	if hasTurnCapNote(claude) {
+		t.Fatalf("claude limitations = %v, the claude runner enforces the turn cap", claude.BudgetLimitations)
+	}
+}

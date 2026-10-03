@@ -2,7 +2,7 @@ package gate
 
 import (
 	"bufio"
-	"github.com/alesierraalta/tpp/internal/plan"
+	"github.com/alesierraalta/tsp/internal/plan"
 	"io"
 	"os"
 	"path/filepath"

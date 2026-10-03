@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/alesierraalta/tpp/internal/sanitize"
+	"github.com/alesierraalta/tsp/internal/sanitize"
 )
 
 const reviewCursorSchemaVersion = 1

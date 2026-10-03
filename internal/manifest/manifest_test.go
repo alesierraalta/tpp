@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	root "github.com/alesierraalta/tpp/assets"
-	"github.com/alesierraalta/tpp/internal/assets"
+	root "github.com/alesierraalta/tsp/assets"
+	"github.com/alesierraalta/tsp/internal/assets"
 )
 
 func TestEveryEmbeddedSkillIsAComponent(t *testing.T) {

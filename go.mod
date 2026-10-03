@@ -1,3 +1,3 @@
-module github.com/alesierraalta/tpp
+module github.com/alesierraalta/tsp
 
 go 1.26

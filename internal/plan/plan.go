@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/alesierraalta/tpp/internal/assets"
+	"github.com/alesierraalta/tsp/internal/assets"
 )
 
 // TemplatePath is where the skeleton lives inside the embedded skills.

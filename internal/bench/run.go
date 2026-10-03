@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alesierraalta/tpp/internal/buildinfo"
+	"github.com/alesierraalta/tsp/internal/buildinfo"
 )
 
 // Prompt is the whole instruction the agent receives: the skill must infer everything else.

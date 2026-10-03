@@ -14,13 +14,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alesierraalta/tpp/internal/admit"
-	"github.com/alesierraalta/tpp/internal/assets"
-	"github.com/alesierraalta/tpp/internal/bench"
-	"github.com/alesierraalta/tpp/internal/buildinfo"
-	"github.com/alesierraalta/tpp/internal/evidence"
-	plancheck "github.com/alesierraalta/tpp/internal/plan"
-	"github.com/alesierraalta/tpp/internal/sanitize"
+	"github.com/alesierraalta/tsp/internal/admit"
+	"github.com/alesierraalta/tsp/internal/assets"
+	"github.com/alesierraalta/tsp/internal/bench"
+	"github.com/alesierraalta/tsp/internal/buildinfo"
+	"github.com/alesierraalta/tsp/internal/evidence"
+	plancheck "github.com/alesierraalta/tsp/internal/plan"
+	"github.com/alesierraalta/tsp/internal/sanitize"
 )
 
 // buildCLI compiles the command once per test binary; the contract under test is the process's,

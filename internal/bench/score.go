@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	plancheck "github.com/alesierraalta/tpp/internal/plan"
+	plancheck "github.com/alesierraalta/tsp/internal/plan"
 )
 
 // PlanPath is where the skill persists its plan inside a workspace.

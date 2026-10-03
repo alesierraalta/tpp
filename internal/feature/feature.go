@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/alesierraalta/tpp/internal/state"
+	"github.com/alesierraalta/tsp/internal/state"
 )
 
 // Feature is one optional capability the human can toggle.

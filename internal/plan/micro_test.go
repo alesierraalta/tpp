@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alesierraalta/tpp/internal/assets"
+	"github.com/alesierraalta/tsp/internal/assets"
 )
 
 const (

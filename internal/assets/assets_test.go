@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alesierraalta/tpp/internal/buildinfo"
+	"github.com/alesierraalta/tsp/internal/buildinfo"
 )
 
 var expected = []string{

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alesierraalta/tpp/internal/hookcmd"
+	"github.com/alesierraalta/tsp/internal/hookcmd"
 )
 
 // perTestCommand rewrites a suite command so it reports one line per test: node's TAP reporter

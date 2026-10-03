@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alesierraalta/tpp/internal/plan"
+	"github.com/alesierraalta/tsp/internal/plan"
 )
 
 // The gate's first question is "was the discipline invoked at all". Its second is the one the

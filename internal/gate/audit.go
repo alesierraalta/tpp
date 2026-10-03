@@ -3,7 +3,7 @@ package gate
 import (
 	"strings"
 
-	"github.com/alesierraalta/tpp/internal/plan"
+	"github.com/alesierraalta/tsp/internal/plan"
 )
 
 // BuildAuditReason is what the Stop says when the discipline ran. Covering a diff and reporting

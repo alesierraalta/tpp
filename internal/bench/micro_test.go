@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alesierraalta/tpp/internal/assets"
-	plancheck "github.com/alesierraalta/tpp/internal/plan"
+	"github.com/alesierraalta/tsp/internal/assets"
+	plancheck "github.com/alesierraalta/tsp/internal/plan"
 )
 
 const (

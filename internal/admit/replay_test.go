@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alesierraalta/tpp/internal/evidence"
-	"github.com/alesierraalta/tpp/internal/plan"
+	"github.com/alesierraalta/tsp/internal/evidence"
+	"github.com/alesierraalta/tsp/internal/plan"
 )
 
 // gitRun runs one git command against dir and fails the test with git's own words when it does.

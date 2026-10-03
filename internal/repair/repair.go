@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/alesierraalta/tpp/internal/doctor"
-	"github.com/alesierraalta/tpp/internal/sync"
+	"github.com/alesierraalta/tsp/internal/doctor"
+	"github.com/alesierraalta/tsp/internal/sync"
 )
 
 // Options controls a repair run.

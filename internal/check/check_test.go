@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alesierraalta/tpp/internal/plan"
+	"github.com/alesierraalta/tsp/internal/plan"
 )
 
 type fakeRepo struct {

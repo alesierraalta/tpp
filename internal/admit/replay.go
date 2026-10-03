@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alesierraalta/tpp/internal/evidence"
-	"github.com/alesierraalta/tpp/internal/plan"
+	"github.com/alesierraalta/tsp/internal/evidence"
+	"github.com/alesierraalta/tsp/internal/plan"
 )
 
 const (

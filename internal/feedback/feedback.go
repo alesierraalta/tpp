@@ -14,9 +14,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/alesierraalta/tpp/internal/assets"
-	"github.com/alesierraalta/tpp/internal/feature"
-	"github.com/alesierraalta/tpp/internal/sanitize"
+	"github.com/alesierraalta/tsp/internal/assets"
+	"github.com/alesierraalta/tsp/internal/feature"
+	"github.com/alesierraalta/tsp/internal/sanitize"
 )
 
 // Verdicts are the three honest answers to "did the method earn its keep".

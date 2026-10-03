@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	plancheck "github.com/alesierraalta/tpp/internal/plan"
+	plancheck "github.com/alesierraalta/tsp/internal/plan"
 )
 
 const (

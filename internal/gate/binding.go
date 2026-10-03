@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/alesierraalta/tpp/internal/plan"
+	"github.com/alesierraalta/tsp/internal/plan"
 )
 
 // BindingEnv carries the Stop gate's explicit per-session plan binding: validated JSON with the

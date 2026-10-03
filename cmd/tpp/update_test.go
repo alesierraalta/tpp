@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alesierraalta/tpp/internal/buildinfo"
-	"github.com/alesierraalta/tpp/internal/update"
+	"github.com/alesierraalta/tsp/internal/buildinfo"
+	"github.com/alesierraalta/tsp/internal/update"
 )
 
 // statusAvailable decodes the one field this suite cares about from `status --json`.

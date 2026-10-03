@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/alesierraalta/tpp/internal/assets"
+	"github.com/alesierraalta/tsp/internal/assets"
 )
 
 // Kind classifies what a component installs.

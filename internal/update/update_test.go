@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alesierraalta/tpp/internal/buildinfo"
+	"github.com/alesierraalta/tsp/internal/buildinfo"
 )
 
 func useHome(t *testing.T) string {

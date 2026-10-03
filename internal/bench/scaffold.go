@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alesierraalta/tpp/internal/hookcmd"
+	"github.com/alesierraalta/tsp/internal/hookcmd"
 )
 
 // SuiteResult is the fixture's own suite outcome before the agent touches it.

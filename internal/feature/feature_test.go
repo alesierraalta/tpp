@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alesierraalta/tpp/internal/state"
+	"github.com/alesierraalta/tsp/internal/state"
 )
 
 func TestAllReturnsOneOptInFeature(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	plancheck "github.com/alesierraalta/tpp/internal/plan"
+	plancheck "github.com/alesierraalta/tsp/internal/plan"
 )
 
 const findingsHeader = "| Id | Finding (path:line, one line) | Severity | Data safe? | Evidence id | Status | Verdict | Reason | Fingerprint |\n|---|---|---|---|---|---|---|---|---|\n"

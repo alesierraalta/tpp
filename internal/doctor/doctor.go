@@ -11,9 +11,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/alesierraalta/tpp/internal/assets"
-	"github.com/alesierraalta/tpp/internal/hookcmd"
-	"github.com/alesierraalta/tpp/internal/skilltree"
+	"github.com/alesierraalta/tsp/internal/assets"
+	"github.com/alesierraalta/tsp/internal/hookcmd"
+	"github.com/alesierraalta/tsp/internal/skilltree"
 )
 
 // SkillStatus is one embedded skill's presence and freshness in the config dir.

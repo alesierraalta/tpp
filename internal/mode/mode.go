@@ -21,15 +21,23 @@ const (
 // authentication or security authority: any process that can set an environment variable can set
 // it, nothing here verifies identity or trust, and it may steer only which mode this process
 // selects and reports — never anything else.
+// GentleObservationEnv is the canonical name; legacyGentleObservationEnv is the pre-rename name,
+// honoured only while the canonical variable is empty or absent.
 const (
-	GentleObservationEnv   = "TPP_GENTLE_OBSERVATION"
-	GentleObservationValue = "pi-session-gentle-active"
+	GentleObservationEnv       = "TSP_GENTLE_OBSERVATION"
+	legacyGentleObservationEnv = "TPP_GENTLE_OBSERVATION"
+	GentleObservationValue     = "pi-session-gentle-active"
 )
 
 // VerifiedGentleSignal accepts only that exact observation and consults nothing else — no PATH,
 // no version, no file — so outside the extension auto stays standalone even with gentle-ai there.
+// The pre-rename name still carries the observation while the canonical one is empty or absent; an
+// explicit wrong canonical value fails closed instead of sliding into that fallback.
 func VerifiedGentleSignal() bool {
-	return os.Getenv(GentleObservationEnv) == GentleObservationValue
+	if value := os.Getenv(GentleObservationEnv); value != "" {
+		return value == GentleObservationValue
+	}
+	return os.Getenv(legacyGentleObservationEnv) == GentleObservationValue
 }
 
 // Resolve maps a requested --mode value to the mode the command runs under. The empty request

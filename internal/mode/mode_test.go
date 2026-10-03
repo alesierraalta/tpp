@@ -87,10 +87,12 @@ func TestResolveRejectsAnUnknownMode(t *testing.T) {
 }
 
 // The protocol with the Pi extension (assets/hosts/pi/tpp.ts); each side's tests pin its
-// constant to these literals so neither shore can drift alone.
+// constant to these literals so neither shore can drift alone. legacyProtocolEnv is the
+// pre-rename name: a fallback honoured only while the canonical variable is absent.
 const (
-	protocolEnv   = "TPP_GENTLE_OBSERVATION"
-	protocolValue = "pi-session-gentle-active"
+	protocolEnv       = "TSP_GENTLE_OBSERVATION"
+	legacyProtocolEnv = "TPP_GENTLE_OBSERVATION"
+	protocolValue     = "pi-session-gentle-active"
 )
 
 // The extension's in-session observation — session UX evidence for mode selection, never
@@ -109,6 +111,7 @@ func TestVerifiedGentleSignalAcceptsTheExtensionObservation(t *testing.T) {
 // Anything that is not the exact observation must not select gentle, or the seam would accept
 // noise as evidence.
 func TestVerifiedGentleSignalRejectsAnyOtherValue(t *testing.T) {
+	unbindEnv(t, legacyProtocolEnv)
 	for _, value := range []string{"", "1", "true", "gentle-ai", protocolValue + "x", " " + protocolValue} {
 		t.Setenv(protocolEnv, value)
 		if VerifiedGentleSignal() {
@@ -120,14 +123,44 @@ func TestVerifiedGentleSignalRejectsAnyOtherValue(t *testing.T) {
 // Without the observation there is no signal: outside the extension auto stays standalone, and
 // neither PATH nor versions are consulted (see mode.go).
 func TestVerifiedGentleSignalIsAbsentWithoutTheObservation(t *testing.T) {
-	original, had := os.LookupEnv(protocolEnv)
-	os.Unsetenv(protocolEnv)
-	t.Cleanup(func() {
-		if had {
-			os.Setenv(protocolEnv, original)
-		}
-	})
+	unbindEnv(t, protocolEnv)
+	unbindEnv(t, legacyProtocolEnv)
 	if VerifiedGentleSignal() {
 		t.Fatal("VerifiedGentleSignal() = true without the observation; outside the extension auto must stay standalone")
+	}
+}
+
+// unbindEnv removes a variable for the test and restores it afterwards, so no value ambient in
+// the suite's own environment can stand in for either name of the protocol.
+func unbindEnv(t *testing.T, name string) {
+	t.Helper()
+	original, had := os.LookupEnv(name)
+	if err := os.Unsetenv(name); err != nil {
+		t.Fatalf("unset %s: %v", name, err)
+	}
+	t.Cleanup(func() {
+		if had {
+			os.Setenv(name, original)
+		}
+	})
+}
+
+// The pre-rename name still carries the observation while the canonical one is absent, so an
+// adapter that has not shipped the rename keeps selecting gentle — and only while TSP is absent.
+func TestVerifiedGentleSignalFallsBackToTheLegacyObservationWhileTheCanonicalOneIsAbsent(t *testing.T) {
+	unbindEnv(t, protocolEnv)
+	t.Setenv(legacyProtocolEnv, protocolValue)
+	if !VerifiedGentleSignal() {
+		t.Fatal("VerifiedGentleSignal() = false with only the legacy observation set; a pre-rename adapter must keep working")
+	}
+}
+
+// An explicit but wrong canonical value fails closed: it must not read as absent and slide into
+// the legacy fallback, or a typo in the TSP variable would select gentle from the old name.
+func TestVerifiedGentleSignalFailsClosedOnAnInvalidCanonicalObservationEvenWhenTheLegacyIsPresent(t *testing.T) {
+	t.Setenv(legacyProtocolEnv, protocolValue)
+	t.Setenv(protocolEnv, "yes")
+	if VerifiedGentleSignal() {
+		t.Fatal("VerifiedGentleSignal() = true for an invalid canonical observation while the legacy one was set; an explicit invalid TSP value must fail closed")
 	}
 }

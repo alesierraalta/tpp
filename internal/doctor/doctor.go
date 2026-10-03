@@ -235,7 +235,8 @@ func compareGateBinaries(hookCommand string, lookPath func(string) (string, erro
 	if err != nil || wiredInfo.IsDir() {
 		return "", "", false
 	}
-	// The binary on PATH is tpp after the rename; a machine that has not moved yet only has tpp.
+	// A hook may be written under any name the gate is recognized as: ask PATH for every one and
+	// compare against the first that resolves, so a machine carrying only tpp still gets a verdict.
 	for _, name := range hookcmd.GateBinaries {
 		p, err := lookPath(name)
 		if err != nil || p == "" {

@@ -300,3 +300,46 @@ func TestUpdateBaseURLPrefersTheNewVariable(t *testing.T) {
 		t.Fatalf("update --check did not use TPP_UPDATE_BASE_URL:\n%s", out)
 	}
 }
+
+// TSP_UPDATE_BASE_URL is canonical: with all three names exported it wins, so a shell still
+// carrying the older TPP_ or RDD_PLUS_ values cannot point the check at a proxy the operator
+// already moved away from.
+func TestUpdateBaseURLPrefersTSPOverTPPAndRDDPlus(t *testing.T) {
+	bin := buildCLI(t)
+	canonical := fakeProxy(t, "v99.0.0")
+	current := fakeProxy(t, "v88.0.0")
+	legacy := fakeProxy(t, "v77.0.0")
+	out, code := runCLIEnv(t, bin, []string{
+		"TPP_HOME=" + t.TempDir(),
+		"TSP_UPDATE_BASE_URL=" + canonical.URL,
+		"TPP_UPDATE_BASE_URL=" + current.URL,
+		"RDD_PLUS_UPDATE_BASE_URL=" + legacy.URL,
+		"PATH=" + t.TempDir(),
+	}, "update", "--check")
+	if code != 0 {
+		t.Fatalf("update --check = %d, want 0\n%s", code, out)
+	}
+	if !strings.Contains(out, "v99.0.0") || strings.Contains(out, "v88.0.0") || strings.Contains(out, "v77.0.0") {
+		t.Fatalf("update --check did not use TSP_UPDATE_BASE_URL:\n%s", out)
+	}
+}
+
+// The pre-rename name still points the check when neither newer name is set: a shell that only
+// exports RDD_PLUS_UPDATE_BASE_URL keeps working across the rename.
+func TestUpdateBaseURLFallsBackToRDDPlusWhenNeitherNewerVariableIsSet(t *testing.T) {
+	bin := buildCLI(t)
+	legacy := fakeProxy(t, "v77.0.0")
+	out, code := runCLIEnv(t, bin, []string{
+		"TPP_HOME=" + t.TempDir(),
+		"TSP_UPDATE_BASE_URL=",
+		"TPP_UPDATE_BASE_URL=",
+		"RDD_PLUS_UPDATE_BASE_URL=" + legacy.URL,
+		"PATH=" + t.TempDir(),
+	}, "update", "--check")
+	if code != 0 {
+		t.Fatalf("update --check = %d, want 0\n%s", code, out)
+	}
+	if !strings.Contains(out, "v77.0.0") {
+		t.Fatalf("update --check did not fall back to RDD_PLUS_UPDATE_BASE_URL:\n%s", out)
+	}
+}

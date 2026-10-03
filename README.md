@@ -189,12 +189,13 @@ tpp doctor --mode turbo        # refused (exit 2) naming auto, standalone, gentl
 | `standalone` | always standalone |
 | `gentle` | gentle under that same signal; otherwise refused as `pending integration` (exit 2) |
 
-The only signal `auto` and `gentle` accept is `TPP_GENTLE_OBSERVATION=pi-session-gentle-active`, and
+The only signal `auto` and `gentle` accept is `TSP_GENTLE_OBSERVATION=pi-session-gentle-active`, and
 only in the environment of the single `tpp doctor` child the Pi extension spawns (through
-`execFile`'s env — no `process.env` mutation, no file), so it is process-scoped. It is a session UX
-observation, not authentication or security authority: any process can set an environment variable,
-nothing here verifies identity or trust, and it may steer only which mode this process selects and
-reports — never anything else.
+`execFile`'s env — no `process.env` mutation, no file), so it is process-scoped. The pre-rename
+`TPP_GENTLE_OBSERVATION` is read only while the TSP variable is absent, and an explicit invalid TSP
+value fails closed. It is a session UX observation, not authentication or security authority: any
+process can set an environment variable, nothing here verifies identity or trust, and it may steer
+only which mode this process selects and reports — never anything else.
 
 Step by step, for a person who wants to see each part:
 
@@ -265,10 +266,12 @@ ones win when both are present:
 - The first default-root resolution moves an existing `~/.config/tpp` or `~/.config/rdd-plus` tree
   (state, backups, update cache) to `~/.config/tsp`, retaining both old paths as symlink aliases.
   An existing TSP root wins; divergent legacy roots are not merged, and a failed move leaves the old root in use.
-- `.rdd-plus.json` is still read when `.tpp.json` is absent; a repository carrying both is refused
-  until one is removed. tpp never renames your file.
-- `RDD_PLUS_HOME` and `RDD_PLUS_UPDATE_BASE_URL` are read when `TPP_HOME` and `TPP_UPDATE_BASE_URL`
-  are unset.
+- `.tsp.json` is the canonical repository declaration; `.tpp.json` and `.rdd-plus.json` remain
+  read-only legacy names. If any two or three are present, tpp refuses them even when contents match.
+  No declaration file is automatically renamed, deleted, merged or rewritten.
+- `TSP_UPDATE_BASE_URL` is canonical for the update check; `TPP_UPDATE_BASE_URL` and then
+  `RDD_PLUS_UPDATE_BASE_URL` are read while the newer name is unset. `RDD_PLUS_HOME` is read when
+  `TSP_HOME` and `TPP_HOME` are unset.
 - The OpenCode snippet and Pi's settings hook are copies, not managed files: re-copy
   `assets/hosts/opencode/tpp.ts` and the `tpp gate` hook from
   `assets/hosts/pi/settings.stop-hook.json`. The Pi extension is different: `tpp sync --hosts pi`

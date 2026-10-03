@@ -2317,9 +2317,11 @@ func TestDoctorModeFollowsTheExtensionObservationNotThePath(t *testing.T) {
 	}
 	path := fake + string(os.PathListSeparator) + pathWithoutBin(t)
 
-	// Every case starts from a cleared observation so an ambient value in the test environment
-	// cannot stand in for the extension; "last entry wins" makes the override deterministic.
-	cleared := "TPP_GENTLE_OBSERVATION="
+	// Every case starts from a cleared observation — canonical name and legacy fallback — so an
+	// ambient value in the test environment cannot stand in for the extension; "last entry wins"
+	// makes the override deterministic.
+	cleared := "TSP_GENTLE_OBSERVATION="
+	clearedLegacy := "TPP_GENTLE_OBSERVATION="
 	observed := "TPP_GENTLE_OBSERVATION=pi-session-gentle-active"
 	for _, tc := range []struct {
 		name string
@@ -2327,7 +2329,7 @@ func TestDoctorModeFollowsTheExtensionObservationNotThePath(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"auto without the observation stays standalone", []string{cleared, "PATH=" + path},
+		{"auto without the observation stays standalone", []string{cleared, clearedLegacy, "PATH=" + path},
 			[]string{"doctor", "--json", "--config-dir", configDir}, `"mode": "standalone"`},
 		{"auto with the observation reports gentle", []string{cleared, "PATH=" + path, observed},
 			[]string{"doctor", "--json", "--config-dir", configDir}, `"mode": "gentle"`},

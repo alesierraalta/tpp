@@ -322,8 +322,9 @@ func statusView() (tui.StatusView, error) {
 // runUpdate checks the module proxy for the latest tag, refreshes the cache `status` reads, and
 // installs through `go install` when this build is behind. The binary a fresh install lands on
 // only runs after a restart, so success points at a new shell instead of claiming this process
-// became the new version. TPP_UPDATE_BASE_URL, or the legacy RDD_PLUS_UPDATE_BASE_URL when it is unset,
-// points the check at another proxy (tests use a local one); an empty value means the public Go module proxy.
+// became the new version. TSP_UPDATE_BASE_URL is canonical; the pre-rename
+// TPP_UPDATE_BASE_URL and then the legacy RDD_PLUS_UPDATE_BASE_URL are read while the newer name is
+// unset. An empty value means the public Go module proxy (tests point the check at a local one).
 func runUpdate(args []string) int {
 	fs := flag.NewFlagSet("update", flag.ContinueOnError)
 	checkOnly := fs.Bool("check", false, "only check and refresh the cache; never install")
@@ -334,7 +335,10 @@ func runUpdate(args []string) int {
 		fmt.Fprintf(os.Stderr, "update: unexpected argument %q\n", fs.Arg(0))
 		return 2
 	}
-	baseURL := os.Getenv("TPP_UPDATE_BASE_URL")
+	baseURL := os.Getenv("TSP_UPDATE_BASE_URL")
+	if baseURL == "" {
+		baseURL = os.Getenv("TPP_UPDATE_BASE_URL")
+	}
 	if baseURL == "" {
 		baseURL = os.Getenv("RDD_PLUS_UPDATE_BASE_URL")
 	}

@@ -13,6 +13,7 @@ import (
 func useHome(t *testing.T) string {
 	t.Helper()
 	home := filepath.Join(t.TempDir(), "tpp")
+	t.Setenv("TSP_HOME", "")
 	t.Setenv("TPP_HOME", home)
 	return home
 }

@@ -12,6 +12,7 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
+	os.Setenv("TSP_HOME", "")
 	os.Setenv("TPP_HOME", root)
 	code := m.Run()
 	os.RemoveAll(root)

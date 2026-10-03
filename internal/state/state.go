@@ -48,10 +48,9 @@ type State struct {
 	Features         map[string]FeatureState `json:"features,omitempty"`
 }
 
-// Path resolves <root>/state.json. The root is $TPP_HOME when set, then the legacy $RDD_PLUS_HOME, otherwise
-// the XDG config directory's tpp folder. An installation made before the rename lives in the XDG config
-// directory's rdd-plus folder: when only that one exists it is moved to the new place once, and when the move
-// cannot happen the old folder stays the root, so the installation is never split across two places.
+// Path resolves <root>/state.json. Explicit roots use TSP_HOME, then TPP_HOME, then RDD_PLUS_HOME;
+// the default is the XDG config directory's tsp folder. A legacy tpp or rdd-plus directory is moved
+// there once as a whole tree, with both old paths retained as aliases.
 func Path() (string, error) {
 	root, err := resolveRoot()
 	if err != nil {
@@ -62,7 +61,7 @@ func Path() (string, error) {
 
 // resolveRoot answers the directory that holds state.json, its backups and the update cache; see Path.
 func resolveRoot() (string, error) {
-	for _, name := range []string{"TPP_HOME", "RDD_PLUS_HOME"} {
+	for _, name := range []string{"TSP_HOME", "TPP_HOME", "RDD_PLUS_HOME"} {
 		if root := os.Getenv(name); root != "" {
 			return root, nil
 		}
@@ -71,25 +70,107 @@ func resolveRoot() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve XDG config directory: %w", err)
 	}
-	return adoptLegacyRoot(filepath.Join(configDir, "rdd-plus"), filepath.Join(configDir, "tpp")), nil
+	return migrateConfigRoot(configDir)
 }
 
-// adoptLegacyRoot answers the root to use: current once it exists, else legacy moved to current, else legacy
-// itself when the move fails. Anything but a clean absence of current leaves legacy untouched.
-func adoptLegacyRoot(legacy, current string) string {
-	if _, err := os.Lstat(current); !errors.Is(err, os.ErrNotExist) {
-		return current
+func migrateConfigRoot(configDir string) (string, error) {
+	current := filepath.Join(configDir, "tsp")
+	if _, err := os.Lstat(current); err == nil {
+		info, statErr := os.Stat(current)
+		if statErr != nil {
+			return "", fmt.Errorf("inspect TSP state root %s: %w", current, statErr)
+		}
+		if !info.IsDir() {
+			return "", fmt.Errorf("TSP state root %s is not a directory", current)
+		}
+		return current, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("inspect TSP state root %s: %w", current, err)
 	}
-	if info, err := os.Stat(legacy); err != nil || !info.IsDir() {
-		return current
+
+	legacyRoots := []string{filepath.Join(configDir, "tpp"), filepath.Join(configDir, "rdd-plus")}
+	type legacyAlias struct {
+		path string
+		info os.FileInfo
 	}
-	if err := os.Rename(legacy, current); err != nil {
-		return legacy
+	var source string
+	var sourceInfo os.FileInfo
+	var aliases []legacyAlias
+	for _, path := range legacyRoots {
+		info, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return "", fmt.Errorf("inspect legacy state root %s: %w", path, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Stat(path)
+			if err != nil {
+				return "", fmt.Errorf("inspect legacy state alias %s: %w", path, err)
+			}
+			if !target.IsDir() {
+				return "", fmt.Errorf("legacy state alias %s does not target a directory", path)
+			}
+			aliases = append(aliases, legacyAlias{path: path, info: target})
+			continue
+		}
+		if !info.IsDir() {
+			return "", fmt.Errorf("legacy state root %s is not a directory", path)
+		}
+		if source != "" {
+			return "", fmt.Errorf("ambiguous legacy state roots %s and %s; refusing to merge", source, path)
+		}
+		source, sourceInfo = path, info
 	}
-	// An rdd-plus binary left on the machine still resolves the old path; a link there keeps it on this root
-	// instead of starting a second, empty installation beside it. A failed link loses nothing: the move is done.
-	_ = os.Symlink(current, legacy)
-	return current
+	if source == "" {
+		if len(aliases) != 0 {
+			return "", fmt.Errorf("legacy state root is only a symlink; refusing to move an alias instead of its contents")
+		}
+		return current, nil
+	}
+	for _, alias := range aliases {
+		if !os.SameFile(sourceInfo, alias.info) {
+			return "", fmt.Errorf("ambiguous legacy state roots %s and %s; refusing to merge", source, alias.path)
+		}
+	}
+
+	if err := os.Rename(source, current); err != nil {
+		return source, nil
+	}
+	if err := os.Symlink(current, source); err != nil {
+		if rollbackErr := os.Rename(current, source); rollbackErr != nil {
+			return "", fmt.Errorf("create legacy state alias %s: %v; restore legacy root: %w", source, err, rollbackErr)
+		}
+		return source, nil
+	}
+	currentInfo, err := os.Stat(current)
+	if err != nil {
+		return current, fmt.Errorf("inspect migrated state root %s: %w", current, err)
+	}
+	for _, alias := range legacyRoots {
+		if alias == source {
+			continue
+		}
+		info, err := os.Lstat(alias)
+		if err == nil {
+			if info.Mode()&os.ModeSymlink == 0 {
+				return current, fmt.Errorf("legacy state root %s appeared during migration; refusing to overwrite", alias)
+			}
+			target, statErr := os.Stat(alias)
+			if statErr != nil || !os.SameFile(currentInfo, target) {
+				return current, fmt.Errorf("legacy state alias %s no longer points to the migrated root", alias)
+			}
+			continue
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return current, fmt.Errorf("inspect legacy state root %s: %w", alias, err)
+		}
+		if err := os.Symlink(current, alias); err != nil {
+			return current, fmt.Errorf("create legacy state alias %s: %w", alias, err)
+		}
+	}
+	return current, nil
 }
 
 // Load answers an empty state when the file is absent, and an error when it exists but cannot be

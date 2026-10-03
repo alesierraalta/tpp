@@ -1730,7 +1730,7 @@ func TestCheckRefusesALayerMatrixWithoutARunColumn(t *testing.T) {
 	doc := runCheckPlan("## Layer matrix\n\n| Layer | Skill | Scope | Status |\n|---|---|---|---|\n| Security | `appsec` | input | pending |\n", "## Ranked targets\n\n| Target | Status | Run |\n|---|---|---|\n| target | pending | redis-stream-pool |\n")
 	problems := CheckDocument(doc)
 	joined := strings.Join(problems, "\n")
-	if !strings.Contains(joined, "Layer matrix") || !strings.Contains(joined, "Run") || !strings.Contains(joined, "tpp plan upgrade") {
+	if !strings.Contains(joined, "Layer matrix") || !strings.Contains(joined, "Run") || !strings.Contains(joined, "tsp plan upgrade") {
 		t.Fatalf("missing Run-column refusal: %v", problems)
 	}
 }
@@ -1739,7 +1739,7 @@ func TestCheckRefusesARankedTargetsTableWithoutARunColumn(t *testing.T) {
 	doc := runCheckPlan("## Layer matrix\n\n| Layer | Skill | Scope | Status | Run |\n|---|---|---|---|---|\n| Security | `appsec` | input | pending | redis-stream-pool |\n", "## Ranked targets\n\n| Target | Status |\n|---|---|\n| target | pending |\n")
 	problems := CheckDocument(doc)
 	joined := strings.Join(problems, "\n")
-	if !strings.Contains(joined, "Ranked targets") || !strings.Contains(joined, "Run") || !strings.Contains(joined, "tpp plan upgrade") {
+	if !strings.Contains(joined, "Ranked targets") || !strings.Contains(joined, "Run") || !strings.Contains(joined, "tsp plan upgrade") {
 		t.Fatalf("missing Run-column refusal: %v", problems)
 	}
 }

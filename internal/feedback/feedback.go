@@ -173,9 +173,9 @@ func Record(configDir string, r Report) error {
 	enabled, err := feature.Enabled("feedback")
 	if err != nil || !enabled {
 		if err != nil {
-			return fmt.Errorf("feedback is disabled; enable it with: tpp feature enable feedback: %w", err)
+			return fmt.Errorf("feedback is disabled; enable it with: tsp feature enable feedback: %w", err)
 		}
-		return fmt.Errorf("feedback is disabled; enable it with: tpp feature enable feedback")
+		return fmt.Errorf("feedback is disabled; enable it with: tsp feature enable feedback")
 	}
 
 	telemetryDir := sanitize.TelemetryDir(configDir)

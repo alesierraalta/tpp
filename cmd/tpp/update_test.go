@@ -75,7 +75,7 @@ func TestUpdateWithoutGoPrintsTheInstallCommand(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("update without go = %d, want 0\n%s", code, out)
 	}
-	want := "go install github.com/alesierraalta/tpp/cmd/tpp@v99.0.0"
+	want := "go install github.com/alesierraalta/tsp/cmd/tsp@v99.0.0"
 	if !strings.Contains(out, want) {
 		t.Fatalf("output missing the exact install command %q:\n%s", want, out)
 	}
@@ -102,7 +102,7 @@ func TestUpdateWithAFakeGoRunsTheInstallArgv(t *testing.T) {
 	fakeBin := t.TempDir()
 	argsFile := filepath.Join(fakeBin, "go-args")
 	gobinFile := filepath.Join(fakeBin, "go-gobin")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > '" + argsFile + "'\nprintf '%s' \"$GOBIN\" > '" + gobinFile + "'\n"
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > '" + argsFile + "'\nprintf '%s' \"$GOBIN\" > '" + gobinFile + "'\n: > \"$GOBIN/tsp\"\n"
 	if err := os.WriteFile(filepath.Join(fakeBin, "go"), []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake go: %v", err)
 	}
@@ -118,12 +118,13 @@ func TestUpdateWithAFakeGoRunsTheInstallArgv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fake go was never run: %v", err)
 	}
-	want := "install\ngithub.com/alesierraalta/tpp/cmd/tpp@v99.0.0\n"
+	// The project was renamed: the bridge release updates into the tsp module and binary.
+	want := "install\ngithub.com/alesierraalta/tsp/cmd/tsp@v99.0.0\n"
 	if string(argv) != want {
 		t.Fatalf("install argv = %q, want %q", argv, want)
 	}
-	if !strings.Contains(out, "tpp version") {
-		t.Fatalf("success must point at confirming in a new shell:\n%s", out)
+	if !strings.Contains(out, "tsp version") || !strings.Contains(out, "tsp sync") {
+		t.Fatalf("success must point at the renamed binary: confirm with tsp version and run tsp sync:\n%s", out)
 	}
 	// The release must replace the binary that is running, not land in a GOBIN that PATH or the Stop hook
 	// never reach (issue #144).
@@ -134,6 +135,9 @@ func TestUpdateWithAFakeGoRunsTheInstallArgv(t *testing.T) {
 	wantDir, _ := filepath.EvalSymlinks(filepath.Dir(bin))
 	if string(gobin) != wantDir {
 		t.Fatalf("go install ran with GOBIN=%q, want the running binary's directory %q", gobin, wantDir)
+	}
+	if r, err := filepath.EvalSymlinks(bin); err != nil || r != filepath.Join(wantDir, "tsp") {
+		t.Fatalf("running tpp resolves to %q (err %v), want it symlinked to the fresh install %s (issue #144)", r, err, filepath.Join(wantDir, "tsp"))
 	}
 }
 

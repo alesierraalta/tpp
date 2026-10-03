@@ -400,7 +400,21 @@ func runUpdate(args []string) int {
 		fmt.Fprintln(os.Stderr, "update:", err)
 		return 1
 	}
-	fmt.Printf("installed %s; restart your shell and run `tpp version` there to confirm\n", result.Latest)
+	exe, _ := os.Executable()
+	exe, _ = filepath.EvalSymlinks(exe)
+	target := "tsp" + map[bool]string{true: ".exe"}[strings.HasSuffix(exe, ".exe")]
+	if filepath.Base(exe) != target {
+		link := filepath.Join(gobin, fmt.Sprintf(".tpp-update-link-%d", os.Getpid()))
+		err = os.Symlink(target, link)
+		if err == nil {
+			err = os.Rename(link, exe)
+		}
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "update: installed tsp %s, but tpp still points at the old build: %v\n", result.Latest, err)
+		return 1
+	}
+	fmt.Printf("installed tsp %s (tpp is now tsp) into %s; restart your shell, confirm with `tsp version`, then run `tsp sync` to move your hooks to tsp\n", result.Latest, gobin)
 	return 0
 }
 

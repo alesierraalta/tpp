@@ -16,7 +16,7 @@ Load when building or gating evaluations of an LLM feature: choosing what to mea
 
 Applicability gate: no judge, no prompt or model change, and no quality claim to defend means nothing to load. Skip judge validation when grading is fully deterministic (schema, regex, exact match).
 
-NOT for: agents, tool use or multi-turn state (`agent-eval`); adversarial and injection testing (`llm-redteam`); retrieval and grounding (`rag-audit-evaluator`); the general "metric must drop on a broken pipeline" principle (`silent-degradation`, Rule 3); deterministic unit tests (`tsp`).
+NOT for: agents, tool use or multi-turn state (`agent-eval`); adversarial and injection testing (`llm-redteam`); retrieval and grounding (`rag-audit-evaluator`); the general "metric must drop on a broken pipeline" principle (`silent-degradation`, Rule 3); deterministic unit tests (`test-strategy`).
 
 ## Hard Rules
 

@@ -27,7 +27,7 @@ NOT for: authoring unconstrained offensive exploits, routine stylistic linting (
 
 ## Plan Contribution
 
-When invoked by `tsp` in PLAN mode: do not execute. Return target rows for the plan:
+When invoked by `test-strategy` in PLAN mode: do not execute. Return target rows for the plan:
 target (path or surface) · check (this skill's domain check: authorization boundary, taint sink,
 secret exposure, parser crash-freedom, stateful invariant, race, authN) · target rung or depth ·
 consequence class · why. Cover every check this skill would run on this codebase, including
@@ -40,7 +40,7 @@ cheap static ones (Semgrep, Gitleaks).
 3. **Falsifiability verification**: mutation or a controlled bypass where meaningful; otherwise a contract/invariant, negative-control, differential, metamorphic, or observed-state check. Do not require mutation or a named production line for every probe.
 4. **Isolated sandboxing**: dynamic attacks run only on a target that passes the Preflight Safety Gate (a throwaway worktree or an ephemeral container, `docker-test-containers`). No unconstrained denial-of-service against shared environments.
 5. **Severity by impact and exploitability evidence**, not by label, per the impact x exploitability matrix in [references/severity.md](references/severity.md): the matrix cell gives the C/M/N label; a "hypothesis" cell (not reproduced, or no named `file:line` sink) is reported as a hypothesis, never as C/M/N.
-6. **Evidence**: every finding carries an executed evidence record per `~/.claude/skills/tsp/references/evidence.md`; no finding from reading alone.
+6. **Evidence**: every finding carries an executed evidence record per `~/.claude/skills/test-strategy/references/evidence.md`; no finding from reading alone.
 7. **Positive control for every denial**: a denied probe counts only when the authorized caller succeeds on the same route in the same run; otherwise a 404 from a wrong route reads as "secure".
 
 ## Decision Gates
@@ -81,4 +81,4 @@ cheap static ones (Semgrep, Gitleaks).
 - [references/rdd-receipt.md](references/rdd-receipt.md) — receipt contract for `lens:security`.
 - [assets/semgrep-rules.yaml](assets/semgrep-rules.yaml) — Semgrep triage rules for SQLi and SSRF, Flask request sources only.
 - [assets/dual-persona-auth-test.py](assets/dual-persona-auth-test.py) — dual-persona authorization harness.
-- Sibling skills: `tsp` · `dependency-legitimacy` · `docker-test-containers` · `exploit-testing`.
+- Sibling skills: `test-strategy` · `dependency-legitimacy` · `docker-test-containers` · `exploit-testing`.

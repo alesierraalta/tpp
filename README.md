@@ -26,7 +26,7 @@ flowchart LR
             claude[Claude Code<br/>~/.claude]
             others[OpenCode · Gemini · Codex]
         end
-        skills[Embedded skills<br/>tsp, exploit-testing,<br/>real-run-validation, ...]
+        skills[Embedded skills<br/>test-strategy, exploit-testing,<br/>real-run-validation, ...]
     end
     subgraph repo[Your repository]
         plan[docs/testing/test-plan.md<br/>or the plan .tpp.json declares]
@@ -56,7 +56,7 @@ flowchart TD
     loop -- yes --> quiet
     loop -- no --> bound{This session bound to a plan<br/>and run with tpp bind?}
     bound -- no --> unbound([Stay silent;<br/>the log records session_plan_unbound])
-    bound -- yes --> ran{tsp or exploit-testing<br/>invoked in this session's transcript?}
+    bound -- yes --> ran{test-strategy or exploit-testing<br/>invoked in this session's transcript?}
     ran -- no --> quiet
     ran -- yes --> owed{Does the bound plan still owe<br/>layers or ranked targets?}
     owed -- no --> done([Say the plan owes nothing])
@@ -92,7 +92,7 @@ tpp bind --unset --session <host session ID>    # remove the record when the ses
 
 ```mermaid
 flowchart TD
-    ask([Operator: haz test strategy / haz el testing]) --> strategy[tsp reads the repo state]
+    ask([Operator: haz test strategy / haz el testing]) --> strategy[test-strategy reads the repo state]
     strategy --> size{How big is the change?}
     size -- "whole app or a wide diff" --> full[Full plan<br/>tpp plan init]
     size -- "one bounded area" --> light[Light plan<br/>Light: blast radius · touches classes]
@@ -327,7 +327,7 @@ At the end of every turn the gate audits only when all of these hold:
 - this session carries an exact binding — `tpp bind`'s stored record or the binding environment —
   naming this session, this worktree, a plan and a run; the worktree's `.tpp.json` declaration, a
   working-tree entry and a fresh source mtime are never a substitute;
-- `tsp` or `exploit-testing` was actually invoked in this session (a name in the
+- `test-strategy` or `exploit-testing` was actually invoked in this session (a name in the
   available-skills listing does not count; a Skill call or a read of its `SKILL.md` does).
 
 Without the binding the stop is silence with `session_plan_unbound` in the telemetry: the gate
@@ -341,8 +341,8 @@ and `plan` fields are pseudonyms, not names.
 
 ## Skills
 
-The embedded skills live under `assets/skills/`. `tsp` is the organic entry point
-("haz test strategy"; legacy aliases: `test-strategy` and "haz el testing"): it infers the mode from repository state, persists a plan that never
+The embedded skills live under `assets/skills/`. `test-strategy` is the organic entry point
+("haz test strategy"; aliases: "haz test stragety" and "haz el testing"): it infers the mode from repository state, persists a plan that never
 shrinks, sweeps the specialized skills for their own checks, and executes through
 `exploit-testing`, whose ladder climbs from contract classes and hostile inputs to real
 collaborators, real seams, injected faults, and concurrency. Every finding carries an executed
@@ -370,8 +370,8 @@ benchmark's JavaScript cases run instead of skipping, and it runs
 
 ## Pending
 
-- The eval harness (`assets/skills/tsp/evals/run_evals.py`, `selftest.py`) and the
-  calibration tools (`assets/skills/tsp/assets/seed-mutants.py`, `fingerprint.sh`) are
+- The eval harness (`assets/skills/test-strategy/evals/run_evals.py`, `selftest.py`) and the
+  calibration tools (`assets/skills/test-strategy/assets/seed-mutants.py`, `fingerprint.sh`) are
   still Python and shell. They will become subcommands.
 - Replaying a ledger row's mutation before a finding is accepted, and `status --next-transition`,
   are the next binaries.
@@ -558,7 +558,7 @@ pinned with a test, or catch one it never wrote down.
 
 Per run: `result.json` and the `test-plan.md` it produced, kept even when the workspace is
 removed. Per bench: `aggregate.json`, `summary.md`, one line in `bench/history.jsonl` and one row
-in `bench/history.md` with the installed `tsp` version, so skill versions compare on
+in `bench/history.md` with the installed `test-strategy` version, so skill versions compare on
 identical fixtures. `--dry-run` scaffolds and checks fixtures without spawning or recording;
 `--max-cost-usd` stops early with exit code 2; a run with any failed or invalid case exits 3, so a
 partial number is never read as a corpus result.

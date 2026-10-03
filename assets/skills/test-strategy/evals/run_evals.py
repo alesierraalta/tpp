@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-run_evals.py — behavioral eval runner for the organic testing skill (tsp).
+run_evals.py — behavioral eval runner for the organic testing skill (test-strategy).
 
 Each case scaffolds a fixture workspace, runs `claude -p "<prompt>"` inside it, and scores the
 result with deterministic graders over the final output, the tool calls, and the files the

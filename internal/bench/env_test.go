@@ -25,7 +25,7 @@ func TestMinimalConfigHoldsTheSkillsAndNothingElse(t *testing.T) {
 	if err := WriteBenchConfig(cfg, real); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(cfg, "skills", "tsp", "SKILL.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(cfg, "skills", "test-strategy", "SKILL.md")); err != nil {
 		t.Fatalf("the skills under test must be installed: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(cfg, "CLAUDE.md")); !os.IsNotExist(err) {
@@ -165,11 +165,11 @@ func TestPiBenchConfigHoldsTheSkillsAndNothingElse(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Both runners must measure the same skill content, byte for byte.
-	want, err := os.ReadFile(filepath.Join(claude, "skills", "tsp", "SKILL.md"))
+	want, err := os.ReadFile(filepath.Join(claude, "skills", "test-strategy", "SKILL.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := os.ReadFile(filepath.Join(cfg, "skills", "tsp", "SKILL.md"))
+	got, err := os.ReadFile(filepath.Join(cfg, "skills", "test-strategy", "SKILL.md"))
 	if err != nil || !bytes.Equal(got, want) {
 		t.Fatalf("the Pi config must hold the same skills: %v", err)
 	}

@@ -16,7 +16,7 @@ Inferred: new repository, no plan; whole-project PLAN then EXECUTE, same run. Th
 | Doctor | installed skills, hook wiring, PATH capabilities, degradation notes | `internal/doctor/` | exit 1 when git, a skill, or the hook is missing |
 | Assets | 12 embedded skills (103 files) | `assets/embed.go`, `internal/assets/` | `go:embed` cannot cross to a parent dir, so the embed lives beside `assets/skills/` |
 | Mutation runner | 23 literal mutants over `internal/gate` | `tools/mutants/` | `go run ./tools/mutants`, exit 1 on any survivor |
-| Skill-side tooling (pending port) | `evals/run_evals.py`, `evals/selftest.py`, `assets/seed-mutants.py`, `assets/fingerprint.sh` | `assets/skills/tsp/` | Python and shell inside the assets; the user requires validation code in Go |
+| Skill-side tooling (pending port) | `evals/run_evals.py`, `evals/selftest.py`, `assets/seed-mutants.py`, `assets/fingerprint.sh` | `assets/skills/test-strategy/` | Python and shell inside the assets; the user requires validation code in Go |
 
 ## Ranked targets
 
@@ -45,7 +45,7 @@ Rows are never removed by budget; budget changes order and status only.
 | Install into a fresh config | `bin/tpp sync --config-dir <tmp>` then `bin/tpp doctor --config-dir <tmp>` | empty temp dir, optionally a copy of a real `settings.json` | `--dry-run` first | doctor prints 12 skills ok, `Stop gate wired`, capabilities, `verdict: healthy`, exit 0; a copy of the real settings keeps its gentle-ai hooks |
 | Gate inside a real session | see `~/.claude/docs/testing/test-plan.md` (E12): two `claude -p` arms | scratch repo under `/tmp` | edit without the skill; edit after reading it | telemetry lines `fired:true` and `fired:false` with `skills_loaded` |
 | Concurrent plan writes and subheading cuts | built `/tmp/rddval/final-hardening` with a template plan and one seeded evidence row | eight processes with distinct `TMPDIR` values and one stable cache namespace; symlinked 0600 plan; Findings and breadth tables with `### Notes` cuts | add distinct ids, race one id, write through the symlink, run `plan check` and `plan gaps` on prose and blank-line cuts | every distinct id survives exactly once; same id yields one success and one duplicate refusal; symlink and mode survive; `###` cuts exit 1 with both lines; shipped plans remain `well formed` |
-| Plan diagnostics on real plans | `go build -o /tmp/rdd-wt ./cmd/tpp` then `/tmp/rdd-wt plan check --path <plan>`; `/tmp/rdd-wt plan add-finding --path <plan> ...`; `/tmp/rdd-wt check --cwd <repo>` | copies of `assets/skills/tsp/evals/fixtures/plans/clean.md`, `rejected.md` and this plan under `/tmp/rddval/plans`, plus hostile variants: status `resolved`, a missing pipe, a blank line inside the table, prose inside the table | the commands above | `plan check` names the breach by line (`<plan>: line N: ...`) and exits 1; both shipped fixtures and this plan still print `well formed` and exit 0; `check` names an unrecognized status instead of silently counting it |
+| Plan diagnostics on real plans | `go build -o /tmp/rdd-wt ./cmd/tpp` then `/tmp/rdd-wt plan check --path <plan>`; `/tmp/rdd-wt plan add-finding --path <plan> ...`; `/tmp/rdd-wt check --cwd <repo>` | copies of `assets/skills/test-strategy/evals/fixtures/plans/clean.md`, `rejected.md` and this plan under `/tmp/rddval/plans`, plus hostile variants: status `resolved`, a missing pipe, a blank line inside the table, prose inside the table | the commands above | `plan check` names the breach by line (`<plan>: line N: ...`) and exits 1; both shipped fixtures and this plan still print `well formed` and exit 0; `check` names an unrecognized status instead of silently counting it |
 
 ## Layer matrix
 
@@ -62,7 +62,7 @@ Rows are never removed by budget; budget changes order and status only.
 
 | Target | Reason |
 |---|---|
-| The skills' prose | validated by the behavioral eval suite inside `assets/skills/tsp/evals`, not by unit tests |
+| The skills' prose | validated by the behavioral eval suite inside `assets/skills/test-strategy/evals`, not by unit tests |
 | Node hook `~/.claude/hooks/testing-gate.mjs` | kept only as the differential oracle; not shipped |
 | LICENSE text | official Apache-2.0 text |
 

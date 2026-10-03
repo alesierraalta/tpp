@@ -182,13 +182,13 @@ func TestSkillsLoaded(t *testing.T) {
 		lines string
 		want  []string
 	}{
-		{"listing text does not count", "- test-strategy: Trigger: haz el testing ... exploit-testing ...\n", []string{}},
-		{"a canonical Skill tool call counts", `{"type":"tool_use","name":"Skill","input":{"skill":"tsp"}}` + "\n", []string{"tsp"}},
-		{"a legacy Skill tool alias canonicalizes", `{"type":"tool_use","name":"Skill","input":{"skill":"test-strategy"}}` + "\n", []string{"tsp"}},
-		{"a legacy SKILL.md path canonicalizes", `{"input":{"file_path":"/home/x/.claude/skills/test-strategy/SKILL.md"}}` + "\n", []string{"tsp"}},
+		{"listing text does not count", "- test-strategy: Trigger: haz el testing ... exploit-testing ...\n- tsp: old alias\n", []string{}},
+		{"the canonical Skill tool call counts", `{"type":"tool_use","name":"Skill","input":{"skill":"test-strategy"}}` + "\n", []string{"test-strategy"}},
+		{"a mistaken Skill tool alias canonicalizes", `{"type":"tool_use","name":"Skill","input":{"skill":"tsp"}}` + "\n", []string{"test-strategy"}},
+		{"a mistaken SKILL.md path canonicalizes", `{"input":{"file_path":"/home/x/.claude/skills/tsp/SKILL.md"}}` + "\n", []string{"test-strategy"}},
 		{"a SKILL.md read counts", `{"input":{"file_path":"/home/x/.claude/skills/exploit-testing/SKILL.md"}}` + "\n", []string{"exploit-testing"}},
 		{"a sibling alone returns only that sibling", `{"input":{"file_path":"/x/.claude/skills/no-excess-tests/SKILL.md"}}` + "\n", []string{"no-excess-tests"}},
-		{"order is first seen, no duplicates", `{"skill":"exploit-testing"}` + "\n" + `{"skill":"test-strategy"}` + "\n" + `{"skill":"exploit-testing"}` + "\n", []string{"exploit-testing", "tsp"}},
+		{"aliases deduplicate to canonical identity in first-seen order", `{"skill":"exploit-testing"}` + "\n" + `{"skill":"test-strategy"}` + "\n" + `{"skill":"tsp"}` + "\n" + `{"skill":"exploit-testing"}` + "\n", []string{"exploit-testing", "test-strategy"}},
 		{"empty transcript", "", []string{}},
 	}
 	for _, tc := range cases {
@@ -251,7 +251,7 @@ func TestDecide(t *testing.T) {
 				"## Ranked targets\n\n| Target | Verdict | Status | Run |\n|---|---|---|---|---|\n" +
 				"| 1. auth | probe | pending | run-t1 |\n"
 			return r
-		}, audit: true, loaded: []string{"tsp"}, wantPlan: plan.DefaultPath},
+		}, audit: true, loaded: []string{"test-strategy"}, wantPlan: plan.DefaultPath},
 		{name: "opt-out at the root silences a cwd in a subdirectory before any binding is read", in: Input{TranscriptPath: "t", Cwd: root + "/sub/dir"}, repo: func() *fakeRepo { r := base(); r.optOut = true; return r }, optOut: true},
 		{name: "a bound stop whose transcript cannot be read audits nothing", bind: true, in: Input{SessionID: "sess-decide", TranscriptPath: "t"}, repo: func() *fakeRepo {
 			r := base()

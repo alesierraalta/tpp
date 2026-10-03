@@ -1,5 +1,5 @@
 // Package plan writes and checks docs/testing/test-plan.md against the contract the
-// TSP skill persists. Format compliance is deterministic work: a binary does it once
+// test-strategy skill persists. Format compliance is deterministic work: a binary does it once
 // instead of every session re-deriving the structure from prose.
 package plan
 
@@ -17,7 +17,7 @@ import (
 )
 
 // TemplatePath is where the skeleton lives inside the embedded skills.
-const TemplatePath = "tsp/assets/test-plan-template.md"
+const TemplatePath = "test-strategy/assets/test-plan-template.md"
 
 // DefaultPath is where the skill persists the plan.
 const DefaultPath = "docs/testing/test-plan.md"
@@ -37,7 +37,7 @@ func embeddedTemplate(path string) (string, error) {
 
 // MicroTemplatePath is the skeleton `plan init --micro` writes: a header, Findings and the Evidence
 // ledger, and nothing a single small function does not owe.
-const MicroTemplatePath = "tsp/assets/test-micro-plan-template.md"
+const MicroTemplatePath = "test-strategy/assets/test-micro-plan-template.md"
 
 // Init writes the skeleton to path. An existing plan is never overwritten unless force is set:
 // the plan never shrinks, so replacing one is a decision, not a default.

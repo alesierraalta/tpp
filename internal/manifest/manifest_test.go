@@ -148,8 +148,8 @@ func TestPiExtensionIsOptInAndHashedFromTheEmbeddedFile(t *testing.T) {
 	if ext == nil {
 		t.Fatal(`Components() has no "tpp" extension component`)
 	}
-	if ext.Kind != Kind("extension") || ext.Source != "hosts/pi/tpp.ts" || ext.Default || len(ext.Hosts) != 1 || ext.Hosts[0] != "pi" {
-		t.Fatalf("tpp component = %+v, want an opt-in, pi-only extension over hosts/pi/tpp.ts", *ext)
+	if ext.Kind != Kind("extension") || ext.Source != "hosts/pi/tsp.ts" || ext.Default || len(ext.Hosts) != 1 || ext.Hosts[0] != "pi" {
+		t.Fatalf("tpp component = %+v, want an opt-in, pi-only extension over hosts/pi/tsp.ts", *ext)
 	}
 	if !AppliesTo("pi", *ext) || AppliesTo("claude", *ext) {
 		t.Fatalf("tpp applies to the wrong hosts: %v", ext.Hosts)
@@ -164,12 +164,12 @@ func TestPiExtensionIsOptInAndHashedFromTheEmbeddedFile(t *testing.T) {
 		t.Fatalf("tpp payload = %d files, want exactly one: %+v", len(payload), payload)
 	}
 	file := payload[0]
-	if file.Source != "hosts/pi/tpp.ts" || file.Rel != "index.ts" {
-		t.Fatalf("tpp file = source %q rel %q, want hosts/pi/tpp.ts installed as index.ts", file.Source, file.Rel)
+	if file.Source != "hosts/pi/tsp.ts" || file.Rel != "index.ts" {
+		t.Fatalf("tpp file = source %q rel %q, want hosts/pi/tsp.ts installed as index.ts", file.Source, file.Rel)
 	}
-	want, err := fs.ReadFile(root.Root, "hosts/pi/tpp.ts")
+	want, err := fs.ReadFile(root.Root, "hosts/pi/tsp.ts")
 	if err != nil {
-		t.Fatalf("hosts/pi/tpp.ts must be embedded: %v", err)
+		t.Fatalf("hosts/pi/tsp.ts must be embedded: %v", err)
 	}
 	digest := sha256.Sum256(want)
 	if file.SHA256 != hex.EncodeToString(digest[:]) || file.Size != int64(len(want)) {

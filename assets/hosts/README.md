@@ -21,7 +21,7 @@ and Pi both work this way, and Pi's payload carries the same fields Claude's doe
 below).
 
 **Plugins.** The host loads code and gives it an event bus. OpenCode works this way, but its
-automatic transport is disabled until session-scoped evidence is available: `opencode/tpp.ts`
+automatic transport is disabled until session-scoped evidence is available: `opencode/tsp.ts`
 no longer runs a check on `session.idle`, because a repo-wide check with no session binding
 behind it fails closed. The file remains a harmless adapter export so an already-copied
 plugin keeps loading, and on its own it shows no notices. If you copied the old plugin into
@@ -31,10 +31,8 @@ unaffected: run `tpp check` from a shell to see what the change still owes, plan
 included.
 
 **Extensions.** The host loads an extension file and calls back into it. Pi works this way:
-`pi/tpp.ts` registers a native `/tpp` command (`check`, `feedback --summary`, `doctor`) that runs the
-shared CLI — it adds no skills and none of Gentle's surfaces (ODD, Engram, review lifecycle remain
-Gentle's). `tpp sync --hosts pi` is the only installer for it and writes just one file,
-`~/.pi/agent/extensions/tpp/index.ts` — never skills, never hook settings. The Pi Stop hook is a
+`pi/tsp.ts` registers native `/tsp` and backward-compatible `/tpp` commands (`check`, `feedback --summary`, `doctor`) through the same dispatcher, spawning the `tsp` CLI — it adds no skills and none of Gentle's surfaces (ODD, Engram, review lifecycle remain Gentle's). `tsp sync --hosts pi` is the only installer for it and writes just one file,
+`~/.pi/agent/extensions/tpp/index.ts` — the destination stays `tpp` to preserve recorded installation state, sync, and uninstall behavior; never skills, never hook settings. The Pi Stop hook is a
 separate, unverified surface (its row below is contract-read, not run here).
 
 A host with neither still gets everything except "what did THIS session do": `tpp check`
@@ -47,7 +45,7 @@ from a Makefile, a pre-push script, or CI.
 |---|---|---|
 | Claude Code | Stop command hook | yes: wired, run, exit code checked by `tpp doctor` |
 | Anything with a shell | `tpp check` | yes |
-| Pi | native `/tpp` command via the extension (`sync --hosts pi` → `~/.pi/agent/extensions/tpp/index.ts`); Stop command hook, Claude-compatible payload | `/tpp` dispatch covered by `pi/tpp.test.mjs` (run in CI); Stop hook contract read from the pi-hooks package; not run here |
+| Pi | native `/tsp` command and `/tpp` compatibility alias via the extension (`sync --hosts pi` → `~/.pi/agent/extensions/tpp/index.ts`); Stop command hook, Claude-compatible payload | `/tsp` and `/tpp` dispatch covered by `pi/tsp.test.mjs` (run in CI); Stop hook contract read from the pi-hooks package; not run here |
 | OpenCode | plugin event, disabled (adapter export only) | contract read from the OpenCode plugin docs; not run here |
 | Codex, Gemini CLI | not implemented | their payload and output schemas are not verified here |
 

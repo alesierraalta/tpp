@@ -728,12 +728,12 @@ func TestSyncPiHostReceivesOnlyTheExtension(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pi extension not installed: %v", err)
 	}
-	want, err := fs.ReadFile(root.Root, "hosts/pi/tpp.ts")
+	want, err := fs.ReadFile(root.Root, "hosts/pi/tsp.ts")
 	if err != nil {
-		t.Fatalf("embedded hosts/pi/tpp.ts: %v", err)
+		t.Fatalf("embedded hosts/pi/tsp.ts: %v", err)
 	}
 	if !bytes.Equal(got, want) {
-		t.Fatalf("installed extension is %d bytes, want the embedded tpp.ts (%d bytes)", len(got), len(want))
+		t.Fatalf("installed extension is %d bytes, want the embedded tsp.ts (%d bytes)", len(got), len(want))
 	}
 
 	var unwanted []string
@@ -828,7 +828,7 @@ func TestSyncPiHostDryRunIdempotenceAndBackup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := fs.ReadFile(root.Root, "hosts/pi/tpp.ts")
+	want, err := fs.ReadFile(root.Root, "hosts/pi/tsp.ts")
 	if err != nil {
 		t.Fatal(err)
 	}

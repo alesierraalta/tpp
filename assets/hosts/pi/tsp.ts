@@ -1,9 +1,9 @@
-// tpp for Pi: the shared tpp CLI as a native /tpp command, loadable without an installer:
-//   pi --extension /path/to/assets/hosts/pi/tpp.ts
+// tsp for Pi: the shared tsp CLI as a native /tsp command, loadable without an installer:
+//   pi --extension /path/to/assets/hosts/pi/tsp.ts
 //
 // Detection reads this session's registered tools (pi.getAllTools()), never PATH: exact
 // Gentle-owned tool names or whole gentle-pi/gentle-ai source path segments. When Gentle is
-// observed, the spawned `tpp doctor` child gets the process-scoped observation through
+// observed, the spawned `tsp doctor` child gets the process-scoped observation through
 // child_process.execFile's env — no process.env mutation, no file. That observation is session
 // UX evidence for mode selection, not authentication or security authority. Gentle review
 // authority is never called; UI writes are guarded by ctx.hasUI.
@@ -34,9 +34,9 @@ export function observesGentleSession(tools: readonly RegisteredTool[]): boolean
   return tools.some((t) => GENTLE_TOOLS.has(t.name) || (t.sourceInfo?.path ?? "").split(/[\\/]+/).some((s) => GENTLE_DIRS.has(s)));
 }
 
-const HELP = "Usage: /tpp check [--path <plan.md>] · /tpp feedback --summary · /tpp doctor [--mode auto|gentle]";
+const HELP = "Usage: /tsp check [--path <plan.md>] · /tsp feedback --summary · /tsp doctor [--mode auto|gentle]";
 
-/** Maps the raw arguments after /tpp; anything outside the surface routes to help — never a review call. */
+/** Maps the raw arguments after /tsp or its /tpp compatibility alias. */
 export function parseTppCommand(rawArgs: string): TppDispatch {
   const [head, ...rest] = rawArgs.trim().split(/\s+/).filter(Boolean);
   switch (head) {
@@ -78,7 +78,7 @@ export type ExecTpp = (argv: readonly string[], opts: ExecOpts) => Promise<ExecR
 /** One tpp child without a shell; a non-zero exit is data — only a binary that never started rejects. */
 export function execTpp(argv: readonly string[], opts: ExecOpts): Promise<ExecResult> {
   return new Promise((resolve, reject) => {
-    execFile("tpp", [...argv], { cwd: opts.cwd, env: opts.env as NodeJS.ProcessEnv, encoding: "utf8" }, (error, stdout, stderr) => {
+    execFile("tsp", [...argv], { cwd: opts.cwd, env: opts.env as NodeJS.ProcessEnv, encoding: "utf8" }, (error, stdout, stderr) => {
       if (error && typeof (error as { code?: unknown }).code !== "number") return reject(error);
       resolve({ stdout: String(stdout), stderr: String(stderr), code: error ? Number((error as { code?: unknown }).code) : 0 });
     });
@@ -98,7 +98,7 @@ export interface TppDeps {
 const MAX_NOTICE = 1200; // a notification is a toast, not a terminal
 const notice = (text: string): string => (text.trim().length <= MAX_NOTICE ? text.trim() : text.trim().slice(0, MAX_NOTICE) + "…");
 
-/** Runs one /tpp invocation; every render is guarded by hasUI so headless sessions still get the child process. */
+/** Runs one invocation; every render is guarded by hasUI so headless sessions still get the child process. */
 export async function runTppCommand(rawArgs: string, deps: TppDeps): Promise<void> {
   const d = parseTppCommand(rawArgs);
   if (d.kind === "help") {
@@ -112,28 +112,30 @@ export async function runTppCommand(rawArgs: string, deps: TppDeps): Promise<voi
     outcome = await deps.exec(buildArgv(d, deps.cwd), { cwd: deps.cwd, env: childEnv(deps.env, d, observed) });
   } catch (error) {
     if (deps.hasUI) {
-      deps.notify(notice(`tpp: ${error instanceof Error ? error.message : String(error)}`), "error");
-      deps.setStatus?.("tpp: failed");
+      deps.notify(notice(`tsp: ${error instanceof Error ? error.message : String(error)}`), "error");
+      deps.setStatus?.("tsp: failed");
     }
     return;
   }
   if (deps.hasUI) {
     const output = outcome.stdout.trim() || outcome.stderr.trim();
     const ok = outcome.code === 0;
-    deps.notify(notice(output || `tpp ${label}: ${ok ? "ok" : `exited ${outcome.code}`}`), ok ? "info" : "error");
+    deps.notify(notice(output || `tsp ${label}: ${ok ? "ok" : `exited ${outcome.code}`}`), ok ? "info" : "error");
     const suffix = observed && d.kind === "doctor" ? " · gentle session observed" : "";
-    deps.setStatus?.(`tpp ${label}: ${ok ? "ok" : `exit ${outcome.code}`}${suffix}`);
+    deps.setStatus?.(`tsp ${label}: ${ok ? "ok" : `exit ${outcome.code}`}${suffix}`);
   }
 }
 
 export default function (pi: ExtensionAPI) {
-  pi.registerCommand("tpp", {
-    description: "tpp check · feedback --summary · doctor [--mode auto|gentle] in this session",
+  const register = (name: "tsp" | "tpp") => pi.registerCommand(name, {
+    description: `${name} check · feedback --summary · doctor [--mode auto|gentle] in this session`,
     handler: (args: string, ctx: ExtensionCommandContext) =>
       runTppCommand(args, {
         tools: pi.getAllTools(), cwd: ctx.cwd, env: process.env, hasUI: ctx.hasUI, exec: execTpp,
         notify: (message, type) => ctx.ui.notify(message, type),
-        setStatus: (text) => ctx.ui.setStatus("tpp", text),
+        setStatus: (text) => ctx.ui.setStatus("tsp", text),
       }),
   });
+  register("tsp");
+  register("tpp");
 }

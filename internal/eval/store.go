@@ -113,7 +113,9 @@ func ReconstructCompletedRun(stored StoredRun, manifest Manifest) (RunData, erro
 // ReproFromEvents derives reproduction outcomes from the verified adjudication events.
 // A recorded Issue confirmation maps to that Issue's primary finding only; Issues without
 // a confirmation keep the legacy admission-C5 fold, and Issues whose reproduction does not
-// apply are NOT_APPLICABLE.
+// apply are NOT_APPLICABLE. Proof-promoted CONFIRMED_NOVEL findings derive their outcome
+// from the referenced novel proof (applies -> reproduced, non-applicable -> not applicable)
+// while historical novel findings without a valid proof stay NotRun.
 func ReproFromEvents(caseRun CaseRun) map[string]ReproOutcome {
 	decisions := make(map[string]Decision)
 	confirmations := make(map[string]ReproOutcome)
@@ -132,6 +134,16 @@ func ReproFromEvents(caseRun CaseRun) map[string]ReproOutcome {
 	}
 	outcomes := make(map[string]ReproOutcome)
 	for _, finding := range caseRun.Findings {
+		if caseRun.FindingState(finding.ID) == FindingConfirmedNovel {
+			if proof, ok := novelProofPromotion(caseRun.Log.Events, finding.ID); ok && proof.rowBound(finding) {
+				if proof.Reproduction.Applies {
+					outcomes[finding.ID] = Reproduced
+				} else {
+					outcomes[finding.ID] = NotApplicable
+				}
+			}
+			continue // historical or unbound novelty keeps the NotRun fold
+		}
 		decision, ok := decisions[finding.ID]
 		if !ok || decision.CandidateIssue == "" {
 			continue

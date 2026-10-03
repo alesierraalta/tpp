@@ -16,15 +16,22 @@ const (
 	EntityCaseRun = "case_run"
 	EntityRun     = "run"
 
-	EventAdmit      = "admit"
-	EventDecide     = "decide"
-	EventDerive     = "derive"
-	EventReopen     = "reopen"
-	EventTransition = "transition"
-	EventConfirm    = "confirm_reproduction"
+	EventAdmit        = "admit"
+	EventDecide       = "decide"
+	EventDerive       = "derive"
+	EventReopen       = "reopen"
+	EventTransition   = "transition"
+	EventConfirm      = "confirm_reproduction"
+	EventNovelProof   = "novel_proof"
+	EventNovelConfirm = "novel_confirm"
 
 	// ConfirmAdjudicator is the rule identity recorded with every reproduction confirmation.
 	ConfirmAdjudicator = "bench-confirm@1"
+	// NovelProofAdjudicator is the fixed instrument rule identity recorded with every
+	// novel-proof event; the named human adjudicator lives inside the proof payload.
+	NovelProofAdjudicator = "bench-novel-proof@1"
+	// NovelConfirmAdjudicator is the rule identity of the controlled novelty promotion.
+	NovelConfirmAdjudicator = "bench-novel-confirm@1"
 )
 
 // Event is one append-only state or adjudication record.
@@ -61,6 +68,16 @@ func (l *Log) Append(event Event) (Event, error) {
 			return Event{}, err
 		}
 	}
+	if event.Kind == EventNovelProof {
+		if _, err := decodeNovelProof(event); err != nil {
+			return Event{}, err
+		}
+	}
+	if event.Kind == EventNovelConfirm {
+		if _, err := decodeNovelConfirmation(l.Events, event); err != nil {
+			return Event{}, err
+		}
+	}
 	states := l.States()
 	current, exists := states[event.Entity+":"+event.ID]
 	if !exists {
@@ -74,8 +91,8 @@ func (l *Log) Append(event Event) (Event, error) {
 		return Event{}, fmt.Errorf("%s %q previous state %q does not match current state %q", event.Entity, event.ID, event.PreviousState, current)
 	}
 	if event.PreviousState == event.NewState {
-		if event.Kind != EventDecide && event.Kind != EventConfirm {
-			return Event{}, fmt.Errorf("state-preserving event must be a decide or confirm event")
+		if event.Kind != EventDecide && event.Kind != EventConfirm && event.Kind != EventNovelProof {
+			return Event{}, fmt.Errorf("state-preserving event must be a decide, confirm, or novel proof event")
 		}
 	} else {
 		if isTerminalState(event.Entity, event.PreviousState) {
@@ -234,7 +251,7 @@ func initialState(entity string) (string, bool) {
 
 func validEventKind(kind string) bool {
 	switch kind {
-	case EventAdmit, EventDecide, EventDerive, EventReopen, EventTransition, EventConfirm:
+	case EventAdmit, EventDecide, EventDerive, EventReopen, EventTransition, EventConfirm, EventNovelProof, EventNovelConfirm:
 		return true
 	default:
 		return false

@@ -22,7 +22,7 @@ func CheckCaseRun(cr *CaseRun) []Violation {
 	}
 	for index, event := range cr.Log.Events {
 		if event.PreviousState == event.NewState {
-			if event.Kind != EventDecide && !validStatePreservingConfirm(event) {
+			if event.Kind != EventDecide && !validStatePreservingConfirm(event) && !validStatePreservingNovelProof(event) {
 				add("I11", fmt.Sprintf("event %d has a state-preserving non-decision", index+1))
 			}
 		} else if !canTransition(event.Entity, event.PreviousState, event.NewState) {

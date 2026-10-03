@@ -128,10 +128,11 @@ func (cr *CaseRun) Decide(decision Decision) error {
 	if level != LevelNone && decision.UnmatchedOutcome != "" {
 		return fmt.Errorf("unmatched outcome is only allowed for a NONE match")
 	}
-	// Interim fail-closed guard: a direct CONFIRMED_NOVEL cannot end a finding before
-	// the independently verified novel proof/backlog workflow exists (pending).
+	// Fail-closed guard: a direct CONFIRMED_NOVEL decision cannot end a finding. Novelty
+	// becomes CONFIRMED_NOVEL only through the controlled proof workflow: RecordNovelProof
+	// followed by ConfirmNovel, whose evidence the CLI/runtime layer must verify (B2).
 	if decision.UnmatchedOutcome == FindingConfirmedNovel {
-		return fmt.Errorf("direct CONFIRMED_NOVEL confirmation is refused: independently verified novel proof and backlog registration are required (proof workflow pending)")
+		return fmt.Errorf("direct CONFIRMED_NOVEL confirmation is refused: a novel proof recorded through the controlled proof workflow (RecordNovelProof + ConfirmNovel) is required")
 	}
 	switch cr.caseRunState() {
 	case CaseRunScored:

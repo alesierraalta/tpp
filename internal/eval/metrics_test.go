@@ -145,6 +145,29 @@ func TestComputeRunMatchesHandCalculatedSpecExample(t *testing.T) {
 	}
 }
 
+// Proof-derived novelty feeds only the reproducibility denominator: applicable proofs
+// count as reproduced, non-applicable conformance proofs are excluded, unproven novelty
+// stays NotRun, and no novel finding adds to known-issue recall.
+func TestComputeRunNovelProofReproDenominatorKeepsRecallUntouched(t *testing.T) {
+	result := CaseResult{
+		Case: "novel", Issues: []Issue{{Case: "novel", ID: "i1", Domain: Correctness, Severity: High}},
+		IssueStates: map[string]IssueState{"i1": IssueTP}, Primary: map[string]string{"i1": "p1"},
+		FindingStates: map[string]FindingState{}, ReportedSeverity: map[string]Severity{}, Repro: map[string]ReproOutcome{},
+	}
+	metricTestFinding(&result, "p1", FindingTPFinding, Reproduced)
+	metricTestFinding(&result, "n1", FindingConfirmedNovel, Reproduced)
+	metricTestFinding(&result, "n2", FindingConfirmedNovel, NotApplicable)
+	metricTestFinding(&result, "n3", FindingConfirmedNovel, "")
+	metrics := ComputeRun(RunData{Cases: []CaseResult{result}}, 0.5)
+	if metrics.KnownIssues != 1 || metrics.TP != 1 || metrics.FN != 0 {
+		t.Fatalf("known issue counts = known:%d TP:%d FN:%d, want novelty to add nothing to recall", metrics.KnownIssues, metrics.TP, metrics.FN)
+	}
+	if metrics.ConfirmedNovel != 3 || metrics.ReproNotRun != 1 {
+		t.Fatalf("novel counts = confirmed:%d notRun:%d, want 3 confirmed and 1 NotRun", metrics.ConfirmedNovel, metrics.ReproNotRun)
+	}
+	metricTestValue(t, metrics.Reproducibility, 1)
+}
+
 func TestComputeRunMacroRecallAveragesPopulatedDomains(t *testing.T) {
 	result := CaseResult{
 		Case: "domains",

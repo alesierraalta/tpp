@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alesierraalta/tpp/internal/hookcmd"
@@ -32,17 +33,18 @@ const (
 )
 
 type NovelProcessObservation struct {
-	Classification NovelRunClass `json:"classification"`
-	ExitCode       int           `json:"exit_code"`
-	Started        bool          `json:"started"`
-	TimedOut       bool          `json:"timed_out"`
-	Complete       bool          `json:"complete"`
-	OutputSHA256   string        `json:"output_sha256"`
-	Output         string        `json:"output,omitempty"`
-	SourceSHA256   string        `json:"source_sha256"`
-	ControlSHA256  string        `json:"control_sha256,omitempty"`
-	TestSHA256     string        `json:"test_sha256"`
-	Reason         string        `json:"reason,omitempty"`
+	Classification  NovelRunClass `json:"classification"`
+	ExitCode        int           `json:"exit_code"`
+	Started         bool          `json:"started"`
+	TimedOut        bool          `json:"timed_out"`
+	Complete        bool          `json:"complete"`
+	OutputSHA256    string        `json:"output_sha256"`
+	Output          string        `json:"output,omitempty"`
+	OutputTruncated bool          `json:"output_truncated,omitempty"`
+	SourceSHA256    string        `json:"source_sha256"`
+	ControlSHA256   string        `json:"control_sha256,omitempty"`
+	TestSHA256      string        `json:"test_sha256"`
+	Reason          string        `json:"reason,omitempty"`
 }
 
 type NovelReplayInput struct {
@@ -195,6 +197,41 @@ func isNovelRunnerFile(rel, kind string) bool {
 	}
 	return base == "go.mod" || base == "go.work"
 }
+
+const novelOutputLimit = 1 << 20
+
+// novelOutputBuffer serializes writes from os/exec's concurrent stdout/stderr copy loops.
+type novelOutputBuffer struct {
+	mu       sync.Mutex
+	data     []byte
+	exceeded bool
+	cancel   context.CancelFunc
+}
+
+func (b *novelOutputBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	remaining := novelOutputLimit - len(b.data)
+	if remaining > 0 {
+		n := len(p)
+		if n > remaining {
+			n = remaining
+		}
+		b.data = append(b.data, p[:n]...)
+	}
+	if len(p) > remaining && !b.exceeded {
+		b.exceeded = true
+		b.cancel()
+	}
+	return len(p), nil
+}
+
+func (b *novelOutputBuffer) snapshot() ([]byte, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]byte(nil), b.data...), b.exceeded
+}
+
 func runNovelSide(fixture, overlay string, tests map[string][]byte, argv []string, kind string, timeout time.Duration, testHash string) NovelProcessObservation {
 	dir, e := stage(fixture, overlay, "", nil)
 	if e != nil {
@@ -218,10 +255,15 @@ func runNovelSide(fixture, overlay string, tests map[string][]byte, argv []strin
 	defer cancel()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = dir
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
+	// Deliberately do not inherit user/application variables, HOME, NODE_OPTIONS, or NODE_PATH.
+	// PATH selects the already-installed runtime; locale is fixed. This is not a sandbox and
+	// does not prove the executable selected by PATH is trusted or prevent filesystem access.
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "LANG=C", "LC_ALL=C", "HOME=" + dir}
+	out := &novelOutputBuffer{cancel: cancel}
+	cmd.Stdout = out
+	cmd.Stderr = out
 	err = cmd.Run()
+	output, outputExceeded := out.snapshot()
 	code := 0
 	started := true
 	if err != nil {
@@ -233,9 +275,14 @@ func runNovelSide(fixture, overlay string, tests map[string][]byte, argv []strin
 			started = false
 		}
 	}
-	ob := NovelProcessObservation{ExitCode: code, Started: started, TimedOut: ctx.Err() == context.DeadlineExceeded, Output: out.String(), OutputSHA256: digest(out.Bytes()), SourceSHA256: sourceHash, TestSHA256: testHash}
+	ob := NovelProcessObservation{ExitCode: code, Started: started, TimedOut: ctx.Err() == context.DeadlineExceeded, Output: string(output), OutputSHA256: digest(output), SourceSHA256: sourceHash, TestSHA256: testHash, OutputTruncated: outputExceeded}
+	if outputExceeded {
+		ob.Classification = NovelInconclusive
+		ob.Reason = "output limit exceeded; captured output is truncated"
+		return ob
+	}
 	if err == nil {
-		if kind == "node" && !nodeTAPPassed(out.String(), tests) {
+		if kind == "node" && !nodeTAPPassed(string(output), tests) {
 			ob.Classification = NovelInconclusive
 			ob.Reason = "successful process did not produce a complete, non-skipped TAP suite"
 			return ob
@@ -249,12 +296,12 @@ func runNovelSide(fixture, overlay string, tests map[string][]byte, argv []strin
 		ob.Reason = err.Error()
 		return ob
 	}
-	if kind == "node" && nodeAssertionFailure(out.String(), tests) {
+	if kind == "node" && nodeAssertionFailure(string(output), tests) {
 		ob.Complete = true
 		ob.Classification = NovelAssertionFailure
 		return ob
 	}
-	if kind == "go" && goAssertionFailure(out.String(), tests) {
+	if kind == "go" && goAssertionFailure(string(output), tests) {
 		ob.Complete = true
 		ob.Classification = NovelAssertionFailure
 		return ob

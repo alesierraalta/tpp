@@ -10,6 +10,53 @@ import (
 	"time"
 )
 
+func TestNovelReplayChildEnvironmentAndOutputLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the real Node test runner")
+	}
+	root := t.TempDir()
+	fixture := filepath.Join(root, "fixture")
+	if err := os.MkdirAll(fixture, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeTest := func(name, body string) string {
+		t.Helper()
+		p := filepath.Join(root, name)
+		if err := os.WriteFile(p, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	preload := writeTest("preload.cjs", `process.env.NOVEL_PRELOAD_RAN='yes';`)
+	t.Setenv("NOVEL_SYNTHETIC_SECRET_SENTINEL", "must-not-reach-child")
+	t.Setenv("NOVEL_PRELOAD_PATH", preload)
+	t.Setenv("NODE_OPTIONS", "--require="+preload)
+	t.Setenv("NODE_PATH", root)
+	t.Setenv("HOME", root)
+	envTest := writeTest("env.test.cjs", `const {test}=require('node:test'); const a=require('node:assert/strict'); test('environment is minimal',()=>{ a.equal(process.env.NOVEL_SYNTHETIC_SECRET_SENTINEL,undefined); a.equal(process.env.NOVEL_PRELOAD_RAN,undefined); a.equal(process.env.NODE_OPTIONS,undefined); a.equal(process.env.NODE_PATH,undefined); a.notEqual(process.env.HOME,`+quoteJS(root)+`); a.ok(process.env.PATH); a.ok(process.env.LANG); });`)
+	got := runNovelSide(fixture, "", map[string][]byte{"env.test.cjs": []byte("ignored")}, []string{"node", "--test", "--test-reporter=tap", envTest}, "node", 5*time.Second, "tests")
+	if got.Classification != NovelPassed || !got.Complete {
+		t.Fatalf("sanitized environment or essential runtime env failed: %+v", got)
+	}
+
+	validTAP := "TAP version 13\\n# Subtest: saved-check\\nnot ok 1 - saved-check\\n  ---\\n  error: |-\\n    Expected values to be strictly equal\\n  code: 'ERR_ASSERTION'\\n  name: 'AssertionError'\\n  ...\\n1..1\\n# tests 1\\n# pass 0\\n# fail 1\\n# skipped 0\\n"
+	overflowTest := writeTest("overflow.test.cjs", `const {test}=require('node:test'); test('saved-check',()=>{process.stdout.write(`+quoteJS(validTAP)+`); process.stderr.write('x'.repeat(2*1024*1024)); process.exitCode=1;});`)
+	overflow := runNovelSide(fixture, "", map[string][]byte{"overflow.test.cjs": []byte("ignored")}, []string{"node", "--test", "--test-reporter=tap", overflowTest}, "node", 5*time.Second, "tests")
+	if overflow.Complete || overflow.Classification != NovelInconclusive || !strings.Contains(overflow.Reason, "output limit") {
+		t.Fatalf("overflow must be explicitly incomplete/inconclusive: %+v", overflow)
+	}
+	if len(overflow.Output) > novelOutputLimit || len(overflow.Output) == 0 || !overflow.OutputTruncated {
+		t.Fatalf("capture not bounded and marked truncated: bytes=%d obs=%+v", len(overflow.Output), overflow)
+	}
+	if overflow.OutputSHA256 != digest([]byte(overflow.Output)) {
+		t.Fatal("truncated capture digest does not bind retained bytes")
+	}
+}
+
+func quoteJS(s string) string {
+	return `"` + strings.ReplaceAll(strings.ReplaceAll(s, `\\`, `\\\\`), `"`, `\\"`) + `"`
+}
+
 func TestReplayNovelSavedTestRequiresFailingFixtureAndPassingControl(t *testing.T) {
 	root := t.TempDir()
 	caseDir := filepath.Join(root, "case")

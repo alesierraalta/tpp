@@ -5,8 +5,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-
-	"github.com/alesierraalta/tsp/internal/buildinfo"
 )
 
 var expected = []string{
@@ -54,30 +52,30 @@ func TestTestStrategyDescriptionPreservesDiscoveryTriggers(t *testing.T) {
 	}
 }
 
-// The skill tells a session which binary it was written for; the two versions must move together,
-// or a session cannot tell whether the tool it has is the tool the skill expects.
+// The legacy bridge requirement remains pinned independently of the TSP build version.
 func TestSkillNamesTheTppVersionItRequires(t *testing.T) {
 	data, err := fs.ReadFile(Skills(), "test-strategy/SKILL.md")
 	if err != nil {
 		t.Fatalf("SKILL.md missing: %v", err)
 	}
-	field := requiredVersion(data)
+	field := regexp.MustCompile(`(?m)^\s*requires_tpp:\s*"?([0-9]+\.[0-9]+\.[0-9]+)"?\s*$`).FindSubmatch(data)
 	if field == nil {
-		t.Fatalf("test-strategy frontmatter has no requires_tpp; this build is %s", buildinfo.Version)
+		t.Fatal("test-strategy frontmatter has no requires_tpp")
 	}
-	if got := string(field[1]); got != buildinfo.Version {
-		t.Fatalf("test-strategy requires tpp %s, but this build is %s", got, buildinfo.Version)
+	if got := string(field[1]); got != "0.5.1" {
+		t.Fatalf("test-strategy requires tpp %s, want legacy bridge version 0.5.1", got)
 	}
 	if !strings.Contains(string(data), "make build") ||
-		!strings.Contains(string(data), "go install github.com/alesierraalta/tpp/cmd/tpp@latest") {
-		t.Fatalf("test-strategy requires tpp %s but names no install path", buildinfo.Version)
+		!strings.Contains(string(data), "go install github.com/alesierraalta/tsp/cmd/tsp@latest") ||
+		!strings.Contains(string(data), "go install github.com/alesierraalta/tpp/cmd/tpp@v0.5.1") {
+		t.Fatal("test-strategy requires tpp 0.5.1 but names no install path")
 	}
 }
 
 // requiredVersion reads the binary version a skill's frontmatter requires: requires_tpp, or requires_tpp
 // in a skill written before the rename.
 func requiredVersion(skill []byte) [][]byte {
-	for _, key := range []string{"requires_tpp", "requires_rdd_plus"} {
+	for _, key := range []string{"requires_tsp", "requires_tpp", "requires_rdd_plus"} {
 		if m := regexp.MustCompile(`(?m)^\s*` + key + `:\s*"?([0-9]+\.[0-9]+\.[0-9]+)"?\s*$`).FindSubmatch(skill); m != nil {
 			return m
 		}

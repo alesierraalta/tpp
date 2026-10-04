@@ -1,22 +1,26 @@
 # Host adapters
 
+TSP is the current product name. The legacy `/tpp` command and `tpp` extension component
+remain intentional compatibility surfaces: the component ID is `tpp`, and the installed
+path stays `~/.pi/agent/extensions/tpp/index.ts` to preserve existing installation state.
+
 The decisions live in the binary. A host adapter is transport: it answers when the agent
 finishes, hands the binary the working directory, and puts the answer somewhere a person or a
 model will read it.
 
 Three shapes cover every host seen so far.
 
-`tpp sync` installs the embedded skills into every host configuration directory it finds: Claude
+`tsp sync` installs the embedded skills into every host configuration directory it finds: Claude
 Code reads `~/.claude/skills`, OpenCode reads `~/.config/opencode/skills`, Gemini reads
 `~/.gemini/skills`, and Codex reads `~/.codex/skills`. Discovery never offers Pi — the Pi extension
-is the explicit `tpp sync --hosts pi` opt-in below. The Stop hook is wired only where its transport
+is the explicit `tsp sync --hosts pi` opt-in below. The Stop hook is wired only where its transport
 is known—Claude Code's `~/.claude/settings.json`; OpenCode, Gemini, and Codex receive the skills, but
 their transports are documented rather than wired by `sync`.
 
 **Command hooks.** The host runs a command when the agent stops and reads JSON back. Claude Code
 and Pi both work this way, and Pi's payload carries the same fields Claude's does
 (`session_id`, `transcript_path`, `cwd`, `hook_event_name`, `stop_hook_active`), so
-`tpp gate` serves both. Wire it with `tpp sync` on Claude Code, or by merging
+`tsp gate` serves both. Wire it with `tsp sync` on Claude Code, or by merging
 `pi/settings.stop-hook.json` into Pi's settings — Pi's is contract-read, not run here (see Verified
 below).
 
@@ -26,8 +30,8 @@ no longer runs a check on `session.idle`, because a repo-wide check with no sess
 behind it fails closed. The file remains a harmless adapter export so an already-copied
 plugin keeps loading, and on its own it shows no notices. If you copied the old plugin into
 `.opencode/plugin/tpp.ts` or `~/.config/opencode/plugin/`, replace or remove that copy by
-hand—`tpp sync` installs skills but does not manage copied plugin files. Manual use is
-unaffected: run `tpp check` from a shell to see what the change still owes, plan gaps
+hand—`tsp sync` installs skills but does not manage copied plugin files. Manual use is
+unaffected: run `tsp check` from a shell to see what the change still owes, plan gaps
 included.
 
 **Extensions.** The host loads an extension file and calls back into it. Pi works this way:
@@ -35,7 +39,7 @@ included.
 `~/.pi/agent/extensions/tpp/index.ts` — the destination stays `tpp` to preserve recorded installation state, sync, and uninstall behavior; never skills, never hook settings. The Pi Stop hook is a
 separate, unverified surface (its row below is contract-read, not run here).
 
-A host with neither still gets everything except "what did THIS session do": `tpp check`
+A host with neither still gets everything except "what did THIS session do": `tsp check`
 reads git and the persisted plan and needs no host at all, which is also what makes it usable
 from a Makefile, a pre-push script, or CI.
 
@@ -43,8 +47,8 @@ from a Makefile, a pre-push script, or CI.
 
 | Host | Transport | Verified here |
 |---|---|---|
-| Claude Code | Stop command hook | yes: wired, run, exit code checked by `tpp doctor` |
-| Anything with a shell | `tpp check` | yes |
+| Claude Code | Stop command hook | yes: wired, run, exit code checked by `tsp doctor` |
+| Anything with a shell | `tsp check` | yes |
 | Pi | native `/tsp` command and `/tpp` compatibility alias via the extension (`sync --hosts pi` → `~/.pi/agent/extensions/tpp/index.ts`); Stop command hook, Claude-compatible payload | `/tsp` and `/tpp` dispatch covered by `pi/tsp.test.mjs` (run in CI); Stop hook contract read from the pi-hooks package; not run here |
 | OpenCode | plugin event, disabled (adapter export only) | contract read from the OpenCode plugin docs; not run here |
 | Codex, Gemini CLI | not implemented | their payload and output schemas are not verified here |

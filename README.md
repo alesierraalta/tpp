@@ -1,8 +1,8 @@
-# tpp
+# TSP (Test Strategy Planning)
 
 A deterministic companion for the testing discipline in Claude Code. It complements gentle-ai; it
 does not replace it. gentle-ai owns the review lifecycle (frozen candidate, refuter, receipts).
-tpp owns what happens before that: a testing flow the model runs and a set of Go binaries
+TSP owns what happens before that: a testing flow the model runs and a set of Go binaries
 that keep it honest.
 
 The split is deliberate. The model does the creative work: enumerating the classes of a contract,
@@ -21,7 +21,7 @@ reference; these diagrams only show how the pieces fit.
 ```mermaid
 flowchart LR
     subgraph machine[Your machine]
-        tpp[tpp binary]
+        tsp[tsp binary]
         subgraph hosts[Agent hosts]
             claude[Claude Code<br/>~/.claude]
             others[OpenCode · Gemini · Codex]
@@ -32,13 +32,13 @@ flowchart LR
         plan[docs/testing/test-plan.md<br/>or the plan .tpp.json declares]
         tests[Pinning tests and probes]
     end
-    tpp -- "tpp sync installs" --> skills
+    tsp -- "tsp sync installs" --> skills
     skills --> claude
     skills --> others
-    tpp -- "wires the Stop hook" --> claude
+    tsp -- "wires the Stop hook" --> claude
     claude -- "model runs the skills" --> plan
     claude --> tests
-    tpp -- "plan check · gaps · admit · export" --> plan
+    tsp -- "plan check · gaps · admit · export" --> plan
 ```
 
 The model does the creative work (classes of a contract, probes, pinning tests); the binary does the
@@ -48,13 +48,13 @@ deterministic work (installing, wiring, checking the plan, replaying evidence).
 
 ```mermaid
 flowchart TD
-    stop([End of a turn: Stop hook runs tpp gate]) --> repo{Inside a git repo<br/>with at most 20 000 status entries?}
+    stop([End of a turn: Stop hook runs tsp gate]) --> repo{Inside a git repo<br/>with at most 20 000 status entries?}
     repo -- no --> quiet([Stay silent])
     repo -- yes --> optout{.no-testing-gate<br/>at the repo root?}
     optout -- yes --> quiet
     optout -- no --> loop{Turn already continuing<br/>because of a Stop hook?}
     loop -- yes --> quiet
-    loop -- no --> bound{This session bound to a plan<br/>and run with tpp bind?}
+    loop -- no --> bound{This session bound to a plan<br/>and run with tsp bind?}
     bound -- no --> unbound([Stay silent;<br/>the log records session_plan_unbound])
     bound -- yes --> ran{test-strategy or exploit-testing<br/>invoked in this session's transcript?}
     ran -- no --> quiet
@@ -63,7 +63,7 @@ flowchart TD
     owed -- yes --> ask2([Name the surfaces left unexamined<br/>and offer feedback on the run])
 ```
 
-Nothing fires from a file's mtime or another chat's worktree: without an explicit `tpp bind` for
+Nothing fires from a file's mtime or another chat's worktree: without an explicit `tsp bind` for
 this session, the Stop sends no plan notice at all. It is a reminder, never an approval gate: every
 path exits 0, and each decision is one line in the telemetry log.
 
@@ -75,18 +75,18 @@ unbound stop audits nothing and the log says why (`session_plan_unbound`). Autom
 starts only when this session is bound, from inside the worktree where it runs:
 
 ```sh
-tpp bind --session <host session ID> --path docs/testing/test-plan.md --run <slug>
-tpp bind --unset --session <host session ID>    # remove the record when the session ends
+tsp bind --session <host session ID> --path docs/testing/test-plan.md --run <slug>
+tsp bind --unset --session <host session ID>    # remove the record when the session ends
 ```
 
 | Topic | Decision |
 |---|---|
 | The record | outside the repository, beside the gate log: a `bindings/` directory at 0700 holding one 0600 file per pair of canonical worktree root and exact session ID, named by a hash — no raw session ID in a filename |
-| What the Stop gate reads | only this session's binding, from the environment or that stored file; when both exist they must agree or the gate audits nothing. `.tpp.json`'s `planPath` is never a Stop fallback — it still drives `tpp check` and every `plan *` command, which need no session at all |
+| What the Stop gate reads | only this session's binding, from the environment or that stored file; when both exist they must agree or the gate audits nothing. `.tpp.json`'s `planPath` is never a Stop fallback — it still drives `tsp check` and every `plan *` command, which need no session at all |
 | Scope of one record | one exact session in one worktree: two sessions in the same checkout bind independently and each audits its own plan and run; a record never applies to another session or another checkout |
-| Stale records | nothing removes a record implicitly; `tpp bind --unset --session <id>` is the housekeeping when a session or worktree retires |
+| Stale records | nothing removes a record implicitly; `tsp bind --unset --session <id>` is the housekeeping when a session or worktree retires |
 | `TESTING_GATE_LOG` | keep it absolute: `bind` and the Stop hook derive the binding directory from the log path, and a relative path resolves against each process's working directory — bind and Stop would then look in different places and find nothing |
-| Concurrent sessions | the binding scopes plan auditing, not source edits: two sessions sharing one working tree still race on files. When the host exposes no session ID, give each chat its own worktree and rely on `tpp check` / `tpp plan gaps` there |
+| Concurrent sessions | the binding scopes plan auditing, not source edits: two sessions sharing one working tree still race on files. When the host exposes no session ID, give each chat its own worktree and rely on `tsp check` / `tsp plan gaps` there |
 
 ### The testing flow a model runs
 
@@ -94,31 +94,31 @@ tpp bind --unset --session <host session ID>    # remove the record when the ses
 flowchart TD
     ask([Operator: haz test strategy / haz el testing]) --> strategy[test-strategy reads the repo state]
     strategy --> size{How big is the change?}
-    size -- "whole app or a wide diff" --> full[Full plan<br/>tpp plan init]
+    size -- "whole app or a wide diff" --> full[Full plan<br/>tsp plan init]
     size -- "one bounded area" --> light[Light plan<br/>Light: blast radius · touches classes]
-    size -- "one small function" --> micro[Micro plan<br/>tpp plan init --micro]
+    size -- "one small function" --> micro[Micro plan<br/>tsp plan init --micro]
     full --> execute
     light --> execute
     micro --> execute
-    execute[Execute: probes, real runs, mutations,<br/>pinning tests observed red then green] --> ledger[Evidence ledger rows<br/>tpp plan admit replays and pins them]
-    ledger --> findings[Findings rows<br/>tpp plan add-finding]
-    findings --> check{tpp plan check}
+    execute[Execute: probes, real runs, mutations,<br/>pinning tests observed red then green] --> ledger[Evidence ledger rows<br/>tsp plan admit replays and pins them]
+    ledger --> findings[Findings rows<br/>tsp plan add-finding]
+    findings --> check{tsp plan check}
     check -- breach --> execute
-    check -- well formed --> gaps{tpp plan gaps}
+    check -- well formed --> gaps{tsp plan gaps}
     gaps -- owed --> execute
-    gaps -- nothing owed --> close([Report, and for someone else's PR:<br/>tpp plan export as a PR comment])
+    gaps -- nothing owed --> close([Report, and for someone else's PR:<br/>tsp plan export as a PR comment])
 ```
 
 ### Installing and staying current
 
 ```mermaid
 flowchart TD
-    new([New machine]) --> install[go install github.com/alesierraalta/tpp/cmd/tpp@latest]
-    install --> sync[tpp sync<br/>skills to every host, Stop hook into Claude]
-    sync --> doctor{tpp doctor}
+    new([New machine]) --> install[go install github.com/alesierraalta/tsp/cmd/tsp@latest<br/>PENDING T5 publication]
+    install --> sync[tsp sync<br/>skills to every host, Stop hook into Claude]
+    sync --> doctor{tsp doctor}
     doctor -- healthy --> use([Ready])
     doctor -- action required --> sync
-    use --> update[tpp update<br/>installs the newer tagged release<br/>where the running binary lives]
+    use --> update[tsp update<br/>installs the newer tagged release<br/>where the running binary lives]
     update --> sync
     old([Machine with rdd-plus 0.3.x]) --> bridge[rdd-plus update<br/>to the 0.3.20 bridge]
     bridge --> bridge2[rdd-plus update<br/>installs tpp beside rdd-plus]
@@ -128,8 +128,8 @@ flowchart TD
 
 ## Install with an agent
 
-Hand one of these prompts to an agent that has a shell. `tpp setup` does the install and the checking
-itself, so the prompt only has to run it and read how it ended: exit 0 and a last line saying tpp is
+Hand one of these prompts to an agent that has a shell. `tsp setup` does the install and the checking
+itself, so the prompt only has to run it and read how it ended: exit 0 and a last line saying tsp is
 installed and working.
 
 | You use | Prompt | What you get |
@@ -142,29 +142,34 @@ tpp works the same in both: the difference is what else is on the machine, not h
 ### Without Gentle AI
 
 ```text
-Install tpp: run go install github.com/alesierraalta/tpp/cmd/tpp@latest, then tpp setup (if tpp is
-not found, run "$(go env GOPATH)/bin/tpp" setup and add the PATH line it prints). It is done when
+Install TSP after its first publication: run go install github.com/alesierraalta/tsp/cmd/tsp@latest, then tsp setup (if tsp is
+not found, run "$(go env GOPATH)/bin/tsp" setup and add the PATH line it prints). It is done when
 setup exits 0; show me its last lines.
 ```
 
 ### With Gentle AI
 
 ```text
-Install tpp: run go install github.com/alesierraalta/tpp/cmd/tpp@latest, then tpp setup (if tpp is
-not found, run "$(go env GOPATH)/bin/tpp" setup and add the PATH line it prints). It is done when
+Install TSP after its first publication: run go install github.com/alesierraalta/tsp/cmd/tsp@latest, then tsp setup (if tsp is
+not found, run "$(go env GOPATH)/bin/tsp" setup and add the PATH line it prints). It is done when
 setup exits 0; show me its last lines. Gentle AI is already installed here: confirm setup lists
 gentle-ai and engram as present.
 ```
 
 ## Install
 
+The canonical TSP install is not yet available: `go install github.com/alesierraalta/tsp/cmd/tsp@latest`
+is pending the first TSP publication (T5). Until then, install the concrete old-module bridge:
+`go install github.com/alesierraalta/tpp/cmd/tpp@v0.5.1`. After TSP is published, `tpp update`
+installs `tsp` after publication; until T5, it is only a concrete legacy bridge update path.
+
 ```sh
-go install github.com/alesierraalta/tpp/cmd/tpp@latest
-tpp setup     # sync, then doctor's checks, then one line saying tpp works (exit 0) or what is left
+go install github.com/alesierraalta/tpp/cmd/tpp@v0.5.1
+tsp setup     # sync, then doctor's checks, then one line saying tsp works (exit 0) or what is left
 ```
 
-`tpp setup` is the one-step path: it runs the same sync as `tpp sync`, the same checks as `tpp doctor`
-against the directory it just wrote, and ends on `tpp is installed and working: <N> skills in <hosts>,
+`tsp setup` is the one-step path: it runs the same sync as `tsp sync`, the same checks as `tsp doctor`
+against the directory it just wrote, and ends on `tsp is installed and working: <N> skills in <hosts>,
 Stop hook wired to <binary>` with exit 0. A failing sync (including a machine with no host yet) stops it
 with sync's exit code; a doctor problem ends it on `setup: not finished:` naming that problem, with exit 1.
 When the binary's directory is not on `PATH` it prints the exact `export PATH=...` line to add; that is a
@@ -177,10 +182,10 @@ Run the mode you mean; it is resolved before any work runs, so a mode this build
 at the flag instead of reporting under another contract:
 
 ```sh
-tpp setup                      # auto: standalone, gentle only with a verified Gentle signal
-tpp doctor --mode standalone   # always the standalone contract
-tpp doctor --mode gentle       # refused (exit 2, "pending integration") without that signal
-tpp doctor --mode turbo        # refused (exit 2) naming auto, standalone, gentle
+tsp setup                      # auto: standalone, gentle only with a verified Gentle signal
+tsp doctor --mode standalone   # always the standalone contract
+tsp doctor --mode gentle       # refused (exit 2, "pending integration") without that signal
+tsp doctor --mode turbo        # refused (exit 2) naming auto, standalone, gentle
 ```
 
 | `--mode` | Runs under |
@@ -190,7 +195,7 @@ tpp doctor --mode turbo        # refused (exit 2) naming auto, standalone, gentl
 | `gentle` | gentle under that same signal; otherwise refused as `pending integration` (exit 2) |
 
 The only signal `auto` and `gentle` accept is `TSP_GENTLE_OBSERVATION=pi-session-gentle-active`, and
-only in the environment of the single `tpp doctor` child the Pi extension spawns (through
+only in the environment of the single `tsp doctor` child the Pi extension spawns (through
 `execFile`'s env — no `process.env` mutation, no file), so it is process-scoped. The pre-rename
 `TPP_GENTLE_OBSERVATION` is read only while the TSP variable is absent, and an explicit invalid TSP
 value fails closed. It is a session UX observation, not authentication or security authority: any
@@ -201,11 +206,11 @@ Step by step, for a person who wants to see each part:
 
 ```sh
 tmp=$(mktemp -d)
-tpp sync --config-dir "$tmp/cfg" --dry-run     # rehearse: the plan, writing nothing
-tpp sync --config-dir "$tmp/cfg"               # rehearse into a throwaway Claude directory
-tpp doctor --config-dir "$tmp/cfg"             # must exit 0 with verdict: healthy
-tpp sync      # installs skills into every discovered host; wires the Stop hook only for Claude
-tpp doctor    # verifies the install and lists optional capabilities
+tsp sync --config-dir "$tmp/cfg" --dry-run     # rehearse: the plan, writing nothing
+tsp sync --config-dir "$tmp/cfg"               # rehearse into a throwaway Claude directory
+tsp doctor --config-dir "$tmp/cfg"             # must exit 0 with verdict: healthy
+tsp sync      # installs skills into every discovered host; wires the Stop hook only for Claude
+tsp doctor    # verifies the install and lists optional capabilities
 ```
 
 To prove the hook answers without waiting for a real session, hand the gate the payload its host would.
@@ -213,11 +218,11 @@ In a throwaway git repository:
 
 ```sh
 printf '%s' "{\"session_id\":\"install-check\",\"transcript_path\":\"$tmp/transcript.jsonl\",\"cwd\":\"$tmp/repo\",\"hook_event_name\":\"Stop\",\"stop_hook_active\":false}" \
-  | TESTING_GATE_LOG="$tmp/gate.jsonl" tpp gate
+  | TESTING_GATE_LOG="$tmp/gate.jsonl" tsp gate
 ```
 
 It exits 0 and leaves one line in `$tmp/gate.jsonl` reading `"skipped":"session_plan_unbound"`: with
-no `tpp bind` for that session the gate audits nothing and prints no Stop payload — the answer every
+no `tsp bind` for that session the gate audits nothing and prints no Stop payload — the answer every
 unbound session gets. The gate always exits 0: it grades the turn and never breaks it.
 
 `sync` installs the embedded skills into every host it finds: `~/.claude/skills`,
@@ -236,20 +241,20 @@ ignored, and a ledger that lives under a different directory is reached with `--
 
 ### The Pi extension (opt-in)
 
-The tpp core is shared: the Pi extension is a thin adapter over the same binaries — `/tpp check`,
-`/tpp feedback --summary`, and `/tpp doctor` run the CLI documented here. It adds no skills and
+The TSP core is shared: the Pi extension is a thin adapter over the same binaries — `/tsp check`,
+`/tsp feedback --summary`, and `/tsp doctor` run the CLI documented here. It adds no skills and
 duplicates nothing of Gentle's: ODD, Engram memory, and the review lifecycle remain Gentle's
 (gentle-ai / gentle-pi), and the extension never calls review authority.
 
 | Command | Behavior |
 |---|---|
-| `tpp sync --hosts pi` | The explicit opt-in, and the only way Pi is ever installed — discovery never offers it. It installs only the `tpp` extension component at `~/.pi/agent/extensions/tpp/index.ts`, the path Pi loads; a pi-only sync writes no skills and no hook settings. |
-| `tpp setup --hosts pi` | Refused as a usage error (exit 2): setup's install and doctor pass are Claude-centered; only `sync` accepts `pi`. |
-| `tpp doctor` | Checks the selected Claude config directory — skill drift, Stop-hook wiring, capabilities. It does not check Pi extension health. |
-| `tpp repair` | Claude-only: re-syncs the managed skills and re-wires Claude's Stop hook; the Pi extension is untouched. |
+| `tsp sync --hosts pi` | The explicit opt-in, and the only way Pi is ever installed — discovery never offers it. It installs only the `tpp` extension component at `~/.pi/agent/extensions/tpp/index.ts`, the path Pi loads; a pi-only sync writes no skills and no hook settings. |
+| `tsp setup --hosts pi` | Refused as a usage error (exit 2): setup's install and doctor pass are Claude-centered; only `sync` accepts `pi`. |
+| `tsp doctor` | Checks the selected Claude config directory — skill drift, Stop-hook wiring, capabilities. It does not check Pi extension health. |
+| `tsp repair` | Claude-only: re-syncs the managed skills and re-wires Claude's Stop hook; the Pi extension is untouched. |
 
-Load the extension (`pi --extension <path>/tpp.ts`, or let Pi load it from
-`~/.pi/agent/extensions/`) and Pi gains a native `/tpp` command. The Pi Stop hook is a separate,
+Load the extension (`pi --extension <path>/tsp.ts`, or let Pi load it from
+`~/.pi/agent/extensions/`) and Pi gains a native `/tsp` command; `/tpp` remains the compatibility alias. The Pi Stop hook is a separate,
 **not verified** surface: its payload contract was read from the pi-hooks package and nobody has
 watched it fire here, so merging `assets/hosts/pi/settings.stop-hook.json` into Pi's settings is
 ready to test, not working.
@@ -270,7 +275,7 @@ ones win when both are present:
   read-only legacy names. If any two or three are present, tpp refuses them even when contents match.
   No declaration file is automatically renamed, deleted, merged or rewritten.
 - `TSP_UPDATE_BASE_URL` is canonical for the update check; `TPP_UPDATE_BASE_URL` and then
-  `RDD_PLUS_UPDATE_BASE_URL` are read while the newer name is unset. `RDD_PLUS_HOME` is read when
+  `RDD_PLUS_UPDATE_BASE_URL` are legacy fallbacks while the newer name is unset. `RDD_PLUS_HOME` is read when
   `TSP_HOME` and `TPP_HOME` are unset.
 - The OpenCode snippet and Pi's settings hook are copies, not managed files: re-copy
   `assets/hosts/opencode/tsp.ts` and the `tpp gate` hook from
@@ -288,38 +293,38 @@ from TPP_HOME's local installation state. Classify paths as managed (installed b
 `--force`; always snapshot first), or foreign (never write or delete). Store backups at
 `<config root>/backups/<timestamp>/{manifest.json, files/…}`.
 
-Opt into feedback with `tpp feature enable feedback`. Use `--preview` to see one anonymized
-record and the two local-only files never publishable. While feedback is off, `tpp feedback --file`
-refuses and the Stop hook stops offering it. The first `tpp feedback --pending` establishes a baseline
+Opt into feedback with `tsp feature enable feedback`. Use `--preview` to see one anonymized
+record and the two local-only files never publishable. While feedback is off, `tsp feedback --file`
+refuses and the Stop hook stops offering it. The first `tsp feedback --pending` establishes a baseline
 now at that exact report snapshot, so existing reports are not treated as pending. Later calls show
 appended reports and one exact snapshot token; review the full batch before acknowledging that token
-with `tpp feedback --mark-reviewed <token>`. Reports appended after that snapshot remain pending.
-`tpp feedback --summary` is all-history and cursor-neutral. The
-interactive TUI now exists as `tpp tui`, and the lifecycle commands `update`, `uninstall`, `restore`,
+with `tsp feedback --mark-reviewed <token>`. Reports appended after that snapshot remain pending.
+`tsp feedback --summary` is all-history and cursor-neutral. The
+interactive TUI now exists as `tsp tui`, and the lifecycle commands `update`, `uninstall`, `restore`,
 and `repair` are documented in the Commands table below.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `tpp gate` | The Stop hook. Reads the hook payload on stdin, logs one line, and audits the plan and run named by this session's binding — stays silent without an exact binding. Always exits 0. |
-| `tpp bind --session <id> --path <plan> --run <slug>` / `tpp bind --unset --session <id>` | Stores or removes this session's Stop-gate binding outside the repository: a 0700 directory beside the gate log, one 0600 file per (canonical worktree root, exact session), named by a hash. |
-| `tpp setup [--hosts <a,b>] [--config-dir <dir>] [--mode <m>]` | Installs and verifies in one step: the same sync as `tpp sync`, the same checks as `tpp doctor` on the directory it wrote, and a PATH check that prints the `export PATH=...` line when the binary's directory is missing. `--hosts` accepts only the discovered skill hosts — `pi` is a usage error here (exit 2); only `sync` accepts it. Ends on `tpp is installed and working: ...` with exit 0, or exits with sync's code, 2 for a refused flag value, or 1 (`setup: not finished: ...`). |
-| `tpp sync [--dry-run] [--force] [--hosts <a,b>]` | Installs the embedded skills into discovered hosts and wires Claude's Stop hook. `--dry-run` prints the plan and writes nothing; `--force` replaces modified managed files after snapshotting them. `--hosts` narrows to the named hosts; naming `pi` is the only way the Pi extension is installed (see [The Pi extension](#the-pi-extension-opt-in)) and installs only that file. Idempotent. |
-| `tpp doctor [--mode <m>] [--config-dir <dir>] [--json]` | Reports installed skills (and whether they drift from the embedded version), whether the hook is wired, and which optional tools are on PATH with what degrades without each — against the selected Claude config directory, not Pi extension health. `--mode` per [Modes](#modes-setup-and-doctor-share---mode-autostandalonegentle); `--json` for machines. Exit 1 when git, a skill, or the hook is missing. |
-| `tpp status [--json]` | Reports local installation state, features, and available version — the cached result after `update` has checked, or `unknown (no update check yet)` before the first check. |
-| `tpp feature list\|enable\|disable <id> [--preview]` | Lists or toggles optional features; preview without changing state. |
-| `tpp feedback [--template | --file <path> | --summary | --pending | --mark-reviewed <token>] [--config-dir <dir>]` | Records or reads local run feedback. `--summary` is all-history and cursor-neutral. The first `--pending` call establishes a baseline now at the current snapshot; later calls print pending reports, the snapshot total, and one exact snapshot token. Review the full batch before acknowledging that token; reports appended after that snapshot remain pending. The cursor is a private sidecar under the selected feedback telemetry directory. |
-| `tpp tui` | Interactive menu over the status report, feature toggles (list, enable/disable, preview), and the sync dry-run plan. Needs an interactive terminal on Linux or macOS; elsewhere it refuses and points at `status`, `feature`, and `sync --dry-run`. |
-| `tpp update [--check]` | Checks the Go module proxy for a newer release and installs it with `go install github.com/alesierraalta/tpp/cmd/tpp@<tag>` (prints the command when `go` is absent); `--check` only refreshes the offline cache. |
-| `tpp uninstall [--dry-run] [--orphans] [--force] [--config-dir <dir>]` | Removes managed assets and unwires the Stop hook; never touches foreign files. Modified content needs `--force` (snapshot first); `--orphans` also removes assets the manifest no longer ships; `--dry-run` writes nothing. |
-| `tpp restore [--id <backup-id>] [--dry-run]` | Copies a backup store entry back onto its original paths (default: the latest backup). |
-| `tpp repair [--config-dir <dir>] [--dry-run] [--force]` | Brings a broken install back to what `doctor` reports healthy (missing/drifted managed skills and Stop hook re-wire), Claude-only — the Pi extension is untouched; a healthy install is a no-op. |
-| `tpp plan` | Writes the plan skeleton, checks the contract, names the breadth still owed, and records one Findings row from flags. `add-finding` writes that row only: it refuses a row the checker would reject and never writes an evidence row. |
-| `tpp plan admit` | Reads the plan's Evidence ledger and decides every row. A dry run by default: `--execute` runs each admitted row's one command through `sh -c` twice, so a pin is only recorded over an output that held still, `--sandbox` observes it in a container with the tree mounted read-only and no network (it needs docker, and the default image is pulled on first use) and replays a declared `Mutate` edit against a writable copy of the tree, where the command must go red under the edit and green once the file is put back (a cell may hold a survey of edits separated by ` ;; `, each replayed on its own copy; an edit prefixed `~ ` is declared equivalent and must stay green, or the row is refused as `mutation-not-equivalent`; an admitted survey prints `N killed, M equivalent`; an edit whose own text contains ` ;; ` cannot be expressed), a row whose `Expect` cell is `fail` pins a test observed red (only an exit from 1 to 125 qualifies, so a missing command (127) is never pinned as red; a zero exit is refused as `expected-failure-passed`), `--only <ids>` narrows the run, `--timeout` bounds one command, and `--record <ids>` writes the observed digest into the plan together with the mode it was observed in. Exit 1 when a row is refused. |
-| `tpp plan export [--path <plan>] [--commit <sha>]` | Prints the plan's Findings as Markdown for a pull request comment: one row per finding with its location, severity, status, pinning test and the evidence that re-observes it (the Admit command, the digest shortened to 12 hex, and `Expect: fail` when declared), headed by the commit covered (default the short HEAD) and the plan's base name, never its directory. Every cell is sanitised like the gaps report's quotes. It never posts: `tpp plan export --path <plan> \| gh pr comment <n> -F -` is the operator's call. |
-| `tpp feedback` | Records one honest process report about the testing method itself, or reads the reports back. `--template` prints a fillable skeleton, `--file <path>` records it, `--summary` (the default) answers whether the method is earning its keep. |
-| `tpp version` | Prints the version. |
+| `tsp gate` | The Stop hook. Reads the hook payload on stdin, logs one line, and audits the plan and run named by this session's binding — stays silent without an exact binding. Always exits 0. |
+| `tsp bind --session <id> --path <plan> --run <slug>` / `tsp bind --unset --session <id>` | Stores or removes this session's Stop-gate binding outside the repository: a 0700 directory beside the gate log, one 0600 file per (canonical worktree root, exact session), named by a hash. |
+| `tsp setup [--hosts <a,b>] [--config-dir <dir>] [--mode <m>]` | Installs and verifies in one step: the same sync as `tsp sync`, the same checks as `tsp doctor` on the directory it wrote, and a PATH check that prints the `export PATH=...` line when the binary's directory is missing. `--hosts` accepts only discovered skill hosts — `pi` is a usage error here; only `sync` accepts it. Ends on `tsp is installed and working: ...` with exit 0, or reports the sync/doctor failure. |
+| `tsp sync [--dry-run] [--force] [--hosts <a,b>]` | Installs the embedded skills into discovered hosts and wires Claude's Stop hook. `--dry-run` prints the plan and writes nothing; `--force` replaces modified managed files after snapshotting them. `--hosts` narrows to the named hosts; naming `pi` is the only way the Pi extension is installed (see [The Pi extension](#the-pi-extension-opt-in)) and installs only that file. Idempotent. |
+| `tsp doctor [--mode <m>] [--config-dir <dir>] [--json]` | Reports installed skills (and whether they drift from the embedded version), whether the hook is wired, and which optional tools are on PATH with what degrades without each — against the selected Claude config directory, not Pi extension health. `--mode` per [Modes](#modes-setup-and-doctor-share---mode-autostandalonegentle); `--json` for machines. Exit 1 when git, a skill, or the hook is missing. |
+| `tsp status [--json]` | Reports local installation state, features, and available version — the cached result after `update` has checked, or `unknown (no update check yet)` before the first check. |
+| `tsp feature list\|enable\|disable <id> [--preview]` | Lists or toggles optional features; preview without changing state. |
+| `tsp feedback [--template | --file <path> | --summary | --pending | --mark-reviewed <token>] [--config-dir <dir>]` | Records or reads local run feedback. `--summary` is all-history and cursor-neutral. The first `--pending` call establishes a baseline now at the current snapshot; later calls print pending reports, the snapshot total, and one exact snapshot token. Review the full batch before acknowledging that token; reports appended after that snapshot remain pending. The cursor is a private sidecar under the selected feedback telemetry directory. |
+| `tsp tui` | Interactive menu over the status report, feature toggles (list, enable/disable, preview), and the sync dry-run plan. Needs an interactive terminal on Linux or macOS; elsewhere it refuses and points at `status`, `feature`, and `sync --dry-run`. |
+| `tsp update [--check]` | Checks the Go module proxy for a newer release and installs it with `go install github.com/alesierraalta/tsp/cmd/tsp@<tag>` (after TSP publication) (prints the command when `go` is absent); `--check` only refreshes the offline cache. |
+| `tsp uninstall [--dry-run] [--orphans] [--force] [--config-dir <dir>]` | Removes managed assets and unwires the Stop hook; never touches foreign files. Modified content needs `--force` (snapshot first); `--orphans` also removes assets the manifest no longer ships; `--dry-run` writes nothing. |
+| `tsp restore [--id <backup-id>] [--dry-run]` | Copies a backup store entry back onto its original paths (default: the latest backup). |
+| `tsp repair [--config-dir <dir>] [--dry-run] [--force]` | Brings a broken install back to what `doctor` reports healthy (missing/drifted managed skills and Stop hook re-wire), Claude-only — the Pi extension is untouched; a healthy install is a no-op. |
+| `tsp plan` | Writes the plan skeleton, checks the contract, names the breadth still owed, and records one Findings row from flags. `add-finding` writes that row only: it refuses a row the checker would reject and never writes an evidence row. |
+| `tsp plan admit` | Reads the plan's Evidence ledger and decides every row. A dry run by default: `--execute` runs each admitted row's one command through `sh -c` twice, so a pin is only recorded over an output that held still, `--sandbox` observes it in a container with the tree mounted read-only and no network (it needs docker, and the default image is pulled on first use) and replays a declared `Mutate` edit against a writable copy of the tree, where the command must go red under the edit and green once the file is put back (a cell may hold a survey of edits separated by ` ;; `, each replayed on its own copy; an edit prefixed `~ ` is declared equivalent and must stay green, or the row is refused as `mutation-not-equivalent`; an admitted survey prints `N killed, M equivalent`; an edit whose own text contains ` ;; ` cannot be expressed), a row whose `Expect` cell is `fail` pins a test observed red (only an exit from 1 to 125 qualifies, so a missing command (127) is never pinned as red; a zero exit is refused as `expected-failure-passed`), `--only <ids>` narrows the run, `--timeout` bounds one command, and `--record <ids>` writes the observed digest into the plan together with the mode it was observed in. Exit 1 when a row is refused. |
+| `tsp plan export [--path <plan>] [--commit <sha>]` | Prints the plan's Findings as Markdown for a pull request comment: one row per finding with its location, severity, status, pinning test and the evidence that re-observes it (the Admit command, the digest shortened to 12 hex, and `Expect: fail` when declared), headed by the commit covered (default the short HEAD) and the plan's base name, never its directory. Every cell is sanitised like the gaps report's quotes. It never posts: `tsp plan export --path <plan> \| gh pr comment <n> -F -` is the operator's call. |
+| `tsp feedback` | Records one honest process report about the testing method itself, or reads the reports back. `--template` prints a fillable skeleton, `--file <path>` records it, `--summary` (the default) answers whether the method is earning its keep. |
+| `tsp version` | Prints the version. |
 
 ## How the gate decides
 
@@ -329,7 +334,7 @@ At the end of every turn the gate audits only when all of these hold:
   directory has hundreds of thousands; a project never does);
 - the repository has no `.no-testing-gate` file at its root;
 - the turn is not already continuing because of a previous Stop hook;
-- this session carries an exact binding — `tpp bind`'s stored record or the binding environment —
+- this session carries an exact binding — `tsp bind`'s stored record or the binding environment —
   naming this session, this worktree, a plan and a run; the worktree's `.tpp.json` declaration, a
   working-tree entry and a fresh source mtime are never a substitute;
 - `test-strategy` or `exploit-testing` was actually invoked in this session (a name in the
@@ -360,7 +365,7 @@ evidence record; anything not executed is a hypothesis.
 ```sh
 go test ./...           # unit, integration (real git repositories), and differential tests
 go run ./tools/mutants  # 23 literal mutants on the gate; every one must be killed
-make build              # bin/tpp
+make build              # bin/tsp
 node --test assets/hosts/pi/tsp.test.mjs  # the Pi extension's pure surface
 ```
 
@@ -392,7 +397,7 @@ For both `check` and `plan`, a relative `--path` is resolved against the worktre
 `--path` is taken as given, except in `check`, which refuses it as a usage error. This is the same
 relative resolution and containment rule used for the `planPath` declaration in `.tpp.json`.
 
-For manual `tpp check` and `tpp plan *` commands, an explicit `--path` wins, then `planPath` in
+For manual `tsp check` and `tsp plan *` commands, an explicit `--path` wins, then `planPath` in
 `.tpp.json` at the worktree root, then `docs/testing/test-plan.md`. Declare a scoped plan like
 this:
 
@@ -405,9 +410,9 @@ silently falls back to the default. The Stop-hook gate ignores `.tpp.json`: it a
 and run bound to the exact session, and stays silent without a valid binding.
 
 ```
-tpp plan init                # write the skeleton, tables and all; never overwrites silently
-tpp plan check               # exit 1 and name every breach of the contract
-tpp plan add-finding ...     # write one Findings row; refuses a row the checker would reject
+tsp plan init                # write the skeleton, tables and all; never overwrites silently
+tsp plan check               # exit 1 and name every breach of the contract
+tsp plan add-finding ...     # write one Findings row; refuses a row the checker would reject
 ```
 
 `check` reports a Findings section that is not a table, a finding that cites no `path:line`, a
@@ -431,7 +436,7 @@ The decisions live in Go; only the transport is per host. That split is what let
 serve more than one agent, and it is why `check` exists:
 
 ```
-tpp check          # exit 1 and say what this repository owes, from git and the plan alone
+tsp check          # exit 1 and say what this repository owes, from git and the plan alone
 ```
 
 It reads no hook payload, no transcript and no host configuration, so anything that can run a
@@ -443,7 +448,7 @@ on top is knowing what THIS session did, which the repository cannot tell you.
 | Claude Code | verified: `sync` wires the Stop hook, `gate` reads its payload and answers in its schema, `doctor` runs the wired command and requires exit zero |
 | Anything that runs a command | verified: `check`, `plan init`, `plan check`, `plan gaps` need no host at all |
 | Gemini CLI | not implemented: its `settings.json` takes command hooks under different event names, and its payload and output schemas are not verified here |
-| Pi | opt-in extension: `sync --hosts pi` installs it and Pi exposes a native `/tsp` command with `/tpp` compatibility alias (`check`, `feedback --summary`, `doctor`); its dispatch is tested in CI (`assets/hosts/pi/tsp.test.mjs`). The native Pi Stop hook is **not verified** — payload contract read from the pi-hooks package, never watched firing |
+| Pi | opt-in extension: `tsp sync --hosts pi` installs it and Pi exposes a native `/tsp` command with `/tpp` compatibility alias (`check`, `feedback --summary`, `doctor`); its dispatch is tested in CI (`assets/hosts/pi/tsp.test.mjs`). The native Pi Stop hook is **not verified** — payload contract read from the pi-hooks package, never watched firing |
 | Codex, OpenCode | not implemented: each has its own extension surface, and guessing a payload schema would ship a hook that silently never fires |
 
 Nothing above is a promise about a host that is not listed as verified. A hook that looks wired and
@@ -454,7 +459,7 @@ command has been run and its exit code checked, not when its configuration file 
 
 The gate asks one question, and only for a session explicitly bound to a plan: the discipline ran
 and stopped halfway. A session that never loaded it, or carries no binding, hears nothing from the
-Stop; `tpp check` is the answer to "what does this repository owe" that needs no session at all.
+Stop; `tsp check` is the answer to "what does this repository owe" that needs no session at all.
 
 Covering a diff and reporting as though the surface were covered is the failure that survives
 every green check: the depth work succeeds, the breadth work is never started, and the summary
@@ -463,7 +468,7 @@ owner and a status: `Security | appsec-adversarial-auditor | ... | pending` afte
 assigned and never invoked.
 
 ```
-tpp plan gaps                # exit 1 and name every layer still owed, with its owner
+tsp plan gaps                # exit 1 and name every layer still owed, with its owner
 ```
 
 `plan gaps` reads the layer matrix's status cells. A row counts as swept when its status reads
@@ -493,10 +498,10 @@ only a brief acknowledgment after a successful write; the summary groups by proj
 verdict it could not classify.
 
 ```sh
-tpp feedback --template          # a fillable skeleton with the run's identity already filled
-tpp feedback --file report.md    # record one report; refusals exit 2 and write nothing
-tpp feedback --summary           # counts per verdict and per skill version, plus the guesses
-tpp feedback                     # no flags: the summary, the cheapest path to the answer
+tsp feedback --template          # a fillable skeleton with the run's identity already filled
+tsp feedback --file report.md    # record one report; refusals exit 2 and write nothing
+tsp feedback --summary           # counts per verdict and per skill version, plus the guesses
+tsp feedback                     # no flags: the summary, the cheapest path to the answer
 ```
 
 One report is `paid`, `cost`, `reason`, and a `verdict` of `paid`, `partly`, or `ceremony`; `guess`
@@ -520,17 +525,17 @@ worktree root, while the gate ledger seals the repository directory name.
 
 ## Benchmark
 
-`tpp bench` measures whether the testing skill finds defects it was never told about. Each
+`tsp bench` measures whether the testing skill finds defects it was never told about. Each
 case under `bench/cases/<id>/` is a fixture project whose own suite is green plus a sealed
 `KEY.json` listing the planted defects (file, line, class, keywords, trigger). The key is never
 copied into a workspace.
 
 ```
-tpp bench run --cases 'bench/cases/*' --model sonnet --runs 1 --max-cost-usd 20
-tpp bench score --case bench/cases/<id> --workspace <ws>     # re-score after grader changes
-tpp bench history                                            # every run, never rewritten
-tpp bench rescore bench/results/<run>                        # re-read a finished run with today's rules
-tpp bench compare bench/results/<before> bench/results/<after>   # per-case reported and caught, side by side
+tsp bench run --cases 'bench/cases/*' --model sonnet --runs 1 --max-cost-usd 20
+tsp bench score --case bench/cases/<id> --workspace <ws>     # re-score after grader changes
+tsp bench history                                            # every run, never rewritten
+tsp bench rescore bench/results/<run>                        # re-read a finished run with today's rules
+tsp bench compare bench/results/<before> bench/results/<after>   # per-case reported and caught, side by side
 ```
 
 `bench run` scaffolds `<out>/<case>/<run>/ws` (default `bench/results/<timestamp>/`), commits the

@@ -27,7 +27,7 @@ Statuses: open · confirmed · fixed · gap-closed · rejected · wontfix.
 ## Evidence ledger
 
 One row per `observado` conclusion: the pinning test observed red then green, and the mutation it kills.
-`Mutate` holds one edit, `<old> => <new> @ <path>:<line>`, which `tpp plan admit --execute --sandbox`
+`Mutate` holds one edit, `<old> => <new> @ <path>:<line>`, which `tsp plan admit --execute --sandbox`
 replays: the command must fail under the edit and pass again once the file is restored. Every row carries
 exactly one cell per header column (14 here); an empty cell stays as `| |`.
 

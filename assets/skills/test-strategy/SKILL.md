@@ -62,8 +62,8 @@ hand-applied gate is a weaker claim than the binary's:
 7. **Routing is an instruction.** INVOKE the sibling (Skill tool, or read
    `~/.claude/skills/<name>/SKILL.md` and apply it inline where no Skill tool exists); what is
    forbidden is approximating it from memory.
-8. **No claim without execution.** Every finding and every "works" carries an evidence record
-   per [references/evidence.md](references/evidence.md); `razonado` items are hypotheses.
+8. **No claim without execution.** Every finding and every "works" carries an evidence record per
+   [references/evidence.md](references/evidence.md); `razonado` items are hypotheses.
 9. **Regression gate.** A diff is validated only when the existing suite is green, its blast-radius
    rows ran to target rung, and `real-run-validation` drove the affected journey.
 10. **RDD receipt.** Derived from an evidence ledger row, only when a provider-issued lineage id
@@ -73,17 +73,17 @@ hand-applied gate is a weaker claim than the binary's:
     state whether data is safe. Never re-propose a `rejected` or `wontfix` finding unless its
     cited-files fingerprint changed; cite the row when skipping.
 12. **Persist before you report, in the shipped shape.** The plan is a set of tables, not a
-    document you compose: create it with `tpp plan init` (or copy
+    document you compose: create it with `tsp plan init` (or copy
     [assets/test-plan-template.md](assets/test-plan-template.md) when the binary is absent) and
     fill its rows. Prose replaces no row, and every finding cell opens with `path:line`. When the
-    plan is not `docs/testing/test-plan.md`, declare it so the Stop hook and `tpp check` read
-    it: write `.tpp.json` at the worktree root.
+    plan is not `docs/testing/test-plan.md`, declare it so the Stop hook and `tsp check` read
+    it: write `.tsp.json` at the worktree root.
     ```json
     {"planPath": "docs/testing/<name>.md"}
     ```
     A plan nobody declares is a plan nothing clears. The declaration is repository-local, so a
     scoped plan cannot silently become the default plan for another checkout. The final message is
-    written only after the declared plan is on disk and `tpp plan check` passes: it reports
+    written only after the declared plan is on disk and `tsp plan check` passes: it reports
     findings that are not rows, cite no location, cite an evidence id that does not exist, or
     settle without a pinning test. A finding that exists only in chat does not exist, and one
     nothing can parse is the same thing. Asking the user whether to fix something never replaces
@@ -103,19 +103,19 @@ hand-applied gate is a weaker claim than the binary's:
     promoted stays `open`, reason `not pinned`.
 
 14. **Record a retrospective at the end of every run**, including blocked or partial ones. Run
-    `tpp feedback --template` into a `mktemp` file outside the repository, fill only the existing
+    `tsp feedback --template` into a `mktemp` file outside the repository, fill only the existing
     fields (`ts`, `repo`, `plan`, `skill`, `build`, `paid`, `cost`, `reason`, `verdict` of `paid`,
     `partly` or `ceremony`, optional `guess`, `freeform`; the parser rejects unknown keys), then
-    `tpp feedback --file`. Set `skill` to what ran (`<name>` or `<name> <version>`; a breakcheck run
+    `tsp feedback --file`. Set `skill` to what ran (`<name>` or `<name> <version>`; a breakcheck run
     records `breakcheck <its version>`). Keep it out of chat: after a successful write reply with a
     brief acknowledgment, and if storage fails say so instead of claiming it was recorded.
-    To review saved feedback, run `tpp feedback --pending` (add `--config-dir <dir>` to select the
+    To review saved feedback, run `tsp feedback --pending` (add `--config-dir <dir>` to select the
     feedback store; `TPP_HOME` remains the separate TPP local-state root). The first call establishes
     a baseline now at its exact snapshot and excludes all reports already present; its review cursor
     is a private sidecar beside the local telemetry ledger. Later calls return the pending reports
     and one exact snapshot token. Review the full batch before acknowledging that token with
-    `tpp feedback --mark-reviewed <token>`; reports appended after that snapshot remain pending.
-    `tpp feedback --summary` is all-history and cursor-neutral.
+    `tsp feedback --mark-reviewed <token>`; reports appended after that snapshot remain pending.
+    `tsp feedback --summary` is all-history and cursor-neutral.
 15. **Ask only when it changes the test.** Ask the user only when the target is ambiguous or the next
     action is irreversible; research everything else. Report each finding consequence first, and mark
     it inferred when it was not observed.
@@ -126,8 +126,8 @@ hand-applied gate is a weaker claim than the binary's:
 
 | State found | Action |
 |---|---|
-| No declared plan (`.tpp.json` absent or has no `planPath`) | PLAN the blast radius when the change is bounded (a scoped run), the whole app when it is not, then EXECUTE the first rows, same run |
-| No declared plan, and the change is one small function eligible for Micro (below) | PLAN micro with `tpp plan init --micro`, then EXECUTE its one pinning test and one mutation |
+| No declared plan (`.tsp.json` absent or has no `planPath`) | PLAN the blast radius when the change is bounded (a scoped run), the whole app when it is not, then EXECUTE the first rows, same run |
+| No declared plan, and the change is one small function eligible for Micro (below) | PLAN micro with `tsp plan init --micro`, then EXECUTE its one pinning test and one mutation |
 | Plan exists but predates the template (missing sections or `Baseline:`) | Migrate it: add the missing sections empty, record the baseline (`assets/fingerprint.sh`), treat the tree as changed, then EXECUTE |
 | Plan exists, fingerprint unchanged | EXECUTE from the first `pending` row |
 | Plan exists, files differ from the plan baseline | Refresh rows in that diff's blast radius, rank first, EXECUTE |
@@ -153,13 +153,13 @@ package, a changed interface) or a scope a plan already covers, which is resumed
 
 **One small function plans micro.** When the change is a single function of about ten lines or fewer,
 its contract does not change, and it touches none of the refused classes above, the plan may be a micro
-plan: `tpp plan init --micro` writes a header declaring `Micro: <file path> · touches none`, the
+plan: `tsp plan init --micro` writes a header declaring `Micro: <file path> · touches none`, the
 Findings table and the Evidence ledger, nothing else. It keeps the vacuous-assertion check on the tests
 that already cover the function, one pinning test observed red then green, and one mutation that test
 kills. `plan check` refuses a `Micro:` plan whose file no `path:line` citation corroborates, whose classes
 are not `none`, that also declares `Light:`, that carries a Layer matrix, or whose ledger lacks an
 `observado` row or a row with a `Mutate` cell; only a plan that passes owes no breadth to `plan gaps`,
-`tpp check` and the Stop gate. A refused declaration reads as a sweep never planned.
+`tsp check` and the Stop gate. A refused declaration reads as a sweep never planned.
 
 Scope: a diff means its blast radius first, closed by the regression gate (rule 9); a clean
 tree on main means the whole app. A scope may keep its own plan beside another scope's — for
@@ -170,7 +170,7 @@ example `docs/testing/test-plan-reports.md` beside an existing `test-plan.md` �
 `~/.config/tpp/reviews/<repo>/pr-<n>.md`, and pass it to every `plan` subcommand with `--path`; run
 `plan admit` from inside the checkout, where its commands and `Mutate` replays resolve. Pinning tests ship as
 a suggested patch, each named by its suite path :: test name, never as a commit to the author's branch.
-`tpp plan export --path <plan>` prints the Findings as a sanitised Markdown comment naming the commit
+`tsp plan export --path <plan>` prints the Findings as a sanitised Markdown comment naming the commit
 it covers; post it (`gh pr comment <n> -F -`) only with the operator's approval.
 
 **Verdict per target**: probe · pin · none (`n/a`), profiles in
@@ -184,7 +184,7 @@ it covers; post it (`gh pr comment <n> -F -`) only with the operator's approval.
 
 **PLAN**
 
-1. Inventory surfaces and entry points with CodeGraph when `tpp doctor` reports it
+1. Inventory surfaces and entry points with CodeGraph when `tsp doctor` reports it
    available, otherwise with `git ls-files` plus grep: routes, CLIs, jobs, migrations,
    ports/adapters, critical journeys.
 2. Layer sweep: invoke each layer owner in PLAN mode and take the target rows it returns
@@ -201,9 +201,9 @@ it covers; post it (`gh pr comment <n> -F -`) only with the operator's approval.
    records, never a silent omission. The `Skill` cell only labels what is still owed.
 6. Record the baseline (`assets/fingerprint.sh`: repo fingerprint; per-finding cited-files fingerprint) and persist to
    the declared plan path (or `docs/testing/test-plan.md` when no path is declared). Create the file with
-   `tpp plan init --path <plan>`, which writes
+   `tsp plan init --path <plan>`, which writes
    [assets/test-plan-template.md](assets/test-plan-template.md) with every table in place; rows
-   start `pending`, `none` rows start `n/a`. Close the run with `tpp plan check` (rule 12).
+   start `pending`, `none` rows start `n/a`. Close the run with `tsp plan check` (rule 12).
 
 **EXECUTE**
 
@@ -218,7 +218,7 @@ it covers; post it (`gh pr comment <n> -F -`) only with the operator's approval.
    of the contract: rewrite it before promoting. Those two runs are one evidence row, and the
    test's identity goes in the finding (rule 13).
 5. Update the plan: row status, rung, evidence ledger, findings, testability blocks with the
-   minimal change that opens them. Write the file, run `tpp plan check` until it passes,
+   minimal change that opens them. Write the file, run `tsp plan check` until it passes,
    then report the delta (rule 12).
 
 ## Output Contract

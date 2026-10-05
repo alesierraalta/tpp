@@ -6,7 +6,7 @@ Use this optional guide when a changed or live path has plausible resource, scal
 
 Start from the affected path and the risk, then state what observation would change the decision:
 
-- **Micro or localized change without evidence of a hot path:** source/call-path analysis may be enough to spot repeated work, an avoidable conversion, or a cheaper equivalent algorithm or data structure. Record this as `razonado` with the concrete path/evidence; it is not a measured speedup or resource saving.
+- **Micro or localized change without evidence of a hot path:** source/call-path analysis may spot repeated work, an avoidable conversion, or a cheaper equivalent algorithm or data structure. Record a reading-only observation as a `razonado` note or optimization opportunity, explicitly not a finding; use measurement before promoting it to a finding.
 - **Known hot path, critical API, or concrete resource concern:** measure representative input size(s) and concurrency with the narrowest existing benchmark or profiler that can test the claim. Include enough of the real call path to expose relevant blocking and I/O.
 - **Architectural change or scaling concern:** broaden the workload only when the changed dependency/path or expected traffic makes a broader effect plausible. State why that workload is representative. Do not expand automatically to every endpoint, profile, or soak duration.
 

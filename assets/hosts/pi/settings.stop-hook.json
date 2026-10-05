@@ -1,12 +1,12 @@
 {
-  "_comment": "tpp for Pi. Pi's command hooks (npm:@hsingjui/pi-hooks) carry Claude Code's payload shape: session_id, transcript_path, cwd, hook_event_name, stop_hook_active. Merge this into .pi/settings.json (project) or the global equivalent; do not replace the file.",
+  "_comment": "tsp for Pi. Pi's command hooks (npm:@hsingjui/pi-hooks) carry Claude Code's payload shape: session_id, transcript_path, cwd, hook_event_name, stop_hook_active. Merge this into .pi/settings.json (project) or the global equivalent; do not replace the file.",
   "hooks": {
     "Stop": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "tpp gate",
+            "command": "tsp gate",
             "timeout": 30
           }
         ]

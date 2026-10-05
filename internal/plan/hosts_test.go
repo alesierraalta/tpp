@@ -34,7 +34,7 @@ func TestShippedHostAdaptersAreUsable(t *testing.T) {
 	if len(stop) != 1 || len(stop[0].Hooks) != 1 {
 		t.Fatalf("pi settings must wire exactly one Stop hook: %+v", stop)
 	}
-	if got := stop[0].Hooks[0].Command; got != "tpp gate" {
+	if got := stop[0].Hooks[0].Command; got != "tsp gate" {
 		t.Fatalf("pi hook command = %q; the binary needs its subcommand", got)
 	}
 	oc, err := os.ReadFile(filepath.Join(root, "opencode", "tsp.ts"))
@@ -45,7 +45,7 @@ func TestShippedHostAdaptersAreUsable(t *testing.T) {
 	// Fail-closed: with no session binding, an automatic repo-wide check has no
 	// session-scoped evidence behind it. The shipped plugin must not run one, and must not
 	// push a toast or a prompt at the user on its own.
-	for _, banned := range []string{"appendPrompt", "showToast", "tpp check"} {
+	for _, banned := range []string{"appendPrompt", "showToast", "tsp check", "tpp check"} {
 		if strings.Contains(body, banned) {
 			t.Fatalf("the opencode plugin must not contain %q: automatic notices are disabled", banned)
 		}

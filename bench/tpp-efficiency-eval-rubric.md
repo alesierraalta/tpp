@@ -49,4 +49,4 @@ Report, without collapsing into one score:
 4. clean-control overtesting/false positives;
 5. instability, costs, turns, and missing/empty artifacts.
 
-Show individual repeats and distributions. With three repeats, avoid significance claims; flag unstable cases and explain whether a difference reflects plan completion, defect recognition, or measurement quality. Do not infer causation from a small score delta or award points for profiling that the case does not justify.
+Show individual repeats and distributions. With a handful of repeats (three to five in these evaluations), avoid significance claims; flag unstable cases and explain whether a difference reflects plan completion, defect recognition, or measurement quality. Do not infer causation from a small score delta or award points for profiling that the case does not justify.

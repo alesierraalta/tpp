@@ -29,6 +29,7 @@ export class RealtimeClient {
   }
 
   subscribe(handler) {
+    if (this.subscribers.has(handler)) return;
     const forward = (msg) => handler(msg);
     this.subscribers.set(handler, forward);
     this.bus.on("message", forward);

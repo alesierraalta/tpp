@@ -1,0 +1,9 @@
+{"id":"n22-hot-path-scaling","language":"node","suite":"node --test","surface":"library",
+ "request":"the matcher's batch matching behaviour","defects":[
+  {"id":"D1","file":"src/matcher.js","line":9,"class":"hot-path-scaling","keywords":["linear","scan","index","probes"],
+   "description":"match() re-scans the whole rule list for every record, so a 100-record batch performs 10000 probes against the stated 200-operation budget instead of resolving each record through one indexed lookup of the rules.",
+   "trigger":{"input":"import { RuleMatcher } from \"./src/matcher.js\"; const counter = { count: 0 }; const rules = []; for (let i = 0; i < 99; i++) rules.push({ region: \"r\" + i, channel: \"web\", route: \"route-\" + i }); rules.push({ region: \"eu\", channel: \"web\", route: \"route-eu\" }); const records = []; for (let i = 0; i < 100; i++) records.push({ region: \"eu\", channel: \"web\" }); const matcher = new RuleMatcher(rules, counter); const matched = matcher.matchAll(records); console.log(counter.count + \" probes, \" + matched.filter((m) => m !== null).length + \" records routed\");",
+    "expected":"at most 200 probes, 100 records routed",
+    "actual":"10000 probes, 100 records routed"},
+   "why_missed":"The suite asserts only which rule each record matches and that the injected counter moves, never how many probes a full batch performs, so a linear rescan per record reads as correct output."}
+ ]}

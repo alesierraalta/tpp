@@ -1,0 +1,9 @@
+{"id":"n23-independent-io-serialization","language":"node","suite":"node --test","surface":"http",
+ "request":"the dashboard load behaviour","defects":[
+  {"id":"D1","file":"src/dashboard.js","line":9,"class":"io-serialization","keywords":["concurrent","serial","await","overlap","promise"],
+   "description":"load() awaits each source before starting the next, so the three independent requests never overlap and the peak in-flight count stays at 1 instead of the 3 the contract promises.",
+   "trigger":{"input":"import { DashboardLoader } from \"./src/dashboard.js\"; const monitor = { inFlight: 0, peak: 0 }; const panel = (value) => { monitor.inFlight += 1; if (monitor.inFlight > monitor.peak) monitor.peak = monitor.inFlight; return (async () => { await null; monitor.inFlight -= 1; return value; })(); }; const client = { profile: () => panel({ name: \"ada\" }), orders: () => panel([{ id: \"o1\" }]), activity: () => panel([{ kind: \"login\" }]) }; const dash = await new DashboardLoader(client).load(); console.log(JSON.stringify({ peak: monitor.peak, panels: Object.keys(dash).length }));",
+    "expected":"{\"peak\":3,\"panels\":3}",
+    "actual":"{\"peak\":1,\"panels\":3}"},
+   "why_missed":"The suite asserts only the merged panels and that each source was asked once, never how many requests were in flight together, so serial awaits read as correct output."}
+ ]}

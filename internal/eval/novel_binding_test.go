@@ -162,6 +162,11 @@ func TestProofFromReplayRefusesInconclusiveOrMalformedObservations(t *testing.T)
 		{"missing subject source digest", func(o *bench.NovelReplayObservation) { o.Subject.SourceSHA256 = "" }, "digest"},
 		{"missing control tree digest", func(o *bench.NovelReplayObservation) { o.Control.ControlSHA256 = "" }, "digest"},
 		{"test digest mismatch", func(o *bench.NovelReplayObservation) { o.TestSHA256 = strings.Repeat("9", 64) }, "does not match the subject test digest"},
+		{"unknown observation rule version", func(o *bench.NovelReplayObservation) { o.RuleVersion = "not-a-bench-rule" }, "rule version"},
+		{"empty control name", func(o *bench.NovelReplayObservation) { o.ControlName = "" }, "control name"},
+		{"control name with path separator", func(o *bench.NovelReplayObservation) { o.ControlName = "fixture/../evil" }, "control name"},
+		{"control name with control character", func(o *bench.NovelReplayObservation) { o.ControlName = "fixture\x01control" }, "control name"},
+		{"subject control digest set", func(o *bench.NovelReplayObservation) { o.Subject.ControlSHA256 = strings.Repeat("9", 64) }, "subject control digest"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			observation := supportedReplayObservation()
@@ -187,7 +192,8 @@ func TestProofFromReplayRequiresBlindSemanticFacts(t *testing.T) {
 		{"failure condition", func(f *NovelProofFacts) { f.FailureCondition = "" }, "failure_condition"},
 		{"mechanism", func(f *NovelProofFacts) { f.Mechanism = " " }, "mechanism"},
 		{"proof kind", func(f *NovelProofFacts) { f.ProofKind = "" }, "kind"},
-		{"proof rule", func(f *NovelProofFacts) { f.ProofRule = "" }, "versioned identity"},
+		{"proof rule", func(f *NovelProofFacts) { f.ProofRule = "" }, "derived from observation rule version"},
+		{"mismatched proof rule", func(f *NovelProofFacts) { f.ProofRule = "novel-saved-test@2" }, "derived from observation rule version"},
 		{"adjudicated by", func(f *NovelProofFacts) { f.AdjudicatedBy = "" }, "adjudicated_by"},
 		{"adjudicated reason", func(f *NovelProofFacts) { f.AdjudicatedReason = "" }, "adjudicated_reason"},
 		{"adjudicated ts", func(f *NovelProofFacts) { f.AdjudicatedTS = "" }, "adjudicated_ts"},
@@ -335,6 +341,41 @@ func TestTamperedNovelProofObservationRejectedAtAppendAndVerify(t *testing.T) {
 			t.Fatalf("Verify(tampered /2 payload with recomputed hash) = %v, want observation gate rejection", err)
 		}
 	})
+	// Observation identity binding: each tampered /2 payload must be rejected at Append,
+	// at Verify under a recomputed hash chain, and as the I9 invariant violation.
+	for _, tt := range []struct {
+		name   string
+		mutate func(*NovelProof)
+		want   string
+	}{
+		{"garbage rule version", func(p *NovelProof) { p.Observation.RuleVersion = "not-a-bench-rule" }, "rule version"},
+		{"rule version valid but proof rule mismatched", func(p *NovelProof) { p.ProofRule = "novel-saved-test@2" }, "proof rule"},
+		{"empty control name", func(p *NovelProof) { p.Observation.ControlName = "" }, "control name"},
+		{"control name with path separator", func(p *NovelProof) { p.Observation.ControlName = "fixture/../evil" }, "control name"},
+		{"control name with control character", func(p *NovelProof) { p.Observation.ControlName = "fixture\x01control" }, "control name"},
+		{"subject control digest set to the control tree", func(p *NovelProof) { p.Observation.Subject.ControlSHA256 = "sha256:" + strings.Repeat("e", 64) }, "subject control digest"},
+		{"subject control digest mismatched", func(p *NovelProof) { p.Observation.Subject.ControlSHA256 = "sha256:" + strings.Repeat("9", 64) }, "subject control digest"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			proof := tamperedProof(t, tt.mutate)
+			cr := novelFindingsCaseRun(t, "f1")
+			before := len(cr.Log.Events)
+			if _, err := cr.Log.Append(newEvent(t, proof)); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Append(tampered /2 payload) = %v, want refusal mentioning %q", err, tt.want)
+			}
+			if len(cr.Log.Events) != before {
+				t.Fatalf("rejected payload mutated the log: %d events", len(cr.Log.Events))
+			}
+			craftConfirm(t, &cr.Log, newEvent(t, proof))
+			if err := cr.Log.Verify(); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Verify(tampered /2 payload with recomputed hash) = %v, want refusal mentioning %q", err, tt.want)
+			}
+			violations := CheckCaseRun(cr)
+			if len(violations) == 0 || violations[0].ID != "I9" || !strings.Contains(violations[0].Detail, tt.want) {
+				t.Fatalf("CheckCaseRun() = %+v, want I9 mentioning %q", violations, tt.want)
+			}
+		})
+	}
 }
 
 func mustMarshal(t *testing.T, value any) []byte {

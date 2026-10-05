@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/alesierraalta/tpp/internal/bench"
 )
@@ -13,14 +14,37 @@ import (
 const (
 	novelSubjectClassification = string(bench.NovelAssertionFailure)
 	novelControlClassification = string(bench.NovelPassed)
-	// novelSavedTestRulePrefix is the only rule family novel-proof/2 accepts: the
-	// correctness saved-test rule the constructor emits (e.g. "novel-saved-test@1").
+	// novelSavedTestRulePrefix is the proof-rule family of the correctness saved-test
+	// rule; novelProofRuleFor maps the known bench rule version to its single member
+	// (e.g. "novel-saved-test@1").
 	novelSavedTestRulePrefix = "novel-saved-test@"
+	// novelSavedTestRuleV1 is the only proof rule novel-proof/2 accepts: the rule mapped
+	// from bench.NovelCorrectnessRuleV1.
+	novelSavedTestRuleV1 = novelSavedTestRulePrefix + "1"
 )
+
+// novelProofRuleFor is the single mapping from a known bench replay rule version to its
+// novel-proof/2 proof rule: ProofFromReplay derives ProofRule from it instead of trusting
+// a caller value, and stored-payload validation re-derives it.
+func novelProofRuleFor(ruleVersion string) (string, error) {
+	switch ruleVersion {
+	case bench.NovelCorrectnessRuleV1:
+		return novelSavedTestRuleV1, nil
+	default:
+		return "", fmt.Errorf("novel proof observation rule version %q is not a known bench rule", ruleVersion)
+	}
+}
+
+// validNovelControlName adds the control-character refusal to the package's
+// single-path-element name gate, so a recorded control name is a sane identity.
+func validNovelControlName(name string) bool {
+	return validBacklogCaseID(name) && !strings.ContainsFunc(name, unicode.IsControl)
+}
 
 // NovelProofFacts are the blind semantic facts behind a proof: what the finding means and
 // who adjudicated it. They remain caller-supplied (never derived from the replay) and are
-// required nonblank by proof validation.
+// required nonblank by proof validation. ProofRule is additionally refused unless it
+// equals the rule derived from the replay's rule version.
 type NovelProofFacts struct {
 	Domain            Domain
 	Severity          Severity
@@ -38,12 +62,21 @@ type NovelProofFacts struct {
 // ProofFromReplay is the pure constructor of a novel-proof/2 proof from an actual bench
 // replay. It derives every digest field from the typed observation — SourceBinding is the
 // staged subject source tree, EvidenceDigests the sorted test/output/control digests, the
-// artifact the subject run output — plus Applies/Outcome and Attempts=1, and refuses any
-// inconclusive observation, malformed or missing digest, test digest mismatch, or blank
-// blind semantic fact. It executes nothing and records nothing. Correctness-only:
-// conformance or command facts are refused until their executable rules exist.
+// artifact the subject run output — plus Applies/Outcome and Attempts=1, derives
+// ProofRule from the single rule mapping of the observation's rule version (refusing an
+// unknown version or a mismatching caller rule), and refuses any inconclusive
+// observation, malformed or missing digest, test digest mismatch, or blank blind semantic
+// fact. It executes nothing and records nothing. Correctness-only: conformance or
+// command facts are refused until their executable rules exist.
 func ProofFromReplay(finding Finding, facts NovelProofFacts, replay bench.NovelReplayObservation) (NovelProof, error) {
 	observation := novelObservationFromReplay(replay)
+	expectedRule, err := novelProofRuleFor(observation.RuleVersion)
+	if err != nil {
+		return NovelProof{}, fmt.Errorf("novel proof from replay: %w", err)
+	}
+	if facts.ProofRule != expectedRule {
+		return NovelProof{}, fmt.Errorf("novel proof from replay: novel proof/2 proof rule %q must be the saved-test rule %q derived from observation rule version %q", facts.ProofRule, expectedRule, observation.RuleVersion)
+	}
 	sourceBinding, evidence, artifact, err := novelDigestsFromObservation(observation)
 	if err != nil {
 		return NovelProof{}, err
@@ -60,7 +93,7 @@ func ProofFromReplay(finding Finding, facts NovelProofFacts, replay bench.NovelR
 		FailureCondition:  facts.FailureCondition,
 		Mechanism:         facts.Mechanism,
 		ProofKind:         facts.ProofKind,
-		ProofRule:         facts.ProofRule,
+		ProofRule:         expectedRule,
 		EvidenceDigests:   evidence,
 		SourceBinding:     sourceBinding,
 		Reproduction:      NovelReproduction{Applies: true, Outcome: Reproduced, ArtifactDigest: artifact, Attempts: 1},
@@ -116,10 +149,17 @@ func prefixedDigest(digest string) string {
 }
 
 // validateNovelObservation applies the conclusive-replay refusal rules to a stored or
-// freshly converted observation: a supported subject assertion failure that started,
-// completed, was not truncated or timed out, and carries no reason; a passed control;
-// both reproduction gates; and well-formed, mutually consistent digests.
+// freshly converted observation: a known bench rule version, a sane control name, a
+// supported subject assertion failure that started, completed, was not truncated or timed
+// out, and carries no reason; a passed control; both reproduction gates; and well-formed,
+// mutually consistent digests.
 func validateNovelObservation(observation NovelProofObservation) error {
+	if _, err := novelProofRuleFor(observation.RuleVersion); err != nil {
+		return err
+	}
+	if !validNovelControlName(observation.ControlName) {
+		return fmt.Errorf("novel proof observation control name %q must be a nonblank single name without path separators or control characters", observation.ControlName)
+	}
 	subject, control := observation.Subject, observation.Control
 	if subject.Classification != novelSubjectClassification {
 		return fmt.Errorf("novel proof observation subject classification %q is not %q", subject.Classification, novelSubjectClassification)
@@ -177,8 +217,8 @@ func validateNovelObservation(observation NovelProofObservation) error {
 			return fmt.Errorf("novel proof observation %s digest %q is not a sha256 digest", digest.name, digest.value)
 		}
 	}
-	if subject.ControlSHA256 != "" && !validSHA256Digest(subject.ControlSHA256) {
-		return fmt.Errorf("novel proof observation subject control digest %q is not a sha256 digest", subject.ControlSHA256)
+	if subject.ControlSHA256 != "" {
+		return fmt.Errorf("novel proof observation subject control digest %q must be empty: bench records the control tree digest on the control side only", subject.ControlSHA256)
 	}
 	if observation.TestSHA256 != subject.TestSHA256 {
 		return fmt.Errorf("novel proof observation test digest %q does not match the subject test digest %q", observation.TestSHA256, subject.TestSHA256)
@@ -221,12 +261,16 @@ func validateNovelObservationBinding(proof NovelProof) error {
 	if proof.ProofKind != NovelProofSavedTest {
 		return fmt.Errorf("novel proof/2 proof kind %q must be the correctness saved-test kind %q", proof.ProofKind, NovelProofSavedTest)
 	}
-	if !versionedIdentity(proof.ProofRule) || !strings.HasPrefix(proof.ProofRule, novelSavedTestRulePrefix) {
-		return fmt.Errorf("novel proof/2 proof rule %q must be a versioned saved-test correctness rule", proof.ProofRule)
-	}
 	observation := *proof.Observation
 	if err := validateNovelObservation(observation); err != nil {
 		return err
+	}
+	expectedRule, err := novelProofRuleFor(observation.RuleVersion)
+	if err != nil {
+		return err
+	}
+	if proof.ProofRule != expectedRule {
+		return fmt.Errorf("novel proof/2 proof rule %q does not match the rule %q derived from observation rule version %q", proof.ProofRule, expectedRule, observation.RuleVersion)
 	}
 	sourceBinding, evidence, artifact, err := novelDigestsFromObservation(observation)
 	if err != nil {

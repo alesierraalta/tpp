@@ -113,7 +113,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    new([New machine]) --> install[go install github.com/alesierraalta/tsp/cmd/tsp@latest<br/>PENDING T5 publication]
+    new([New machine]) --> install[go install github.com/alesierraalta/tsp/cmd/tsp@latest]
     install --> sync[tsp sync<br/>skills to every host, Stop hook into Claude]
     sync --> doctor{tsp doctor}
     doctor -- healthy --> use([Ready])
@@ -158,13 +158,11 @@ gentle-ai and engram as present.
 
 ## Install
 
-The canonical TSP install is not yet available: `go install github.com/alesierraalta/tsp/cmd/tsp@latest`
-is pending the first TSP publication (T5). Until then, install the concrete old-module bridge:
-`go install github.com/alesierraalta/tpp/cmd/tpp@v0.5.1`. After TSP is published, `tpp update`
-installs `tsp` after publication; until T5, it is only a concrete legacy bridge update path.
+Install TSP from its module. An existing TPP install moves over with `tpp update` (bridge
+`go install github.com/alesierraalta/tpp/cmd/tpp@v0.5.1`), which installs `tsp` and points `tpp` at it.
 
 ```sh
-go install github.com/alesierraalta/tpp/cmd/tpp@v0.5.1
+go install github.com/alesierraalta/tsp/cmd/tsp@latest
 tsp setup     # sync, then doctor's checks, then one line saying tsp works (exit 0) or what is left
 ```
 

@@ -4,7 +4,8 @@ description: "Trigger: haz test stragety, haz test strategy, test-strategy, haz 
 license: Apache-2.0
 metadata:
   author: "alesierraalta"
-  version: "0.4.2"
+  version: "0.5.0"
+  requires_tsp: "0.6.0"
   requires_tpp: "0.5.1"
   scope: [common]
   auto_invoke: "Any request to test something: infer scope and mode from repo state, build or resume the persisted plan, execute it through specialized testing skills"
@@ -23,8 +24,8 @@ This skill decides WHICH targets and routes; siblings do the work.
 
 ## Tooling
 
-Written for the TSP binary built from this repository; `tsp version` prints the build. TSP is the current product. Its `requires_tsp` minimum is intentionally unspecified until the first TSP publication establishes a release version (T5); `requires_tpp: 0.5.1` is only the historical bridge requirement. Build it with `make build` (writes
-`bin/tsp`) and put it on `PATH`, or use `go install github.com/alesierraalta/tsp/cmd/tsp@latest` **after its first publication (T5)**. Until then, the concrete bridge remains `go install github.com/alesierraalta/tpp/cmd/tpp@v0.5.1`; `tpp update` installs `tsp` after TSP is published. Without the binary, fall back and say so in the report, since a
+Written for `tsp 0.6.0` (`tsp version` prints the build); `requires_tpp: 0.5.1` is only the historical bridge requirement. Build it with `make build` (writes
+`bin/tsp`) and put it on `PATH`, or use `go install github.com/alesierraalta/tsp/cmd/tsp@latest`. An existing TPP install moves over with `tpp update` from the bridge `go install github.com/alesierraalta/tpp/cmd/tpp@v0.5.1`. Without the binary, fall back and say so in the report, since a
 hand-applied gate is a weaker claim than the binary's:
 
 - `plan init` -> copy [assets/test-plan-template.md](assets/test-plan-template.md) (rule 12).

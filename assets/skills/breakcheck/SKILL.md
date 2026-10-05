@@ -4,7 +4,7 @@ description: "Trigger: breakcheck, romper esto, intenta romperlo, testing advers
 license: Apache-2.0
 metadata:
   author: "alesierraalta"
-  version: "0.1.3"
+  version: "0.1.4"
   requires_tpp: "0.3.8"
   scope: [common]
   auto_invoke: "Explicit invocation to break a change before RDD: bounded adversarial probes and a readiness disposition"
@@ -20,6 +20,12 @@ Load only on explicit invocation ("breakcheck", "romper esto", or "testing adver
 
 ## Probe Selection
 
+- **Aim the campaign at what the change just introduced.** New logic is where the specification and the
+  change's own tests are most likely to have skipped a case; probing the code around it re-tests what its
+  author already believes.
+- **Enumerate the cases the specification and the tests do not list, and make one of them a probe.** The
+  listed cases are the ones somebody already thought about; the unlisted ones are where a campaign has
+  found its material findings.
 - Start with assumptions whose failure would block readiness or change the project authority's decision.
 - Prefer boundary, malformed, repeated, concurrent, interrupted, and unauthorized inputs when they match the candidate's contract.
 - For regressions, compare the smallest safe behavior against the base; do not treat base behavior as correct without a contract.
@@ -46,7 +52,8 @@ Load only on explicit invocation ("breakcheck", "romper esto", or "testing adver
 
 ## Execution Steps
 
-1. Read the candidate, its contracts, and any Verifier evidence.
+1. Read the candidate, its contracts, and any Verifier evidence — and read the change's own tests, writing
+   down what they do not cover before choosing a single probe.
 2. List assumptions and choose the few probes worth running; record omitted risks and why.
 3. State the probe and time budget before the first probe.
 4. Run probes in isolation and stop when the budget is exhausted.

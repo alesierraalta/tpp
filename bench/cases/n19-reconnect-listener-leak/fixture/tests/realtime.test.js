@@ -58,3 +58,16 @@ test("an unsubscribed handler is detached and receives nothing more", () => {
   bus.emit("message", "hi");
   assert.deepEqual(seen, []);
 });
+
+test("subscribing the same handler twice still leaves nothing after one unsubscribe", () => {
+  const { bus, rt } = client();
+  const seen = [];
+  const handler = (m) => seen.push(m);
+  rt.subscribe(handler);
+  rt.subscribe(handler);
+  assert.equal(bus.listenerCount("message"), 1);
+  rt.unsubscribe(handler);
+  assert.equal(bus.listenerCount("message"), 0);
+  bus.emit("message", "hi");
+  assert.deepEqual(seen, []);
+});

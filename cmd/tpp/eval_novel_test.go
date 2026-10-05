@@ -5,16 +5,20 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alesierraalta/tpp/internal/bench"
 	"github.com/alesierraalta/tpp/internal/eval"
+	plan "github.com/alesierraalta/tpp/internal/plan"
 )
 
 // proveNovelFixture is a one-case node benchmark whose saved test fails on the fixture
@@ -386,6 +390,192 @@ func TestBenchEvalProveNovelRecordsExactlyOneProof(t *testing.T) {
 	assertRunDirUnchanged(t, fx.runDir, before2)
 }
 
+// proveNovelContentionWindow bounds how long the lock-held test watches a prove-novel it
+// started while the test itself holds the run-dir lock. Nothing outside the process can
+// observe "this process is queued on flock", so the window is an observation period, not a
+// sleep used to synchronize: while the test holds the lock a locked writer cannot mutate or
+// exit at any moment of it (a longer window never turns a pass into a fail), while an
+// unlocked writer reaches SaveRun or exits inside it (the window is what lets the pre-lock
+// code be caught).
+const proveNovelContentionWindow = 2 * time.Second
+
+// proveNovelFinishWait bounds waiting for a background prove-novel to finish. It is a
+// watchdog against a hung child, not a synchronization delay: the happy path proceeds the
+// moment the process exits.
+const proveNovelFinishWait = 2 * time.Minute
+
+// backgroundCLI runs the built binary in the background with its combined output in a
+// file, so the test can observe the run directory and the process's liveness while it is
+// still running without reading a buffer the process writes into (the race detector would
+// flag that).
+type backgroundCLI struct {
+	cmd     *exec.Cmd
+	outPath string
+	done    chan error
+}
+
+func startCLI(t *testing.T, bin string, args ...string) backgroundCLI {
+	t.Helper()
+	outPath := filepath.Join(t.TempDir(), "background.out")
+	out, err := os.Create(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(bin, args...)
+	cmd.Stdout, cmd.Stderr = out, out
+	if err := cmd.Start(); err != nil {
+		out.Close()
+		t.Fatalf("start %v: %v", args, err)
+	}
+	out.Close() // the child owns its descriptor now
+	t.Cleanup(func() { _ = cmd.Process.Kill() })
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	return backgroundCLI{cmd: cmd, outPath: outPath, done: done}
+}
+
+// awaitExit waits up to limit for the process to finish and kills it before failing, so no
+// background prove-novel outlives the test.
+func (b backgroundCLI) awaitExit(t *testing.T, limit time.Duration) error {
+	t.Helper()
+	select {
+	case err := <-b.done:
+		return err
+	case <-time.After(limit):
+		_ = b.cmd.Process.Kill()
+		t.Fatalf("background %v still running after %s", b.cmd.Args, limit)
+		return nil
+	}
+}
+
+// code classifies a finished process's Wait error the way runCLI does.
+func (b backgroundCLI) code(t *testing.T, waitErr error) int {
+	t.Helper()
+	if waitErr == nil {
+		return 0
+	}
+	var ee *exec.ExitError
+	if errors.As(waitErr, &ee) {
+		return ee.ExitCode()
+	}
+	t.Fatalf("running %v: %v", b.cmd.Args, waitErr)
+	return -1
+}
+
+func (b backgroundCLI) output(t *testing.T) string {
+	t.Helper()
+	data, err := os.ReadFile(b.outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+// TestBenchEvalProveNovelRunDirLockSerializesWriters pins the serialization itself: the
+// test takes the same run-dir lock prove-novel takes, starts prove-novel --execute, and the
+// command must hold at LoadRun — no output, no node process, no event, still alive — for as
+// long as the lock is held. Releasing the lock lets it finish and record exactly one proof.
+// A command that ran unlocked (the pre-lock code) exits or mutates inside the window.
+func TestBenchEvalProveNovelRunDirLockSerializesWriters(t *testing.T) {
+	bin := buildCLI(t)
+	fx := writeProveNovelFixture(t, bin, "node --test")
+
+	lock, err := plan.LockPlan(fx.runDir)
+	if err != nil {
+		t.Fatalf("take the run-dir lock: %v", err)
+	}
+	defer plan.UnlockPlan(lock) // a failing assertion must not leave a child blocked forever
+
+	before := snapshotRunDir(t, fx.runDir)
+	bg := startCLI(t, bin, append(proveNovelArgs(fx), "--execute")...)
+	select {
+	case err := <-bg.done:
+		t.Fatalf("prove-novel exited (%v) while the test held the run-dir lock: the command ran unlocked", err)
+	case <-time.After(proveNovelContentionWindow):
+	}
+	if size, err := fileSize(bg.outPath); err != nil {
+		t.Fatal(err)
+	} else if size != 0 {
+		t.Fatalf("prove-novel printed %d bytes while the run-dir lock was held:\n%s", size, bg.output(t))
+	}
+	assertRunDirUnchanged(t, fx.runDir, before)
+	if _, err := os.Stat(fx.marker); err == nil {
+		t.Fatal("prove-novel spawned node while the run-dir lock was held")
+	} else if !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+
+	plan.UnlockPlan(lock)
+	if code := bg.code(t, bg.awaitExit(t, proveNovelFinishWait)); code != 0 {
+		t.Fatalf("prove-novel exited %d after the lock was released:\n%s", code, bg.output(t))
+	}
+	out := bg.output(t)
+	if !strings.Contains(out, "recorded novel-proof/2 proof for c1/c1-f1") {
+		t.Fatalf("prove-novel did not record the proof after the lock was released:\n%s", out)
+	}
+	if _, err := os.Stat(fx.marker); err != nil {
+		t.Fatalf("the saved test never ran after the lock was released: %v", err)
+	}
+	eventsPath := filepath.Join(fx.runDir, "c1", "events.jsonl")
+	events, err := os.ReadFile(eventsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := bytes.Count(events, []byte(`"event":"novel_proof"`)); got != 1 {
+		t.Fatalf("events.jsonl holds %d novel_proof events, want exactly 1", got)
+	}
+}
+
+// TestBenchEvalProveNovelConcurrentExecutionsRecordExactlyOneProof pins the lost-update
+// fix: two prove-novel --execute invocations on one run dir must not both report success.
+// The lock makes the second one wait, load the first one's saved proof and refuse with
+// "already has an effective novel proof"; exactly one novel_proof event persists.
+func TestBenchEvalProveNovelConcurrentExecutionsRecordExactlyOneProof(t *testing.T) {
+	bin := buildCLI(t)
+	fx := writeProveNovelFixture(t, bin, "node --test")
+
+	first := startCLI(t, bin, append(proveNovelArgs(fx), "--execute")...)
+	second := startCLI(t, bin, append(proveNovelArgs(fx), "--execute")...)
+	type outcome struct {
+		code int
+		out  string
+	}
+	runs := []outcome{
+		{first.code(t, first.awaitExit(t, proveNovelFinishWait)), first.output(t)},
+		{second.code(t, second.awaitExit(t, proveNovelFinishWait)), second.output(t)},
+	}
+	var recorded, refused int
+	for _, run := range runs {
+		switch {
+		case run.code == 0 && strings.Contains(run.out, "recorded novel-proof/2 proof for c1/c1-f1"):
+			recorded++
+		case run.code == 1 && strings.Contains(run.out, "already has an effective novel proof"):
+			refused++
+		default:
+			t.Fatalf("neither a recorded proof nor the duplicate refusal (exit %d):\n%s", run.code, run.out)
+		}
+	}
+	if recorded != 1 || refused != 1 {
+		t.Fatalf("got %d recorded proof(s) and %d duplicate refusal(s), want exactly one of each:\nfirst:\n%s\nsecond:\n%s",
+			recorded, refused, runs[0].out, runs[1].out)
+	}
+	events, err := os.ReadFile(filepath.Join(fx.runDir, "c1", "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := bytes.Count(events, []byte(`"event":"novel_proof"`)); got != 1 {
+		t.Fatalf("events.jsonl holds %d novel_proof events after the race, want exactly 1", got)
+	}
+}
+
+func fileSize(path string) (int64, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, err
+	}
+	return info.Size(), nil
+}
+
 // TestBenchEvalProveNovelRefusalsDoNotMutate is the refusal matrix: every preflight or
 // replay refusal exits non-zero with run.json, caserun.json and events.jsonl byte-identical.
 func TestBenchEvalProveNovelRefusalsDoNotMutate(t *testing.T) {
@@ -440,6 +630,21 @@ func TestBenchEvalProveNovelRefusalsDoNotMutate(t *testing.T) {
 		}
 		if !strings.Contains(out, "not conclusive") || !strings.Contains(out, "assertion_failure") {
 			t.Fatalf("inconclusive refusal must print the observation classification:\n%s", out)
+		}
+		assertRunDirUnchanged(t, fx.runDir, before)
+	})
+	t.Run("lock unavailable refuses before mutation", func(t *testing.T) {
+		// A run-dir lock needs a per-user cache directory; with neither $XDG_CACHE_HOME nor
+		// $HOME set there is none, and the command must refuse before LoadRun — never run
+		// unlocked. (On a platform whose lock primitive exists but cannot be taken the same
+		// refusal fires: LockPlan's error is the only path to this message.)
+		before := snapshotRunDir(t, fx.runDir)
+		out, code := runCLIEnv(t, bin, []string{"HOME=", "XDG_CACHE_HOME="}, append(proveNovelArgs(fx), "--execute")...)
+		if code != 1 {
+			t.Fatalf("exited %d, want 1:\n%s", code, out)
+		}
+		if !strings.Contains(out, "run directory lock") || !strings.Contains(out, "refusing to run unlocked") {
+			t.Fatalf("lock-failure refusal must name the run directory lock and the unlocked refusal:\n%s", out)
 		}
 		assertRunDirUnchanged(t, fx.runDir, before)
 	})

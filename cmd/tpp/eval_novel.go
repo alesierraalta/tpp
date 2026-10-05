@@ -12,6 +12,7 @@ import (
 	"github.com/alesierraalta/tpp/internal/bench"
 	"github.com/alesierraalta/tpp/internal/eval"
 	"github.com/alesierraalta/tpp/internal/hookcmd"
+	plan "github.com/alesierraalta/tpp/internal/plan"
 )
 
 // runBenchEvalProveNovel records exactly one novel-proof/2 event for one NOVEL_CANDIDATE
@@ -20,8 +21,17 @@ import (
 // before the single SaveRun: a refused invocation leaves run.json, caserun.json and
 // events.jsonl byte-identical. The replay runs only with --execute; this command claims
 // no sandbox or secret isolation — the tests execute repository code on this machine.
-// TOCTOU: the checks and the write are not locked against a concurrent writer; they fail
-// closed on the state read, they do not claim to freeze it.
+// Serialization: from before LoadRun until after SaveRun (or the refusal that ends the
+// command), this command holds the exclusive run-dir lock plan.LockPlan takes — an
+// advisory flock keyed on the run directory's canonical path, in the per-user cache
+// directory, blocking, and released by the kernel if this process dies. A concurrent
+// prove-novel waits, then loads the proof the winner saved and refuses "already has an
+// effective novel proof" instead of racing the write and reporting a success that was
+// overwritten; a lock that cannot be taken refuses here, before any mutation, never
+// proceeding unlocked. The dry run takes the same lock — one acquisition point, released
+// on return either way — but writes nothing. Only prove-novel is serialized: the other
+// eval subcommands (adjudicate, confirm, close, verify, ...) are NOT yet locked against
+// concurrent writers.
 func runBenchEvalProveNovel(args []string) int {
 	fs := evalFlagSet("bench eval prove-novel")
 	fs.Usage = func() {
@@ -84,6 +94,18 @@ func runBenchEvalProveNovel(args []string) int {
 		fmt.Fprintf(os.Stderr, "bench eval prove-novel: --severity %q is not info, low, medium, high, or critical\n", *severity)
 		return 2
 	}
+
+	// One exclusive lock spans the whole transaction: everything from this LoadRun to the
+	// SaveRun below (or the refusal that ends the command) runs under it, so a second
+	// prove-novel queues instead of reading the pre-proof state — it sees the winner's saved
+	// proof and refuses instead of overwriting it. The dry run takes it too (one acquisition
+	// point, released on return). No lock, no run: a lock that cannot be taken — unsupported
+	// platform or any error — refuses here, before the run directory is read or mutated.
+	lock, err := plan.LockPlan(*runDir)
+	if err != nil {
+		return evalCommandError("prove-novel", fmt.Errorf("run directory lock: %w; refusing to run unlocked", err))
+	}
+	defer plan.UnlockPlan(lock)
 
 	stored, err := eval.LoadRun(*runDir)
 	if err != nil {

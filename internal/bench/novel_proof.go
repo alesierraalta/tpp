@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -233,6 +234,9 @@ func (b *novelOutputBuffer) snapshot() ([]byte, bool) {
 }
 
 func runNovelSide(fixture, overlay string, tests map[string][]byte, argv []string, kind string, timeout time.Duration, testHash string) NovelProcessObservation {
+	if !novelProcessGroupsSupported() {
+		return NovelProcessObservation{Classification: NovelInconclusive, ExitCode: -1, Reason: "novel replay process cleanup is unsupported on " + runtime.GOOS, TestSHA256: testHash}
+	}
 	dir, e := stage(fixture, overlay, "", nil)
 	if e != nil {
 		return NovelProcessObservation{Classification: NovelInconclusive, ExitCode: -1, Reason: e.Error(), TestSHA256: testHash}
@@ -255,14 +259,17 @@ func runNovelSide(fixture, overlay string, tests map[string][]byte, argv []strin
 	defer cancel()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = dir
+	configureNovelProcess(cmd)
+	cmd.WaitDelay = novelWaitDelay
 	// Deliberately do not inherit user/application variables, HOME, NODE_OPTIONS, or NODE_PATH.
-	// PATH selects the already-installed runtime; locale is fixed. This is not a sandbox and
-	// does not prove the executable selected by PATH is trusted or prevent filesystem access.
+	// PATH selects the already-installed runtime; locale is fixed. This is not a sandbox: process
+	// group cleanup is not containment, and a descendant that calls setsid can escape the group.
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "LANG=C", "LC_ALL=C", "HOME=" + dir}
 	out := &novelOutputBuffer{cancel: cancel}
 	cmd.Stdout = out
 	cmd.Stderr = out
 	err = cmd.Run()
+	groupAlive, groupErr := killNovelProcessGroup(cmd)
 	output, outputExceeded := out.snapshot()
 	code := 0
 	started := true
@@ -276,6 +283,17 @@ func runNovelSide(fixture, overlay string, tests map[string][]byte, argv []strin
 		}
 	}
 	ob := NovelProcessObservation{ExitCode: code, Started: started, TimedOut: ctx.Err() == context.DeadlineExceeded, Output: string(output), OutputSHA256: digest(output), SourceSHA256: sourceHash, TestSHA256: testHash, OutputTruncated: outputExceeded}
+	if errors.Is(err, exec.ErrWaitDelay) {
+		groupAlive = true // WaitDelay means an inherited pipe remained open after the runner exited.
+	}
+	if groupAlive || groupErr != nil {
+		ob.Classification = NovelInconclusive
+		ob.Reason = "descendant processes outlived test runner"
+		if errors.Is(err, exec.ErrWaitDelay) {
+			ob.Reason += "; output pipe wait delay expired"
+		}
+		return ob
+	}
 	if outputExceeded {
 		ob.Classification = NovelInconclusive
 		ob.Reason = "output limit exceeded; captured output is truncated"

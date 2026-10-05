@@ -8,8 +8,8 @@ import (
 	"strings"
 )
 
-// NovelProofSchema is the schema identity of a recorded novel proof. Version 1 proofs
-// carry caller-asserted digest fields only and remain decodable/verifiable for history.
+// NovelProofSchema is the historical, never-released schema identity novel-proof/1: it
+// carried caller-asserted digest fields only and is refused at every decode and write.
 const NovelProofSchema = "novel-proof/1"
 
 // NovelProofSchemaV2 is the current schema identity: v2 binds every proof to a required,
@@ -115,29 +115,20 @@ func versionedIdentity(rule string) bool {
 
 // validateNovelProof checks schema, identity, taxonomy, presence, evidence shape, human
 // adjudication attribution, and reproduction coherence. Content truth is out of scope.
-// novel-proof/1 accepts no observation and is history-only; novel-proof/2 requires one
-// and cross-checks it against the proof's digest fields and the conclusive-replay
-// refusal rules, so Append, Verify, and I9 reject tampered or inconclusive payloads too.
+// Only novel-proof/2 exists: it requires the replay observation and cross-checks it
+// against the proof's digest fields and the conclusive-replay refusal rules, so Append,
+// Verify, and I9 reject caller-asserted, tampered, or inconclusive payloads too.
 func validateNovelProof(proof NovelProof) error {
-	switch proof.Schema {
-	case NovelProofSchema:
-		if proof.Observation != nil {
-			return fmt.Errorf("novel proof schema %q must not carry a replay observation", NovelProofSchema)
-		}
-	case NovelProofSchemaV2:
-		if proof.Observation == nil {
-			return fmt.Errorf("novel proof schema %q requires a replay observation", NovelProofSchemaV2)
-		}
-	default:
-		return fmt.Errorf("novel proof schema %q is not %q or %q", proof.Schema, NovelProofSchema, NovelProofSchemaV2)
+	if proof.Schema != NovelProofSchemaV2 {
+		return fmt.Errorf("novel proof schema %q is not %q", proof.Schema, NovelProofSchemaV2)
+	}
+	if proof.Observation == nil {
+		return fmt.Errorf("novel proof schema %q requires a replay observation", NovelProofSchemaV2)
 	}
 	if err := validateNovelProofBody(proof); err != nil {
 		return err
 	}
-	if proof.Schema == NovelProofSchemaV2 {
-		return validateNovelObservationBinding(proof)
-	}
-	return nil
+	return validateNovelObservationBinding(proof)
 }
 
 // validateNovelProofBody applies the schema-independent proof checks: identity, taxonomy,
@@ -372,9 +363,10 @@ func novelProofPromotion(events []Event, findingID string) (NovelProof, bool) {
 
 // RecordNovelProof appends a state-preserving novel-proof event for an existing
 // NOVEL_CANDIDATE finding of an adjudicating case run, bound to the admitted row. Only
-// novel-proof/2 proofs carrying their replay observation may be written; schema v1 is
-// history-only. It is a pure model write: no command executes, no runtime authority is
-// granted, and a rejected proof never mutates the run.
+// novel-proof/2 proofs carrying their replay observation are writable; a novel-proof/1
+// payload is refused by the shared validation before any mutation. It is a pure model
+// write: no command executes, no runtime authority is granted, and a rejected proof
+// never mutates the run.
 func (cr *CaseRun) RecordNovelProof(proof NovelProof, ts string) error {
 	if cr.caseRunState() != CaseRunAdjudicating {
 		return fmt.Errorf("case run %q cannot record a novel proof in state %q", cr.Case, cr.caseRunState())
@@ -385,9 +377,6 @@ func (cr *CaseRun) RecordNovelProof(proof NovelProof, ts string) error {
 	}
 	if cr.FindingState(finding.ID) != FindingNovelCandidate {
 		return fmt.Errorf("finding %q is not a novel candidate", finding.ID)
-	}
-	if proof.Schema != NovelProofSchemaV2 || proof.Observation == nil {
-		return fmt.Errorf("novel proof writes require schema %q carrying a replay observation, got schema %q", NovelProofSchemaV2, proof.Schema)
 	}
 	if err := validateNovelProof(proof); err != nil {
 		return err

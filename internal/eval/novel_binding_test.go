@@ -56,8 +56,8 @@ func replayFacts() NovelProofFacts {
 	}
 }
 
-// schemaV1ProofFor builds a valid historical novel-proof/1 proof with no observation,
-// exactly as writers emitted it before schema v2 existed.
+// schemaV1ProofFor builds the never-released novel-proof/1 shape: no observation and
+// caller-asserted digests only, the payload every gate must now refuse.
 func schemaV1ProofFor(f Finding) NovelProof {
 	facts := replayFacts()
 	return NovelProof{
@@ -232,29 +232,26 @@ func TestRecordNovelProofRefusesSchemaV1AndObservationlessWrites(t *testing.T) {
 	}
 }
 
-// Historical novel-proof/1 events remain decodable and verifiable exactly as before:
-// Append accepts a hand-built v1 payload, the log verifies, and the controlled promotion
-// still derives from it.
-func TestHistoricalSchemaV1NovelProofStillVerifies(t *testing.T) {
+// Novel-proof/1 carried caller-asserted digests and no observation, so it is refused
+// everywhere: Append rejects a hand-built /1 event without mutating the log, a log
+// already containing one fails Verify even under a recomputed hash, and such a proof
+// can never drive the controlled promotion.
+func TestSchemaV1NovelProofRefusedAtAppendVerifyAndPromotion(t *testing.T) {
 	cr := novelFindingsCaseRun(t, "f1")
-	payload, err := json.Marshal(schemaV1ProofFor(cr.Findings[0]))
-	if err != nil {
-		t.Fatal(err)
+	event := craftedNovelProofEvent(t, schemaV1ProofFor(cr.Findings[0]))
+	before := len(cr.Log.Events)
+	if _, err := cr.Log.Append(event); err == nil || !strings.Contains(err.Error(), NovelProofSchemaV2) {
+		t.Fatalf("Append(novel-proof/1) = %v, want refusal naming %s", err, NovelProofSchemaV2)
 	}
-	event := Event{Entity: EntityFinding, ID: "f1", Kind: EventNovelProof,
-		PreviousState: string(FindingNovelCandidate), NewState: string(FindingNovelCandidate),
-		TS: "3", Adjudicator: NovelProofAdjudicator, Payload: payload}
-	if _, err := cr.Log.Append(event); err != nil {
-		t.Fatalf("historical novel-proof/1 event must stay appendable: %v", err)
+	if len(cr.Log.Events) != before {
+		t.Fatalf("rejected /1 payload mutated the log: %d events", len(cr.Log.Events))
 	}
-	if err := cr.Log.Verify(); err != nil {
-		t.Fatalf("historical log with a /1 proof must verify: %v", err)
+	craftConfirm(t, &cr.Log, event)
+	if err := cr.Log.Verify(); err == nil || !strings.Contains(err.Error(), NovelProofSchemaV2) {
+		t.Fatalf("Verify(log containing a /1 proof under a recomputed hash) = %v, want refusal naming %s", err, NovelProofSchemaV2)
 	}
-	if err := cr.ConfirmNovel("f1", "4"); err != nil {
-		t.Fatalf("historical /1 proof must still promote: %v", err)
-	}
-	if got := cr.FindingState("f1"); got != FindingConfirmedNovel {
-		t.Fatalf("state after confirmation = %s, want CONFIRMED_NOVEL", got)
+	if err := cr.ConfirmNovel("f1", "4"); err == nil {
+		t.Fatal("ConfirmNovel promoted a refused novel-proof/1 event")
 	}
 }
 

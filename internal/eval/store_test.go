@@ -209,8 +209,8 @@ func TestReproFromEventsIgnoresMalformedConfirmation(t *testing.T) {
 	}
 }
 
-// promoteNovelFixtures records proofs and controlled promotions for f1 (applicable) and
-// f2 (non-applicable conformance), plus f3's historical direct CONFIRMED_NOVEL decide.
+// promoteNovelFixtures records f1's /2 proof and controlled promotion plus f2 and f3's
+// proof-less historical direct CONFIRMED_NOVEL decides (no conformance proofs exist).
 func promoteNovelFixtures(t *testing.T, cr *CaseRun) {
 	t.Helper()
 	byID := func(id string) Finding {
@@ -226,42 +226,25 @@ func promoteNovelFixtures(t *testing.T, cr *CaseRun) {
 	if err := cr.ConfirmNovel("f1", "4"); err != nil {
 		t.Fatal(err)
 	}
-	// The conformance proof is a historical novel-proof/1 record appended directly: the
-	// v2 write path is correctness saved-test only and refuses new conformance proofs
-	// until their executable rules exist (B2b2b2).
-	conformance := novelProofFor(byID("f2"))
-	conformance.Schema = NovelProofSchema
-	conformance.Observation = nil
-	conformance.ProofKind = NovelProofConformance
-	conformance.ProofRule = "novel-conformance@1"
-	conformance.Reproduction = NovelReproduction{Applies: false, Outcome: NotApplicable, ArtifactDigest: confirmDigestB}
-	conformancePayload, err := json.Marshal(conformance)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := cr.Log.Append(Event{Entity: EntityFinding, ID: "f2", Kind: EventNovelProof,
-		PreviousState: string(FindingNovelCandidate), NewState: string(FindingNovelCandidate),
-		TS: "3", Adjudicator: NovelProofAdjudicator, Payload: conformancePayload}); err != nil {
-		t.Fatalf("append historical conformance proof: %v", err)
-	}
-	if err := cr.ConfirmNovel("f2", "4"); err != nil {
-		t.Fatal(err)
-	}
-	decision := Decision{FindingID: "f3", UnmatchedOutcome: FindingConfirmedNovel, By: "reviewer", TS: "3", Reason: "verified novel"}
-	payload, err := json.Marshal(decision)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := cr.Log.Append(Event{Entity: EntityFinding, ID: "f3", Kind: EventDecide,
-		PreviousState: string(FindingNovelCandidate), NewState: string(FindingConfirmedNovel),
-		Reason: decision.Reason, TS: decision.TS, Adjudicator: decision.By, Payload: payload}); err != nil {
-		t.Fatalf("append historical novel decide: %v", err)
+	// Conformance proofs can no longer exist, so f2 joins f3 as a proof-less historical
+	// direct CONFIRMED_NOVEL decide: neither earns a proof-derived reproduction outcome.
+	for _, id := range []string{"f2", "f3"} {
+		decision := Decision{FindingID: id, UnmatchedOutcome: FindingConfirmedNovel, By: "reviewer", TS: "3", Reason: "verified novel"}
+		payload, err := json.Marshal(decision)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := cr.Log.Append(Event{Entity: EntityFinding, ID: id, Kind: EventDecide,
+			PreviousState: string(FindingNovelCandidate), NewState: string(FindingConfirmedNovel),
+			Reason: decision.Reason, TS: decision.TS, Adjudicator: decision.By, Payload: payload}); err != nil {
+			t.Fatalf("append historical novel decide: %v", err)
+		}
 	}
 }
 
 // Proof-promoted novelty derives reproduction only from a valid referenced proof:
-// applicable proofs reproduce, conformance non-applicable proofs are NotApplicable, and
-// historical or reference-tampered promotions stay absent (NotRun), never credited.
+// applicable proofs reproduce, while historical or reference-tampered promotions stay
+// absent (NotRun), never credited.
 func TestReproFromEventsCountsOnlyProofPromotedNovelty(t *testing.T) {
 	cr := novelFindingsCaseRun(t, "f1", "f2", "f3", "f4")
 	promoteNovelFixtures(t, cr)
@@ -279,7 +262,7 @@ func TestReproFromEventsCountsOnlyProofPromotedNovelty(t *testing.T) {
 	craftConfirm(t, &cr.Log, Event{Entity: EntityFinding, ID: "f4", Kind: EventNovelConfirm,
 		PreviousState: string(FindingNovelCandidate), NewState: string(FindingConfirmedNovel),
 		TS: "4", Adjudicator: NovelConfirmAdjudicator, Payload: confirm})
-	want := map[string]ReproOutcome{"f1": Reproduced, "f2": NotApplicable}
+	want := map[string]ReproOutcome{"f1": Reproduced}
 	if got := ReproFromEvents(*cr); !reflect.DeepEqual(got, want) {
 		t.Fatalf("ReproFromEvents() = %v, want proof-derived %v (historical and reference-tampered novelty stays NotRun)", got, want)
 	}
@@ -293,7 +276,7 @@ func TestNovelProofRunRoundtripKeepsReconstructionConsistent(t *testing.T) {
 	if err := cr.Close("5"); err != nil {
 		t.Fatalf("close promoted-novel case: %v", err)
 	}
-	wantRepro := map[string]ReproOutcome{"f1": Reproduced, "f2": NotApplicable}
+	wantRepro := map[string]ReproOutcome{"f1": Reproduced}
 	if got := ReproFromEvents(*cr); !reflect.DeepEqual(got, wantRepro) {
 		t.Fatalf("ReproFromEvents() = %v, want %v", got, wantRepro)
 	}

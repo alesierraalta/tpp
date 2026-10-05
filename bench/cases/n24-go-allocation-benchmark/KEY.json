@@ -1,0 +1,9 @@
+{"id":"n24-go-allocation-benchmark","language":"go","suite":"go test ./...","surface":"library",
+ "request":"the report refresh rendering behaviour","defects":[
+  {"id":"D1","file":"report.go","line":21,"class":"allocation-churn","keywords":["allocation","churn","sprintf","render","refresh"],
+   "description":"RenderBatch formats every row with fmt.Sprintf inside the refresh loop, so each render of the representative batch pays the formatter's per-row heap allocations for lines that a plain byte-builder and strconv.AppendInt produce byte-identically.",
+   "trigger":{"input":"go test -run '^$' -bench '^BenchmarkRenderBatch$' -benchmem -count=5",
+    "expected":"functional output preserved: the rendered lines stay byte-identical to the fixture's; with the rendering rewritten to a simpler builder/strconv strategy the measured allocs/op and B/op are lower than the fixture's, while the ns/op timings are descriptive only and assert no threshold",
+    "actual":"goos: linux\ngoarch: amd64\npkg: bench/n24-go-allocation-benchmark\ncpu: AMD Ryzen 7 5700                               \nBenchmarkRenderBatch-16    \t   50167\t     25579 ns/op\t    7693 B/op\t     256 allocs/op\nBenchmarkRenderBatch-16    \t   46695\t     23657 ns/op\t    7693 B/op\t     256 allocs/op\nBenchmarkRenderBatch-16    \t   45715\t     22302 ns/op\t    7693 B/op\t     256 allocs/op\nBenchmarkRenderBatch-16    \t   60393\t     21831 ns/op\t    7693 B/op\t     256 allocs/op\nBenchmarkRenderBatch-16    \t   53272\t     20660 ns/op\t    7693 B/op\t     256 allocs/op\nPASS\nok  \tbench/n24-go-allocation-benchmark\t8.093s\n"},
+   "why_missed":"The suite asserts only rendered text — exact lines, batch order, empty batches — which the format-based and the builder rendering both satisfy byte for byte, and it records no allocation metric, so churn behind identical output stays invisible to a green suite."}
+ ]}

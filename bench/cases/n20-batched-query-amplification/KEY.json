@@ -1,0 +1,9 @@
+{"id":"n20-batched-query-amplification","language":"node","suite":"node --test","surface":"library",
+ "request":"the order-report behaviour","defects":[
+  {"id":"D1","file":"src/report.js","line":12,"class":"query-amplification","keywords":["batch","items","amplification","n+1"],
+   "description":"listOrders fills each order with its own itemsFor(id) call instead of one itemsForOrders(ids) batch, so a listing reads the repository once per row.",
+   "trigger":{"input":"import { ReportService } from \"./src/report.js\"; let calls = 0; const orders = [{ id: \"o1\", status: \"paid\" }, { id: \"o2\", status: \"pending\" }]; const repo = { orders(f) { calls++; return orders; }, itemsFor(id) { calls++; return []; }, itemsForOrders(ids) { calls++; return []; } }; new ReportService(repo).listOrders({}); console.log(calls);",
+    "expected":"2",
+    "actual":"3"},
+   "why_missed":"The suite asserts only the returned rows and items, never the number of repository calls, so one query per row reads as correct output."}
+ ]}

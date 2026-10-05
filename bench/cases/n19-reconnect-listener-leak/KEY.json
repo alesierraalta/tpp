@@ -1,0 +1,9 @@
+{"id":"n19-reconnect-listener-leak","language":"node","suite":"node --test","surface":"library",
+ "request":"the session-subscription behaviour","defects":[
+  {"id":"D1","file":"src/realtime.js","line":27,"class":"listener-leak","keywords":["reconnect","session","disconnect"],
+   "description":"reconnect() only clears the connected flag and opens a new session without bus.off, so the previous session listener stays attached and keeps recording after a later disconnect.",
+   "trigger":{"input":"import { EventEmitter } from \"node:events\"; import { RealtimeClient } from \"./src/realtime.js\"; const bus = new EventEmitter(); const rt = new RealtimeClient(bus); rt.connect(); rt.reconnect(); rt.disconnect(); bus.emit(\"message\",\"late\"); console.log(JSON.stringify({listeners:bus.listenerCount(\"message\"), last:rt.last}));",
+    "expected":"{\"listeners\":0,\"last\":null}",
+    "actual":"{\"listeners\":1,\"last\":\"late\"}"},
+   "why_missed":"The suite reconnects once and only asserts that a message still arrives, so it never counts the session listeners or checks that a reconnected-then-disconnected client stops recording."}
+ ]}

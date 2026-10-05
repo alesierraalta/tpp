@@ -191,8 +191,7 @@ func TestProofFromReplayRequiresBlindSemanticFacts(t *testing.T) {
 		{"expected behavior", func(f *NovelProofFacts) { f.ExpectedBehavior = "" }, "expected_behavior"},
 		{"failure condition", func(f *NovelProofFacts) { f.FailureCondition = "" }, "failure_condition"},
 		{"mechanism", func(f *NovelProofFacts) { f.Mechanism = " " }, "mechanism"},
-		{"proof kind", func(f *NovelProofFacts) { f.ProofKind = "" }, "kind"},
-		{"proof rule", func(f *NovelProofFacts) { f.ProofRule = "" }, "derived from observation rule version"},
+		{"mismatched proof kind", func(f *NovelProofFacts) { f.ProofKind = NovelProofConformance }, "kind"},
 		{"mismatched proof rule", func(f *NovelProofFacts) { f.ProofRule = "novel-saved-test@2" }, "derived from observation rule version"},
 		{"adjudicated by", func(f *NovelProofFacts) { f.AdjudicatedBy = "" }, "adjudicated_by"},
 		{"adjudicated reason", func(f *NovelProofFacts) { f.AdjudicatedReason = "" }, "adjudicated_reason"},
@@ -206,6 +205,35 @@ func TestProofFromReplayRequiresBlindSemanticFacts(t *testing.T) {
 				t.Fatalf("ProofFromReplay() = %v, want error mentioning %q", err, tt.want)
 			}
 		})
+	}
+}
+
+// A blank ProofKind/ProofRule is derived from the replay observation — the correctness
+// saved-test kind and the rule mapped from its rule version — instead of refused. A
+// non-blank value that contradicts the derivation is still refused.
+func TestProofFromReplayDerivesBlankProofIdentity(t *testing.T) {
+	finding := Finding{ID: "f1", Row: 1, Fingerprint: strings.Repeat("0", 63) + "1", Location: "src/file1.go:1"}
+	facts := replayFacts()
+	facts.ProofKind, facts.ProofRule = "", ""
+	proof, err := ProofFromReplay(finding, facts, supportedReplayObservation())
+	if err != nil {
+		t.Fatalf("ProofFromReplay(blank proof identity) = %v, want the derived kind and rule", err)
+	}
+	if proof.ProofKind != NovelProofSavedTest {
+		t.Fatalf("proof kind = %q, want the derived %q", proof.ProofKind, NovelProofSavedTest)
+	}
+	if proof.ProofRule != novelSavedTestRuleV1 {
+		t.Fatalf("proof rule = %q, want the derived %q", proof.ProofRule, novelSavedTestRuleV1)
+	}
+	mismatched := replayFacts()
+	mismatched.ProofRule = "novel-saved-test@2"
+	if _, err := ProofFromReplay(finding, mismatched, supportedReplayObservation()); err == nil || !strings.Contains(err.Error(), "derived from observation rule version") {
+		t.Fatalf("ProofFromReplay(mismatched rule) = %v, want a refusal naming the derivation", err)
+	}
+	wrongKind := replayFacts()
+	wrongKind.ProofKind = NovelProofConformance
+	if _, err := ProofFromReplay(finding, wrongKind, supportedReplayObservation()); err == nil || !strings.Contains(err.Error(), "kind") {
+		t.Fatalf("ProofFromReplay(non-saved-test kind) = %v, want a refusal naming the kind", err)
 	}
 }
 

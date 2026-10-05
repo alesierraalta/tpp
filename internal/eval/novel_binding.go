@@ -43,8 +43,9 @@ func validNovelControlName(name string) bool {
 
 // NovelProofFacts are the blind semantic facts behind a proof: what the finding means and
 // who adjudicated it. They remain caller-supplied (never derived from the replay) and are
-// required nonblank by proof validation. ProofRule is additionally refused unless it
-// equals the rule derived from the replay's rule version.
+// required nonblank by proof validation — except ProofKind and ProofRule, which are
+// derived from the replay observation when left blank; a non-blank ProofRule that
+// contradicts the derived rule is refused.
 type NovelProofFacts struct {
 	Domain            Domain
 	Severity          Severity
@@ -63,8 +64,9 @@ type NovelProofFacts struct {
 // replay. It derives every digest field from the typed observation — SourceBinding is the
 // staged subject source tree, EvidenceDigests the sorted test/output/control digests, the
 // artifact the subject run output — plus Applies/Outcome and Attempts=1, derives
-// ProofRule from the single rule mapping of the observation's rule version (refusing an
-// unknown version or a mismatching caller rule), and refuses any inconclusive
+// ProofKind and ProofRule from the observation when the caller leaves them blank
+// (refusing an unknown rule version or a non-blank caller rule that contradicts the
+// derivation), and refuses any inconclusive
 // observation, malformed or missing digest, test digest mismatch, or blank blind semantic
 // fact. It executes nothing and records nothing. Correctness-only: conformance or
 // command facts are refused until their executable rules exist.
@@ -74,8 +76,15 @@ func ProofFromReplay(finding Finding, facts NovelProofFacts, replay bench.NovelR
 	if err != nil {
 		return NovelProof{}, fmt.Errorf("novel proof from replay: %w", err)
 	}
-	if facts.ProofRule != expectedRule {
+	// Blank proof identity is derived from the observation: the saved-test rule mapped
+	// from its rule version and the correctness saved-test kind. A non-blank rule that
+	// contradicts the derivation is refused; a non-blank kind must still be the saved-test
+	// kind, which validateNovelProof's observation binding refuses otherwise.
+	if facts.ProofRule != "" && facts.ProofRule != expectedRule {
 		return NovelProof{}, fmt.Errorf("novel proof from replay: novel proof/2 proof rule %q must be the saved-test rule %q derived from observation rule version %q", facts.ProofRule, expectedRule, observation.RuleVersion)
+	}
+	if facts.ProofKind == "" {
+		facts.ProofKind = NovelProofSavedTest
 	}
 	sourceBinding, evidence, artifact, err := novelDigestsFromObservation(observation)
 	if err != nil {

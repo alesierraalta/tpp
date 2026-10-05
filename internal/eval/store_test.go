@@ -226,12 +226,23 @@ func promoteNovelFixtures(t *testing.T, cr *CaseRun) {
 	if err := cr.ConfirmNovel("f1", "4"); err != nil {
 		t.Fatal(err)
 	}
+	// The conformance proof is a historical novel-proof/1 record appended directly: the
+	// v2 write path is correctness saved-test only and refuses new conformance proofs
+	// until their executable rules exist (B2b2b2).
 	conformance := novelProofFor(byID("f2"))
+	conformance.Schema = NovelProofSchema
+	conformance.Observation = nil
 	conformance.ProofKind = NovelProofConformance
 	conformance.ProofRule = "novel-conformance@1"
 	conformance.Reproduction = NovelReproduction{Applies: false, Outcome: NotApplicable, ArtifactDigest: confirmDigestB}
-	if err := cr.RecordNovelProof(conformance, "3"); err != nil {
+	conformancePayload, err := json.Marshal(conformance)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := cr.Log.Append(Event{Entity: EntityFinding, ID: "f2", Kind: EventNovelProof,
+		PreviousState: string(FindingNovelCandidate), NewState: string(FindingNovelCandidate),
+		TS: "3", Adjudicator: NovelProofAdjudicator, Payload: conformancePayload}); err != nil {
+		t.Fatalf("append historical conformance proof: %v", err)
 	}
 	if err := cr.ConfirmNovel("f2", "4"); err != nil {
 		t.Fatal(err)

@@ -34,19 +34,15 @@ func novelFindingsCaseRun(t *testing.T, ids ...string) *CaseRun {
 	return cr
 }
 
-// novelProofFor returns a schema-valid saved-test proof bound to the admitted finding row.
+// novelProofFor returns a schema-valid saved-test proof bound to the admitted finding
+// row, derived through the pure constructor from a supported fabricated observation so
+// its digest fields stay internally coherent.
 func novelProofFor(f Finding) NovelProof {
-	return NovelProof{
-		Schema: NovelProofSchema, FindingID: f.ID, Fingerprint: f.Fingerprint, Location: f.Location,
-		Domain: Correctness, Severity: High, IssueType: "logic",
-		ExpectedBehavior: "the reply is sent exactly once",
-		FailureCondition: "a reconnect after a partial write resends the reply",
-		Mechanism:        "the idempotency key is dropped when the socket reconnects",
-		ProofKind:        NovelProofSavedTest, ProofRule: "novel-saved-test@1",
-		EvidenceDigests: []string{confirmDigestA, confirmDigestB}, SourceBinding: "sha256:" + strings.Repeat("d", 64),
-		Reproduction:  NovelReproduction{Applies: true, Outcome: Reproduced, ArtifactDigest: confirmDigestA, Attempts: 1},
-		AdjudicatedBy: "reviewer", AdjudicatedReason: "rows checked against the ledger", AdjudicatedTS: "3",
+	proof, err := ProofFromReplay(f, replayFacts(), supportedReplayObservation())
+	if err != nil {
+		panic(fmt.Sprintf("novelProofFor: %v", err))
 	}
+	return proof
 }
 
 // The controlled promotion path: direct Decide(CONFIRMED_NOVEL) stays refused, a recorded

@@ -8,8 +8,13 @@ import (
 	"strings"
 )
 
-// NovelProofSchema is the schema identity of a recorded novel proof.
+// NovelProofSchema is the schema identity of a recorded novel proof. Version 1 proofs
+// carry caller-asserted digest fields only and remain decodable/verifiable for history.
 const NovelProofSchema = "novel-proof/1"
+
+// NovelProofSchemaV2 is the current schema identity: v2 binds every proof to a required,
+// digest-only typed replay observation from an actual bench replay.
+const NovelProofSchemaV2 = "novel-proof/2"
 
 // Novel proof kinds name the evidence class behind a recorded proof.
 const (
@@ -26,29 +31,61 @@ type NovelReproduction struct {
 	Attempts       int          `json:"attempts"`
 }
 
+// NovelObservationProcess is the digest-only process record of one replay side (subject
+// or control): classification facts plus "sha256:"-prefixed digests only. Raw runner
+// output never enters a recorded observation.
+type NovelObservationProcess struct {
+	Classification  string `json:"classification"`
+	ExitCode        int    `json:"exit_code"`
+	Started         bool   `json:"started"`
+	TimedOut        bool   `json:"timed_out"`
+	Complete        bool   `json:"complete"`
+	OutputTruncated bool   `json:"output_truncated"`
+	Reason          string `json:"reason,omitempty"`
+	OutputSHA256    string `json:"output_sha256"`
+	SourceSHA256    string `json:"source_sha256"`
+	ControlSHA256   string `json:"control_sha256,omitempty"`
+	TestSHA256      string `json:"test_sha256"`
+}
+
+// NovelProofObservation is the required typed payload of a novel-proof/2 event: the
+// digest-only facts of the actual subject/control replay the proof's digest fields are
+// bound to, plus the rule identity and both reproduction gates.
+type NovelProofObservation struct {
+	RuleVersion           string                  `json:"rule_version"`
+	ControlName           string                  `json:"control_name"`
+	TestSHA256            string                  `json:"test_sha256"`
+	Subject               NovelObservationProcess `json:"subject"`
+	Control               NovelObservationProcess `json:"control"`
+	SupportedReproduction bool                    `json:"supported_reproduction"`
+	AdjudicationRequired  bool                    `json:"adjudication_required"`
+}
+
 // NovelProof is typed evidence recorded for a NOVEL_CANDIDATE finding. The pure model
 // checks schema, identity, and presence only: it never executes anything and never
 // asserts the recorded facts are true; independent runtime verification is a separate
-// (B2) concern that supplies the verified facts recorded here.
+// (B2) concern that supplies the verified facts recorded here. A novel-proof/2 proof
+// carries that observation and its digest fields must match it.
 type NovelProof struct {
-	Schema            string            `json:"schema"`
-	FindingID         string            `json:"finding_id"`
-	Fingerprint       string            `json:"fingerprint"`
-	Location          string            `json:"location"`
-	Domain            Domain            `json:"domain"`
-	Severity          Severity          `json:"severity"`
-	IssueType         string            `json:"issue_type"`
-	ExpectedBehavior  string            `json:"expected_behavior"`
-	FailureCondition  string            `json:"failure_condition"`
-	Mechanism         string            `json:"mechanism"`
-	ProofKind         string            `json:"proof_kind"`
-	ProofRule         string            `json:"proof_rule"`
-	EvidenceDigests   []string          `json:"evidence_digests"`
-	SourceBinding     string            `json:"source_binding"`
-	Reproduction      NovelReproduction `json:"reproduction"`
-	AdjudicatedBy     string            `json:"adjudicated_by"`
-	AdjudicatedReason string            `json:"adjudicated_reason"`
-	AdjudicatedTS     string            `json:"adjudicated_ts"`
+	Schema            string                 `json:"schema"`
+	FindingID         string                 `json:"finding_id"`
+	Fingerprint       string                 `json:"fingerprint"`
+	Location          string                 `json:"location"`
+	Domain            Domain                 `json:"domain"`
+	Severity          Severity               `json:"severity"`
+	IssueType         string                 `json:"issue_type"`
+	ExpectedBehavior  string                 `json:"expected_behavior"`
+	FailureCondition  string                 `json:"failure_condition"`
+	Mechanism         string                 `json:"mechanism"`
+	ProofKind         string                 `json:"proof_kind"`
+	ProofRule         string                 `json:"proof_rule"`
+	EvidenceDigests   []string               `json:"evidence_digests"`
+	SourceBinding     string                 `json:"source_binding"`
+	Reproduction      NovelReproduction      `json:"reproduction"`
+	AdjudicatedBy     string                 `json:"adjudicated_by"`
+	AdjudicatedReason string                 `json:"adjudicated_reason"`
+	AdjudicatedTS     string                 `json:"adjudicated_ts"`
+	Observation       *NovelProofObservation `json:"observation,omitempty"`
 }
 
 // NovelProofBinding exposes an effective proof with the digest of its recording event.
@@ -78,10 +115,34 @@ func versionedIdentity(rule string) bool {
 
 // validateNovelProof checks schema, identity, taxonomy, presence, evidence shape, human
 // adjudication attribution, and reproduction coherence. Content truth is out of scope.
+// novel-proof/1 accepts no observation and is history-only; novel-proof/2 requires one
+// and cross-checks it against the proof's digest fields and the conclusive-replay
+// refusal rules, so Append, Verify, and I9 reject tampered or inconclusive payloads too.
 func validateNovelProof(proof NovelProof) error {
-	if proof.Schema != NovelProofSchema {
-		return fmt.Errorf("novel proof schema %q is not %q", proof.Schema, NovelProofSchema)
+	switch proof.Schema {
+	case NovelProofSchema:
+		if proof.Observation != nil {
+			return fmt.Errorf("novel proof schema %q must not carry a replay observation", NovelProofSchema)
+		}
+	case NovelProofSchemaV2:
+		if proof.Observation == nil {
+			return fmt.Errorf("novel proof schema %q requires a replay observation", NovelProofSchemaV2)
+		}
+	default:
+		return fmt.Errorf("novel proof schema %q is not %q or %q", proof.Schema, NovelProofSchema, NovelProofSchemaV2)
 	}
+	if err := validateNovelProofBody(proof); err != nil {
+		return err
+	}
+	if proof.Schema == NovelProofSchemaV2 {
+		return validateNovelObservationBinding(proof)
+	}
+	return nil
+}
+
+// validateNovelProofBody applies the schema-independent proof checks: identity, taxonomy,
+// presence, evidence shape, adjudication attribution, and reproduction coherence.
+func validateNovelProofBody(proof NovelProof) error {
 	if strings.TrimSpace(proof.FindingID) == "" {
 		return fmt.Errorf("novel proof finding id is required")
 	}
@@ -310,9 +371,10 @@ func novelProofPromotion(events []Event, findingID string) (NovelProof, bool) {
 }
 
 // RecordNovelProof appends a state-preserving novel-proof event for an existing
-// NOVEL_CANDIDATE finding of an adjudicating case run, bound to the admitted row. It is a
-// pure model write: no command executes, no runtime authority is granted, and a rejected
-// proof never mutates the run.
+// NOVEL_CANDIDATE finding of an adjudicating case run, bound to the admitted row. Only
+// novel-proof/2 proofs carrying their replay observation may be written; schema v1 is
+// history-only. It is a pure model write: no command executes, no runtime authority is
+// granted, and a rejected proof never mutates the run.
 func (cr *CaseRun) RecordNovelProof(proof NovelProof, ts string) error {
 	if cr.caseRunState() != CaseRunAdjudicating {
 		return fmt.Errorf("case run %q cannot record a novel proof in state %q", cr.Case, cr.caseRunState())
@@ -323,6 +385,9 @@ func (cr *CaseRun) RecordNovelProof(proof NovelProof, ts string) error {
 	}
 	if cr.FindingState(finding.ID) != FindingNovelCandidate {
 		return fmt.Errorf("finding %q is not a novel candidate", finding.ID)
+	}
+	if proof.Schema != NovelProofSchemaV2 || proof.Observation == nil {
+		return fmt.Errorf("novel proof writes require schema %q carrying a replay observation, got schema %q", NovelProofSchemaV2, proof.Schema)
 	}
 	if err := validateNovelProof(proof); err != nil {
 		return err

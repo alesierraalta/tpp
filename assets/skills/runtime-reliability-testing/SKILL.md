@@ -70,5 +70,6 @@ Report: falsifiable invariant table (claim | bound and provenance | observed | c
 
 - [references/patterns.md](references/patterns.md) — coordinated omission, tail latency amplification.
 - [references/rdd-receipt.md](references/rdd-receipt.md) — receipt contract for `lens:reliability`.
+- [references/performance-efficiency.md](references/performance-efficiency.md) — resource efficiency: allocation, retention, hot-path scaling and I/O amplification evidence.
 - [assets/k6-arrival-rate-template.js](assets/k6-arrival-rate-template.js) — k6 open workload script.
 - Sibling skills: `resilience-fault-injection` (fault injection, retries, breakers) · `test-strategy` · `docker-test-containers` · `exploit-testing` · `real-run-validation`.

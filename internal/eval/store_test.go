@@ -223,7 +223,7 @@ func promoteNovelFixtures(t *testing.T, cr *CaseRun) {
 	if err := cr.RecordNovelProof(novelProofFor(byID("f1")), "3"); err != nil {
 		t.Fatal(err)
 	}
-	if err := cr.ConfirmNovel("f1", "4"); err != nil {
+	if err := cr.ConfirmNovel("f1", "promoter", "proof verified independently", "4"); err != nil {
 		t.Fatal(err)
 	}
 	// Conformance proofs can no longer exist, so f2 joins f3 as a proof-less historical
@@ -255,7 +255,8 @@ func TestReproFromEventsCountsOnlyProofPromotedNovelty(t *testing.T) {
 	if err := cr.RecordNovelProof(novelProofFor(*f4), "3"); err != nil {
 		t.Fatal(err)
 	}
-	confirm, err := json.Marshal(novelConfirmPayload{FindingID: "f4", ProofHash: confirmDigestB, SourceBinding: "sha256:" + strings.Repeat("d", 64)})
+	confirm, err := json.Marshal(novelConfirmPayload{FindingID: "f4", ProofHash: confirmDigestB, SourceBinding: "sha256:" + strings.Repeat("d", 64),
+		By: "promoter", Reason: "proof verified independently"})
 	if err != nil {
 		t.Fatal(err)
 	}

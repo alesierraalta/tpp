@@ -135,51 +135,24 @@ func AppendNovelBacklog(root string, record NovelBacklogRecord) error {
 		return err
 	}
 	path := filepath.Join(backlogDir, record.CaseID+".jsonl")
-	info, err := os.Lstat(path)
-	if err == nil {
-		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-			return fmt.Errorf("backlog path %q is not a regular non-symlink file", path)
+	existing, err := readNovelBacklogFile(path, record.CaseID)
+	if err != nil {
+		return err
+	}
+	want := bytes.TrimSuffix(line, []byte{'\n'})
+	found := false
+	for _, prior := range existing {
+		if !sameBacklogIdentity(prior, record) {
+			continue
 		}
-		contents, readErr := os.ReadFile(path)
-		if readErr != nil {
-			return fmt.Errorf("read backlog: %w", readErr)
+		canonical, err := json.Marshal(prior)
+		if err != nil || !bytes.Equal(canonical, want) {
+			return fmt.Errorf("backlog identity conflicts with existing content")
 		}
-		if len(contents) > 0 && contents[len(contents)-1] != '\n' {
-			return fmt.Errorf("backlog %q has an incomplete final line", path)
-		}
-		found := false
-		scanner := bufio.NewScanner(bytes.NewReader(contents))
-		scanner.Buffer(make([]byte, 4096), 16*1024*1024)
-		for scanner.Scan() {
-			var existing NovelBacklogRecord
-			if err := json.Unmarshal(scanner.Bytes(), &existing); err != nil {
-				return fmt.Errorf("malformed backlog record: %w", err)
-			}
-			if err := existing.validate(); err != nil {
-				return fmt.Errorf("invalid existing backlog record: %w", err)
-			}
-			if existing.CaseID != record.CaseID {
-				return fmt.Errorf("backlog record case %q does not match file case %q", existing.CaseID, record.CaseID)
-			}
-			canonical, err := json.Marshal(existing)
-			if err != nil || !bytes.Equal(canonical, scanner.Bytes()) {
-				return fmt.Errorf("existing backlog record is not canonical JSON")
-			}
-			if sameBacklogIdentity(existing, record) {
-				if !bytes.Equal(scanner.Bytes(), bytes.TrimSuffix(line, []byte{'\n'})) {
-					return fmt.Errorf("backlog identity conflicts with existing content")
-				}
-				found = true
-			}
-		}
-		if err := scanner.Err(); err != nil {
-			return fmt.Errorf("read backlog records: %w", err)
-		}
-		if found {
-			return nil
-		}
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("inspect backlog: %w", err)
+		found = true
+	}
+	if found {
+		return nil
 	}
 
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
@@ -191,6 +164,77 @@ func AppendNovelBacklog(root string, record NovelBacklogRecord) error {
 		return fmt.Errorf("append backlog record: %w", err)
 	}
 	return nil
+}
+
+// NovelBacklogMatches returns the records already stored in root/backlog/<caseID>.jsonl
+// for runID/findingID, validating the file exactly as AppendNovelBacklog does (regular
+// non-symlink file, complete final line, every record valid, canonical, and for this
+// case). A backlog file that does not exist yet yields no records. The function only
+// reads: how a missing, identical, stale, or conflicting record is reconciled is the
+// caller's decision.
+func NovelBacklogMatches(root, caseID, runID, findingID string) ([]NovelBacklogRecord, error) {
+	if !validBacklogCaseID(caseID) {
+		return nil, fmt.Errorf("backlog case id %q is not a safe path component", caseID)
+	}
+	records, err := readNovelBacklogFile(filepath.Join(root, "backlog", caseID+".jsonl"), caseID)
+	if err != nil {
+		return nil, err
+	}
+	var matches []NovelBacklogRecord
+	for _, record := range records {
+		if record.RunID == runID && record.FindingID == findingID {
+			matches = append(matches, record)
+		}
+	}
+	return matches, nil
+}
+
+// readNovelBacklogFile parses and validates every canonical record stored at path for
+// caseID. A missing file yields no records; a non-regular file, an incomplete final line,
+// a malformed or invalid record, a foreign case row, or non-canonical JSON is an error,
+// so both the writer and the read-only lookup fail closed on the same gate.
+func readNovelBacklogFile(path, caseID string) ([]NovelBacklogRecord, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("inspect backlog: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("backlog path %q is not a regular non-symlink file", path)
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read backlog: %w", err)
+	}
+	if len(contents) > 0 && contents[len(contents)-1] != '\n' {
+		return nil, fmt.Errorf("backlog %q has an incomplete final line", path)
+	}
+	var records []NovelBacklogRecord
+	scanner := bufio.NewScanner(bytes.NewReader(contents))
+	scanner.Buffer(make([]byte, 4096), 16*1024*1024)
+	for scanner.Scan() {
+		var existing NovelBacklogRecord
+		if err := json.Unmarshal(scanner.Bytes(), &existing); err != nil {
+			return nil, fmt.Errorf("malformed backlog record: %w", err)
+		}
+		if err := existing.validate(); err != nil {
+			return nil, fmt.Errorf("invalid existing backlog record: %w", err)
+		}
+		if existing.CaseID != caseID {
+			return nil, fmt.Errorf("backlog record case %q does not match file case %q", existing.CaseID, caseID)
+		}
+		canonical, err := json.Marshal(existing)
+		if err != nil || !bytes.Equal(canonical, scanner.Bytes()) {
+			return nil, fmt.Errorf("existing backlog record is not canonical JSON")
+		}
+		records = append(records, existing)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read backlog records: %w", err)
+	}
+	return records, nil
 }
 
 func sameBacklogIdentity(a, b NovelBacklogRecord) bool {

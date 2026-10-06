@@ -67,7 +67,7 @@ func TestNovelProofControlledPromotionFlow(t *testing.T) {
 	if got := cr.FindingState("f1"); got != FindingNovelCandidate {
 		t.Fatalf("state after proof = %s, want state-preserving NOVEL_CANDIDATE", got)
 	}
-	if err := cr.ConfirmNovel("f1", "4"); err != nil {
+	if err := cr.ConfirmNovel("f1", "promoter", "proof verified independently", "4"); err != nil {
 		t.Fatalf("ConfirmNovel() = %v, want controlled promotion", err)
 	}
 	if got := cr.FindingState("f1"); got != FindingConfirmedNovel {
@@ -197,7 +197,7 @@ func TestTamperedAndRehashedNovelProofFailVerification(t *testing.T) {
 	if proofIndex < 0 {
 		t.Fatal("recorded proof event missing")
 	}
-	if err := cr.ConfirmNovel("f1", "4"); err != nil {
+	if err := cr.ConfirmNovel("f1", "promoter", "proof verified independently", "4"); err != nil {
 		t.Fatal(err)
 	}
 	cr.Log.Events[proofIndex].Payload = bytes.Replace(cr.Log.Events[proofIndex].Payload, []byte(`"high"`), []byte(`"medium"`), 1)
@@ -220,13 +220,13 @@ func TestTamperedAndRehashedNovelProofFailVerification(t *testing.T) {
 // in the new adjudication epoch, without mutating the run, until one is recorded again.
 func TestConfirmNovelRequiresFreshProofAfterReopen(t *testing.T) {
 	cr := novelFindingsCaseRun(t, "f1")
-	if err := cr.ConfirmNovel("f1", "3"); err == nil || !strings.Contains(err.Error(), "proof") {
+	if err := cr.ConfirmNovel("f1", "promoter", "proof verified independently", "3"); err == nil || !strings.Contains(err.Error(), "proof") {
 		t.Fatalf("ConfirmNovel without any proof = %v, want refusal", err)
 	}
 	if err := cr.RecordNovelProof(novelProofFor(cr.Findings[0]), "3"); err != nil {
 		t.Fatal(err)
 	}
-	if err := cr.ConfirmNovel("f1", "4"); err != nil {
+	if err := cr.ConfirmNovel("f1", "promoter", "proof verified independently", "4"); err != nil {
 		t.Fatal(err)
 	}
 	if err := cr.Reopen("f1", "needs a second look", "reviewer", "5"); err != nil {
@@ -239,7 +239,7 @@ func TestConfirmNovelRequiresFreshProofAfterReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := len(cr.Log.Events)
-	if err := cr.ConfirmNovel("f1", "7"); err == nil || !strings.Contains(err.Error(), "proof") {
+	if err := cr.ConfirmNovel("f1", "promoter", "proof verified independently", "7"); err == nil || !strings.Contains(err.Error(), "proof") {
 		t.Fatalf("ConfirmNovel with only a pre-reopen proof = %v, want stale-proof refusal", err)
 	}
 	if len(cr.Log.Events) != before || cr.FindingState("f1") != FindingNovelCandidate {
@@ -248,10 +248,162 @@ func TestConfirmNovelRequiresFreshProofAfterReopen(t *testing.T) {
 	if err := cr.RecordNovelProof(novelProofFor(cr.Findings[0]), "8"); err != nil {
 		t.Fatalf("fresh proof must be accepted: %v", err)
 	}
-	if err := cr.ConfirmNovel("f1", "9"); err != nil {
+	if err := cr.ConfirmNovel("f1", "promoter", "proof verified independently", "9"); err != nil {
 		t.Fatalf("fresh proof must promote: %v", err)
 	}
 	if got := cr.FindingState("f1"); got != FindingConfirmedNovel {
 		t.Fatalf("state after fresh promotion = %s, want CONFIRMED_NOVEL", got)
 	}
+}
+
+// The promotion payload must record the declared confirmer and reason the human
+// separation-of-duties decision requires: a payload missing either field (or carrying a
+// blank one) is refused at Append, at Verify under a recomputed hash chain, and as the
+// I9 invariant; a tampered recorded by breaks the hash chain; the model layer itself
+// refuses the proof's own adjudicator, and the accepted declarations are recorded
+// trimmed. Identities are self-declared strings, not authenticated principals.
+func TestNovelConfirmPayloadRequiresDeclaredByAndReason(t *testing.T) {
+	// legacyPayload is the never-released pre-separation shape: no confirmer, no reason.
+	type legacyPayload struct {
+		FindingID     string `json:"finding_id"`
+		ProofHash     string `json:"proof_hash"`
+		SourceBinding string `json:"source_binding"`
+	}
+	type payloadWithBy struct {
+		FindingID     string `json:"finding_id"`
+		ProofHash     string `json:"proof_hash"`
+		SourceBinding string `json:"source_binding"`
+		By            string `json:"by"`
+	}
+	// prep records the finding's proof and returns the case run, the proof event, and the
+	// decoded proof its payload must bind to.
+	prep := func(t *testing.T) (*CaseRun, Event, NovelProof) {
+		t.Helper()
+		cr := novelFindingsCaseRun(t, "f1")
+		if err := cr.RecordNovelProof(novelProofFor(cr.Findings[0]), "3"); err != nil {
+			t.Fatal(err)
+		}
+		for _, event := range cr.Log.Events {
+			if event.Kind == EventNovelProof {
+				proof, err := decodeNovelProof(event)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return cr, event, proof
+			}
+		}
+		t.Fatal("recorded proof event missing")
+		return nil, Event{}, NovelProof{}
+	}
+	confirmEvent := func(payload json.RawMessage) Event {
+		return Event{Entity: EntityFinding, ID: "f1", Kind: EventNovelConfirm,
+			PreviousState: string(FindingNovelCandidate), NewState: string(FindingConfirmedNovel),
+			TS: "4", Adjudicator: NovelConfirmAdjudicator, Payload: payload}
+	}
+	validPayload := func(t *testing.T, pe Event, proof NovelProof) json.RawMessage {
+		t.Helper()
+		data, err := json.Marshal(novelConfirmPayload{FindingID: "f1", ProofHash: pe.Hash,
+			SourceBinding: proof.SourceBinding, By: "promoter", Reason: "second look"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
+	for _, tt := range []struct {
+		name    string
+		want    string
+		payload func(Event, NovelProof) json.RawMessage
+	}{
+		{"missing by and reason", "by", func(pe Event, proof NovelProof) json.RawMessage {
+			data, _ := json.Marshal(legacyPayload{FindingID: "f1", ProofHash: pe.Hash, SourceBinding: proof.SourceBinding})
+			return data
+		}},
+		{"blank by", "by", func(pe Event, proof NovelProof) json.RawMessage {
+			data, _ := json.Marshal(novelConfirmPayload{FindingID: "f1", ProofHash: pe.Hash,
+				SourceBinding: proof.SourceBinding, By: " ", Reason: "second look"})
+			return data
+		}},
+		{"missing reason", "reason", func(pe Event, proof NovelProof) json.RawMessage {
+			data, _ := json.Marshal(payloadWithBy{FindingID: "f1", ProofHash: pe.Hash,
+				SourceBinding: proof.SourceBinding, By: "promoter"})
+			return data
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cr, pe, proof := prep(t)
+			payload := tt.payload(pe, proof)
+			before := len(cr.Log.Events)
+			if _, err := cr.Log.Append(confirmEvent(payload)); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Append() = %v, want error mentioning %q", err, tt.want)
+			}
+			if len(cr.Log.Events) != before || cr.FindingState("f1") != FindingNovelCandidate {
+				t.Fatalf("refused payload mutated the run: events %d, state %s", len(cr.Log.Events), cr.FindingState("f1"))
+			}
+			craftConfirm(t, &cr.Log, confirmEvent(payload))
+			if err := cr.Log.Verify(); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Verify() = %v, want error mentioning %q", err, tt.want)
+			}
+			found := false
+			for _, violation := range CheckCaseRun(cr) {
+				if violation.ID == "I9" && strings.Contains(violation.Detail, tt.want) {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("CheckCaseRun() = %+v, want I9 mentioning %q", CheckCaseRun(cr), tt.want)
+			}
+		})
+	}
+
+	// A tampered recorded by fails verification through the hash chain: the payload is
+	// hashed into the event, so editing the declaration in place cannot verify.
+	t.Run("tampered declared by fails verification", func(t *testing.T) {
+		cr, pe, proof := prep(t)
+		if _, err := cr.Log.Append(confirmEvent(validPayload(t, pe, proof))); err != nil {
+			t.Fatal(err)
+		}
+		if err := cr.Log.Verify(); err != nil {
+			t.Fatalf("valid promotion must verify: %v", err)
+		}
+		last := len(cr.Log.Events) - 1
+		tampered := bytes.Replace(cr.Log.Events[last].Payload, []byte(`"promoter"`), []byte(`"mallory"`), 1)
+		if bytes.Equal(tampered, cr.Log.Events[last].Payload) {
+			t.Fatal("tamper did not change the payload")
+		}
+		cr.Log.Events[last].Payload = tampered
+		if err := cr.Log.Verify(); err == nil || !strings.Contains(err.Error(), "hash") {
+			t.Fatalf("Verify() = %v, want the hash chain to refuse the tampered by", err)
+		}
+	})
+
+	// Separation of duties holds at the model layer too: the proof's own adjudicator
+	// cannot promote it, and the refusal leaves the log untouched.
+	t.Run("the proof's adjudicator cannot confirm it", func(t *testing.T) {
+		cr, _, _ := prep(t)
+		before := len(cr.Log.Events)
+		err := cr.ConfirmNovel("f1", "reviewer", "second look", "4")
+		if err == nil || !strings.Contains(err.Error(), "separation of duties") {
+			t.Fatalf("ConfirmNovel(same identity) = %v, want separation-of-duties refusal", err)
+		}
+		if len(cr.Log.Events) != before || cr.FindingState("f1") != FindingNovelCandidate {
+			t.Fatalf("refusal mutated the run: events %d, state %s", len(cr.Log.Events), cr.FindingState("f1"))
+		}
+	})
+
+	t.Run("records the trimmed declared by and reason", func(t *testing.T) {
+		cr, _, _ := prep(t)
+		if err := cr.ConfirmNovel("f1", " promoter ", "  second look  ", "4"); err != nil {
+			t.Fatalf("ConfirmNovel() = %v, want acceptance", err)
+		}
+		var payload novelConfirmPayload
+		if err := json.Unmarshal(cr.Log.Events[len(cr.Log.Events)-1].Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.By != "promoter" || payload.Reason != "second look" {
+			t.Fatalf("recorded by/reason = %q/%q, want the trimmed declarations", payload.By, payload.Reason)
+		}
+		if err := cr.Log.Verify(); err != nil {
+			t.Fatalf("promoted log must verify: %v", err)
+		}
+	})
 }

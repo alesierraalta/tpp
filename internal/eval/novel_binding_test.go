@@ -127,7 +127,7 @@ func TestProofFromReplayDerivesBoundProofAndRecordsV2(t *testing.T) {
 	if !reflect.DeepEqual(binding.Proof, proof) {
 		t.Fatalf("reconstructed proof = %+v, want the constructed proof %+v", binding.Proof, proof)
 	}
-	if err := cr.ConfirmNovel("f1", "4"); err != nil {
+	if err := cr.ConfirmNovel("f1", "promoter", "proof verified independently", "4"); err != nil {
 		t.Fatalf("ConfirmNovel() = %v, want controlled promotion", err)
 	}
 	if got := cr.FindingState("f1"); got != FindingConfirmedNovel {
@@ -284,7 +284,7 @@ func TestSchemaV1NovelProofRefusedAtAppendVerifyAndPromotion(t *testing.T) {
 	if err := cr.Log.Verify(); err == nil || !strings.Contains(err.Error(), NovelProofSchemaV2) {
 		t.Fatalf("Verify(log containing a /1 proof under a recomputed hash) = %v, want refusal naming %s", err, NovelProofSchemaV2)
 	}
-	if err := cr.ConfirmNovel("f1", "4"); err == nil {
+	if err := cr.ConfirmNovel("f1", "promoter", "proof verified independently", "4"); err == nil {
 		t.Fatal("ConfirmNovel promoted a refused novel-proof/1 event")
 	}
 }

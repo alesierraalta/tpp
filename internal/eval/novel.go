@@ -258,11 +258,18 @@ func decodeNovelProof(event Event) (NovelProof, error) {
 	return proof, nil
 }
 
-// novelConfirmPayload is the recorded body of a controlled novel confirmation event.
+// novelConfirmPayload is the recorded body of a controlled novel confirmation event. By
+// and Reason record the confirmer's declared identity and justification (human decision:
+// separation of duties); identities are self-declared strings, not authenticated
+// principals. No confirm event was ever released without them, so every decode requires
+// the full set — there is no unreleased-history compatibility to preserve (the
+// novel-proof/2 precedent).
 type novelConfirmPayload struct {
 	FindingID     string `json:"finding_id"`
 	ProofHash     string `json:"proof_hash"`
 	SourceBinding string `json:"source_binding"`
+	By            string `json:"by"`
+	Reason        string `json:"reason"`
 }
 
 // effectiveNovelProof returns the latest valid novel-proof event in the finding's current
@@ -291,9 +298,10 @@ func effectiveNovelProof(events []Event, findingID string) (Event, NovelProof, b
 
 // decodeNovelConfirmation validates a controlled novel confirmation: the exact
 // NOVEL_CANDIDATE -> CONFIRMED_NOVEL finding transition, the fixed instrument rule, a
-// canonical payload bound to the event id, and a reference to the hash and source binding
-// of the finding's effective proof. prior holds the events preceding this one so Append
-// and Verify apply the identical gate.
+// canonical payload bound to the event id, the required declared confirmer and reason
+// (separation of duties records; identities are self-declared), and a reference to the
+// hash and source binding of the finding's effective proof. prior holds the events
+// preceding this one so Append and Verify apply the identical gate.
 func decodeNovelConfirmation(prior []Event, event Event) (novelConfirmPayload, error) {
 	if event.Kind != EventNovelConfirm || event.Entity != EntityFinding ||
 		event.PreviousState != string(FindingNovelCandidate) || event.NewState != string(FindingConfirmedNovel) {
@@ -319,6 +327,12 @@ func decodeNovelConfirmation(prior []Event, event Event) (novelConfirmPayload, e
 	}
 	if payload.ProofHash == "" {
 		return novelConfirmPayload{}, fmt.Errorf("novel confirm payload proof_hash is required")
+	}
+	if strings.TrimSpace(payload.By) == "" {
+		return novelConfirmPayload{}, fmt.Errorf("novel confirm payload by is required")
+	}
+	if strings.TrimSpace(payload.Reason) == "" {
+		return novelConfirmPayload{}, fmt.Errorf("novel confirm payload reason is required")
 	}
 	proofEvent, proof, ok := effectiveNovelProof(prior, event.ID)
 	if !ok {
@@ -396,7 +410,11 @@ func (cr *CaseRun) RecordNovelProof(proof NovelProof, ts string) error {
 // dedicated event that references the exact effective proof. Absent, malformed, stale, or
 // re-bound proofs are refused before any write; later CLI callers must additionally have
 // verified independent runtime evidence (B2) before invoking this pure transition.
-func (cr *CaseRun) ConfirmNovel(findingID, ts string) error {
+// Separation of duties (human decision): the declared confirmer must differ from the
+// proof's adjudicator; both are recorded trimmed in the payload. Identities are
+// self-declared strings, not authenticated principals — this refusal enforces the
+// declaration, it proves nothing about who spoke.
+func (cr *CaseRun) ConfirmNovel(findingID, by, reason, ts string) error {
 	finding, ok := cr.finding(findingID)
 	if !ok {
 		return fmt.Errorf("unknown finding %q", findingID)
@@ -411,7 +429,14 @@ func (cr *CaseRun) ConfirmNovel(findingID, ts string) error {
 	if !proof.rowBound(*finding) {
 		return fmt.Errorf("finding %q novel proof is stale: fingerprint or location no longer matches the admitted row", findingID)
 	}
-	payload, err := json.Marshal(novelConfirmPayload{FindingID: findingID, ProofHash: proofEvent.Hash, SourceBinding: proof.SourceBinding})
+	by, reason = strings.TrimSpace(by), strings.TrimSpace(reason)
+	if by == "" || reason == "" {
+		return fmt.Errorf("finding %q confirmation requires a nonblank declared confirmer and reason", findingID)
+	}
+	if by == strings.TrimSpace(proof.AdjudicatedBy) {
+		return fmt.Errorf("finding %q separation of duties: confirmer %q is the proof's adjudicated_by; the promotion must be declared by a different identity", findingID, by)
+	}
+	payload, err := json.Marshal(novelConfirmPayload{FindingID: findingID, ProofHash: proofEvent.Hash, SourceBinding: proof.SourceBinding, By: by, Reason: reason})
 	if err != nil {
 		return fmt.Errorf("marshal novel confirm: %w", err)
 	}

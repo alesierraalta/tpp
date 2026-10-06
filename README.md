@@ -231,7 +231,9 @@ receive skills but their transports are documented rather than wired. Claude's s
 `~/.claude/settings.json`: every existing hook and setting is preserved, the gate is added once,
 and running it again changes nothing. A file modified after tpp installed it is not replaced
 by default; pass `--force` to replace it after tpp snapshots the edited file in the central
-backup store described below. An unparseable `settings.json` aborts the run before anything is
+backup store described below. A path under the skills directory that sync cannot read, or a symlink
+back to an enclosing folder, is reported once as a user path and left alone; an unreadable skills
+directory itself still aborts the run. An unparseable `settings.json` aborts the run before anything is
 written. Use `--config-dir` to target another Claude directory, `--hosts` to narrow installation,
 and `--dry-run` to see the plan. Without an explicit `--config-dir`, commands resolve the directory
 in this order: `CLAUDE_CONFIG_DIR`, then `PI_CODING_AGENT_DIR`, then `~/.claude`; empty values are

@@ -272,6 +272,7 @@ func syncHost(host Host, binPath string, opts Options, installationState *state.
 			return names, nil
 		},
 		ReadFile: os.ReadFile,
+		Resolve:  filepath.EvalSymlinks,
 	}
 	if installationState.Hosts != nil {
 		if current, ok := installationState.Hosts[host.Name]; ok && current.ConfigDir != host.ConfigDir {

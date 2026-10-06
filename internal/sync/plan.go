@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
@@ -45,6 +46,9 @@ type PlanDeps struct {
 	ListDir func(path string) ([]string, error)
 	// ReadFile returns a file's bytes. A missing file must be reported as missing, not as empty.
 	ReadFile func(path string) ([]byte, error)
+	// Resolve returns a directory's path with symlinks resolved, so the walk can tell a link back to an
+	// enclosing folder from a new one. Nil disables cycle detection.
+	Resolve func(path string) (string, error)
 }
 
 // PlanInput carries everything the planner needs; it never touches the disk itself.
@@ -259,19 +263,46 @@ func digestBytes(data []byte) string {
 	return hex.EncodeToString(digest[:])
 }
 
-func listFiles(path string, deps PlanDeps) ([]string, error) {
+// listFiles walks a host's skills directory. Below the root every path is a candidate user path, so one
+// that cannot be read, or a link back to an enclosing folder, is returned as a single path rather than
+// failing the plan or being walked forever.
+func listFiles(root string, deps PlanDeps) ([]string, error) {
+	return walkFiles(root, nil, deps)
+}
+
+func walkFiles(path string, ancestors []string, deps PlanDeps) ([]string, error) {
+	isRoot := ancestors == nil
 	entries, err := deps.ListDir(path)
 	if err != nil {
-		return fileIfReadable(path, deps, err)
+		files, err := fileIfReadable(path, deps, err)
+		if err != nil && !isRoot {
+			return []string{path}, nil
+		}
+		return files, err
+	}
+	if deps.Resolve != nil {
+		if real, err := deps.Resolve(path); err == nil {
+			if slices.Contains(ancestors, real) {
+				return []string{path}, nil
+			}
+			ancestors = append(slices.Clip(ancestors), real)
+		}
+	}
+	if ancestors == nil {
+		ancestors = []string{}
 	}
 	if len(entries) == 0 {
-		return fileIfEmptyDirectory(path, deps)
+		files, err := fileIfEmptyDirectory(path, deps)
+		if err != nil && !isRoot {
+			return []string{path}, nil
+		}
+		return files, err
 	}
 
 	sort.Strings(entries)
 	var files []string
 	for _, entry := range entries {
-		children, err := listFiles(filepath.Join(path, entry), deps)
+		children, err := walkFiles(filepath.Join(path, entry), ancestors, deps)
 		if err != nil {
 			return nil, err
 		}

@@ -75,7 +75,7 @@ reason when judged not worth testing.
 
 The plan lives at `docs/testing/test-plan.md` by default (or the path the user names), built from
 `assets/test-plan-template.md`. When it is not the default path, declare it at the worktree root in
-`.tpp.json`; the Stop hook and `tpp check` read that declared plan:
+`.tsp.json`; the Stop hook and `tsp check` read that declared plan:
 
 ```json
 {"planPath": "docs/testing/<name>.md"}
@@ -95,7 +95,7 @@ radius, the classes it touched, and a reason for every layer it skipped.
 
 What the trigger does not change is the depth: execution inside the scope is not reduced. The target it
 reaches climbs to its rung through its sibling, leaves a pinning test and an evidence row, and the run
-closes on `tpp plan check` like any other. A bounded request and a bounded diff are the same
+closes on `tsp plan check` like any other. A bounded request and a bounded diff are the same
 decision reached from two sides: one names the surface, the other shows it.
 
 - Eligible: "test the reservation math in `src/inventory.js`"; a two-file fix to a pure function whose

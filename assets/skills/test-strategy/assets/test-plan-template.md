@@ -94,7 +94,7 @@ One row per `observado` conclusion (`references/evidence.md`). `razonado` items 
 
 `Admit` holds ONE bare shell command, with no backticks and no placeholders, because `Executed` is
 prose a human reads and `Admit` is the command the binary runs. `Digest` holds the `sha256:` digest of the
-canonical output, written by `tpp plan admit --execute --record <id>` rather than by hand.
+canonical output, written by `tsp plan admit --execute --record <id>` rather than by hand.
 
 A pin only means something over output that holds still, so `--execute` runs each admitted command twice:
 the second run is the probe, and a row whose two observations disagree is refused as unstable instead of
@@ -142,7 +142,7 @@ a mutation already defines its own red and green runs.
 
 Every row carries exactly one cell per header column (14 here); an empty cell stays as `| |`. A literal
 `|` inside a cell is written `\|`, or it splits the cell and `plan check` refuses the row. Add the ledger
-row before `tpp plan add-finding` names it: that command writes the Findings row only and refuses
+row before `tsp plan add-finding` names it: that command writes the Findings row only and refuses
 an Evidence id the ledger does not carry.
 
 | Id | Claim | Executed | Admit | Inputs and parameters | Observed | Digest | Normalize | Mode | Mutate | Expect | Mutation or negative control → result | Reproduction | Label (`observado` / `razonado`, literal) |

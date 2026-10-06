@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/alesierraalta/tsp/internal/buildinfo"
 )
 
 var expected = []string{
@@ -69,6 +71,27 @@ func TestSkillNamesTheTppVersionItRequires(t *testing.T) {
 		!strings.Contains(string(data), "go install github.com/alesierraalta/tsp/cmd/tsp@latest") ||
 		!strings.Contains(string(data), "go install github.com/alesierraalta/tpp/cmd/tpp@v0.5.1") {
 		t.Fatal("test-strategy requires tpp 0.5.1 but names no install path")
+	}
+}
+
+// The canonical requirement is the TSP release this skill ships with, installed from the new module.
+func TestSkillRequiresTheTspReleaseItShipsWith(t *testing.T) {
+	data, err := fs.ReadFile(Skills(), "test-strategy/SKILL.md")
+	if err != nil {
+		t.Fatalf("SKILL.md missing: %v", err)
+	}
+	field := regexp.MustCompile(`(?m)^\s*requires_tsp:\s*"?([0-9]+\.[0-9]+\.[0-9]+)"?\s*$`).FindSubmatch(data)
+	if field == nil {
+		t.Fatal("test-strategy frontmatter has no requires_tsp")
+	}
+	if got := string(field[1]); got != "0.6.0" || got != buildinfo.Version {
+		t.Fatalf("test-strategy requires tsp %s, want the shipped build %s and release 0.6.0", got, buildinfo.Version)
+	}
+	if got := string(requiredVersion(data)[1]); got != "0.6.0" {
+		t.Fatalf("required version = %s, want requires_tsp to win over legacy keys", got)
+	}
+	if !strings.Contains(string(data), "go install github.com/alesierraalta/tsp/cmd/tsp@latest") {
+		t.Fatal("test-strategy requires tsp 0.6.0 but names no install path")
 	}
 }
 

@@ -49,5 +49,5 @@
 
 ## Feedback record
 
-- Result: `[recorded after successful tpp feedback --file, or storage failure]`
+- Result: `[recorded after successful tsp feedback --file, or storage failure]`
 - Ledger/reference: `[fill]`

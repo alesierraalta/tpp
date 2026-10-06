@@ -113,7 +113,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    new([New machine]) --> install[go install github.com/alesierraalta/tsp/cmd/tsp@latest<br/>PENDING T5 publication]
+    new([New machine]) --> install[go install github.com/alesierraalta/tsp/cmd/tsp@latest]
     install --> sync[tsp sync<br/>skills to every host, Stop hook into Claude]
     sync --> doctor{tsp doctor}
     doctor -- healthy --> use([Ready])
@@ -158,13 +158,11 @@ gentle-ai and engram as present.
 
 ## Install
 
-The canonical TSP install is not yet available: `go install github.com/alesierraalta/tsp/cmd/tsp@latest`
-is pending the first TSP publication (T5). Until then, install the concrete old-module bridge:
-`go install github.com/alesierraalta/tpp/cmd/tpp@v0.5.1`. After TSP is published, `tpp update`
-installs `tsp` after publication; until T5, it is only a concrete legacy bridge update path.
+Install TSP from its module. An existing TPP install moves over with `tpp update` (bridge
+`go install github.com/alesierraalta/tpp/cmd/tpp@v0.5.1`), which installs `tsp` and points `tpp` at it.
 
 ```sh
-go install github.com/alesierraalta/tpp/cmd/tpp@v0.5.1
+go install github.com/alesierraalta/tsp/cmd/tsp@latest
 tsp setup     # sync, then doctor's checks, then one line saying tsp works (exit 0) or what is left
 ```
 
@@ -272,14 +270,14 @@ ones win when both are present:
   (state, backups, update cache) to `~/.config/tsp`, retaining both old paths as symlink aliases.
   An existing TSP root wins; divergent legacy roots are not merged, and a failed move leaves the old root in use.
 - `.tsp.json` is the canonical repository declaration; `.tpp.json` and `.rdd-plus.json` remain
-  read-only legacy names. If any two or three are present, tpp refuses them even when contents match.
+  read-only legacy names. If any two or three are present, tsp refuses them even when contents match.
   No declaration file is automatically renamed, deleted, merged or rewritten.
 - `TSP_UPDATE_BASE_URL` is canonical for the update check; `TPP_UPDATE_BASE_URL` and then
   `RDD_PLUS_UPDATE_BASE_URL` are legacy fallbacks while the newer name is unset. `RDD_PLUS_HOME` is read when
   `TSP_HOME` and `TPP_HOME` are unset.
 - The OpenCode snippet and Pi's settings hook are copies, not managed files: re-copy
-  `assets/hosts/opencode/tsp.ts` and the `tpp gate` hook from
-  `assets/hosts/pi/settings.stop-hook.json`. The Pi extension is different: `tpp sync --hosts pi`
+  `assets/hosts/opencode/tsp.ts` and the `tsp gate` hook from
+  `assets/hosts/pi/settings.stop-hook.json`. The Pi extension is different: `tsp sync --hosts pi`
   manages `~/.pi/agent/extensions/tpp/index.ts`.
 
 ### State and safety

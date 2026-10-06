@@ -73,7 +73,7 @@ func Components() []Component {
 	components = append(components, Component{
 		ID:      "tpp",
 		Kind:    KindExtension,
-		Source:  "hosts/pi/tpp.ts",
+		Source:  "hosts/pi/tsp.ts",
 		Hosts:   []string{"pi"},
 		Default: false,
 	})

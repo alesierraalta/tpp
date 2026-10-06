@@ -171,7 +171,7 @@ func TestRecordRefusesWhileFeedbackIsDisabled(t *testing.T) {
 		Paid: "paid", Cost: "one hour", Reason: "reason", Verdict: VerdictPaid}
 
 	err := Record(dir, r)
-	const want = "feedback is disabled; enable it with: tpp feature enable feedback"
+	const want = "feedback is disabled; enable it with: tsp feature enable feedback"
 	if err == nil || err.Error() != want {
 		t.Fatalf("Record error = %v, want %q", err, want)
 	}

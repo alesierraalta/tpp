@@ -42,4 +42,4 @@ jobs:
       # suite over a .ts module; go test never reaches it, so a silent skip here would be a green
       # run that verified less than it claims.
       - name: test pi extension
-        run: node --test assets/hosts/pi/tpp.test.mjs
+        run: node --test assets/hosts/pi/tsp.test.mjs

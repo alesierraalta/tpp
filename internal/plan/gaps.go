@@ -321,7 +321,7 @@ func rankedGaps(g *Gaps, ranked tableScan, run string) bool {
 // scoped. Its rows cannot be attributed to anybody, so they stay out of the count and Any() fails closed on
 // them: reading a legacy table as "this run owes nothing" is the one verdict a scoped count must never invent.
 func missingRunColumn(table, run string) string {
-	return fmt.Sprintf("the %s table has no Run column, so its rows were not counted for run %q: run tpp plan upgrade to add it", table, run)
+	return fmt.Sprintf("the %s table has no Run column, so its rows were not counted for run %q: run tsp plan upgrade to add it", table, run)
 }
 
 // scopedRow decides whether one breadth row belongs to run, counting the rows it excludes as it goes. A blank cell

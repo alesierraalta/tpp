@@ -37,7 +37,7 @@ func TestShippedHostAdaptersAreUsable(t *testing.T) {
 	if got := stop[0].Hooks[0].Command; got != "tpp gate" {
 		t.Fatalf("pi hook command = %q; the binary needs its subcommand", got)
 	}
-	oc, err := os.ReadFile(filepath.Join(root, "opencode", "tpp.ts"))
+	oc, err := os.ReadFile(filepath.Join(root, "opencode", "tsp.ts"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -25,12 +25,16 @@ import (
 
 // buildCLI compiles the command once per test binary; the contract under test is the process's,
 // not a function's, so it has to run as a process.
-func buildCLI(t *testing.T) string {
+func buildCLI(t *testing.T, names ...string) string {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("builds a binary")
 	}
-	bin := filepath.Join(t.TempDir(), "tpp")
+	name := "tsp"
+	if len(names) > 0 {
+		name = names[0]
+	}
+	bin := filepath.Join(t.TempDir(), name)
 	out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput()
 	if err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
@@ -65,10 +69,10 @@ func TestCLIContract(t *testing.T) {
 		wantExit int
 		wantOut  string // substring expected on stdout or stderr
 	}{
-		{name: "no command prints usage and exits 2", wantExit: 2, wantOut: "usage: tpp"},
-		{name: "unknown command prints usage and exits 2", args: []string{"bogus"}, wantExit: 2, wantOut: "usage: tpp"},
-		{name: "bench with no subcommand exits 2", args: []string{"bench"}, wantExit: 2, wantOut: "usage: tpp"},
-		{name: "bench with an unknown subcommand exits 2", args: []string{"bench", "bogus"}, wantExit: 2, wantOut: "usage: tpp"},
+		{name: "no command prints usage and exits 2", wantExit: 2, wantOut: "usage: tsp"},
+		{name: "unknown command prints usage and exits 2", args: []string{"bogus"}, wantExit: 2, wantOut: "usage: tsp"},
+		{name: "bench with no subcommand exits 2", args: []string{"bench"}, wantExit: 2, wantOut: "usage: tsp"},
+		{name: "bench with an unknown subcommand exits 2", args: []string{"bench", "bogus"}, wantExit: 2, wantOut: "usage: tsp"},
 		// A runner the bench cannot spawn must be refused before it scaffolds or spawns anything.
 		{name: "bench run with an unknown runner exits 2", args: []string{"bench", "run", "--runner", "gemini"}, wantExit: 2, wantOut: "use pi or claude"},
 		{name: "bench score without arguments exits 2", args: []string{"bench", "score"}, wantExit: 2, wantOut: "needs --case"},
@@ -80,8 +84,8 @@ func TestCLIContract(t *testing.T) {
 		{name: "an unknown flag on a subcommand exits 2", args: []string{"doctor", "--nope"}, wantExit: 2, wantOut: "flag provided but not defined"},
 		{name: "check refuses a path outside the repository", args: []string{"check", "--path", "../outside.md"}, wantExit: 2, wantOut: "--path"},
 		{name: "check refuses an absolute path", args: []string{"check", "--path", "/abs.md"}, wantExit: 2, wantOut: "--path"},
-		{name: "plan with no subcommand exits 2", args: []string{"plan"}, wantExit: 2, wantOut: "usage: tpp"},
-		{name: "plan with an unknown subcommand exits 2", args: []string{"plan", "bogus"}, wantExit: 2, wantOut: "usage: tpp"},
+		{name: "plan with no subcommand exits 2", args: []string{"plan"}, wantExit: 2, wantOut: "usage: tsp"},
+		{name: "plan with an unknown subcommand exits 2", args: []string{"plan", "bogus"}, wantExit: 2, wantOut: "usage: tsp"},
 		{name: "plan check on a missing file exits 1", args: []string{"plan", "check", "--path", "/nonexistent/plan.md"}, wantExit: 1, wantOut: "plan check:"},
 		{name: "plan gaps on a missing file exits 1", args: []string{"plan", "gaps", "--path", "/nonexistent/plan.md"}, wantExit: 1, wantOut: "plan gaps:"},
 		{name: "plan gaps run and all are mutually exclusive", args: []string{"plan", "gaps", "--run", "redis-pool", "--all"}, wantExit: 2, wantOut: "cannot combine"},
@@ -521,7 +525,7 @@ func TestFeedbackCLIRequiresOptInThenRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, code := runCLIWithHomeEnv(t, home, bin, "feedback", "--config-dir", configDir, "--file", report)
-	wantRefusal := "feedback is disabled; enable it with: tpp feature enable feedback"
+	wantRefusal := "feedback is disabled; enable it with: tsp feature enable feedback"
 	if code == 0 || !strings.Contains(out, wantRefusal) {
 		t.Fatalf("disabled feedback = %d %q", code, out)
 	}
@@ -872,7 +876,7 @@ func TestTopLevelSynopsisListsFeedbackReviewActions(t *testing.T) {
 	home := t.TempDir()
 	out, code := runCLIWithHomeEnv(t, home, bin)
 	if code != 2 {
-		t.Fatalf("tpp without a command exit = %d, want 2\n%s", code, out)
+		t.Fatalf("tsp without a command exit = %d, want 2\n%s", code, out)
 	}
 	var feedbackSynopsis string
 	for _, line := range strings.Split(out, "\n") {
@@ -1459,7 +1463,7 @@ func TestPlanScopedCLIRealRun(t *testing.T) {
 
 	out, code := runCLIAt(t, dir, bin, "plan", "check", "--path", "plan.md")
 	t.Logf("$ %s plan check --path plan.md\n%s", bin, out)
-	if code != 1 || !strings.Contains(out, "tpp plan upgrade") {
+	if code != 1 || !strings.Contains(out, "tsp plan upgrade") {
 		t.Fatalf("legacy plan check = %d\n%s", code, out)
 	}
 	out, code = runCLIAt(t, dir, bin, "plan", "upgrade", "--path", "plan.md")
@@ -2082,7 +2086,7 @@ func lastLine(out string) string {
 }
 
 // setup is the whole install in one command: it syncs, verifies with the doctor's checks, and ends on one
-// line saying tpp works, so an agent or a person knows the install is done from the exit code and that line.
+// line saying tsp works, so an agent or a person knows the install is done from the exit code and that line.
 func TestSetupInstallsVerifiesAndSaysItIsWorking(t *testing.T) {
 	bin := buildCLI(t)
 	home := t.TempDir()
@@ -2105,7 +2109,7 @@ func TestSetupInstallsVerifiesAndSaysItIsWorking(t *testing.T) {
 		t.Fatalf("setup must show the doctor's checks:\n%s", out)
 	}
 	last := lastLine(out)
-	if !strings.HasPrefix(last, "tpp is installed and working: ") || !strings.Contains(last, "in claude") || !strings.HasSuffix(last, "Stop hook wired to "+bin) {
+	if !strings.HasPrefix(last, "tsp is installed and working: ") || !strings.Contains(last, "in claude") || !strings.HasSuffix(last, "Stop hook wired to "+bin) {
 		t.Fatalf("last line = %q, want the working line naming the host and the wired binary\n%s", last, out)
 	}
 	if strings.Contains(out, "export PATH=") {
@@ -2114,7 +2118,7 @@ func TestSetupInstallsVerifiesAndSaysItIsWorking(t *testing.T) {
 }
 
 // A machine with no host has nothing to install into: setup stops with sync's exit code and never claims
-// tpp is working.
+// tsp is working.
 func TestSetupStopsWhenNoHostIsInstalled(t *testing.T) {
 	bin := buildCLI(t)
 	home := t.TempDir()
@@ -2149,7 +2153,7 @@ func TestSetupPrintsThePathLineWhenTheBinaryIsNotOnPath(t *testing.T) {
 	if want := `export PATH="` + dir + `:$PATH"`; !strings.Contains(out, want) {
 		t.Fatalf("setup must print %q:\n%s", want, out)
 	}
-	if last := lastLine(out); !strings.HasPrefix(last, "tpp is installed and working: ") || !strings.HasSuffix(last, "Stop hook wired to "+bin) {
+	if last := lastLine(out); !strings.HasPrefix(last, "tsp is installed and working: ") || !strings.HasSuffix(last, "Stop hook wired to "+bin) {
 		t.Fatalf("a PATH warning is not a failure, and the hook still names the binary it runs; last line = %q\n%s", last, out)
 	}
 }
@@ -2175,7 +2179,7 @@ func TestSetupOnAMachineWithoutClaudeInstallsTheSkillsAndSaysTheHookIsNotWired(t
 		t.Fatalf("setup must not create a Claude config dir on a machine without Claude Code: %v", err)
 	}
 	last := lastLine(out)
-	if !strings.HasPrefix(last, "tpp is installed and working: ") || !strings.Contains(last, "in codex") ||
+	if !strings.HasPrefix(last, "tsp is installed and working: ") || !strings.Contains(last, "in codex") ||
 		!strings.HasSuffix(last, "Stop hook not wired: Claude Code is not installed here, and the gate runs only there") {
 		t.Fatalf("last line = %q, want the working line naming codex and saying the hook is not wired\n%s", last, out)
 	}
@@ -2267,7 +2271,7 @@ func TestModeFlagSelectsAndReportsTheStandaloneContract(t *testing.T) {
 		if !strings.Contains(out, "mode standalone") {
 			t.Fatalf("setup must report the mode it ran under:\n%s", out)
 		}
-		if !strings.HasPrefix(lastLine(out), "tpp is installed and working: ") {
+		if !strings.HasPrefix(lastLine(out), "tsp is installed and working: ") {
 			t.Fatalf("last line = %q\n%s", lastLine(out), out)
 		}
 	})
@@ -2374,7 +2378,7 @@ func TestSetupHookRequirementFollowsTheSelectedHost(t *testing.T) {
 		}
 	}
 	last := lastLine(out)
-	if !strings.HasPrefix(last, "tpp is installed and working: ") || !strings.Contains(last, "in codex") {
+	if !strings.HasPrefix(last, "tsp is installed and working: ") || !strings.Contains(last, "in codex") {
 		t.Fatalf("last line = %q, want the working line naming codex\n%s", last, out)
 	}
 }

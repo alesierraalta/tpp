@@ -47,8 +47,7 @@ func TestShellWordsSplitsLikeAShell(t *testing.T) {
 	}
 }
 
-// The gate installs as tpp: `tpp gate` is current, `rdd-plus gate` is the pre-rename command sync
-// moves to it, and `tsp gate`, recognized but not installed yet, is not legacy either.
+// The gate installs as tsp: `tsp gate` is current, while `tpp gate` and `rdd-plus gate` are legacy.
 func TestGateCommandsTreatOnlySupersededNamesAsLegacy(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -56,8 +55,8 @@ func TestGateCommandsTreatOnlySupersededNamesAsLegacy(t *testing.T) {
 		wantGate   bool
 		wantLegacy bool
 	}{
-		{"the pending tsp gate is not legacy", "/h/bin/tsp gate", true, false},
-		{"the installed tpp gate is current", "/h/bin/tpp gate", true, false},
+		{"the installed tsp gate is current", "/h/bin/tsp gate", true, false},
+		{"the old tpp gate is legacy", "/h/bin/tpp gate", true, true},
 		{"the older rdd-plus gate is legacy", "/h/bin/rdd-plus gate", true, true},
 	}
 	for _, tc := range cases {

@@ -615,7 +615,7 @@ func TestDecideReportsTheRunScopeProblemInsteadOfOwesNothing(t *testing.T) {
 		{
 			name:       "a table with no Run column",
 			plan:       noRunColumn,
-			wantLine:   []string{"Run column", "tpp plan upgrade"},
+			wantLine:   []string{"Run column", "tsp plan upgrade"},
 			wantReason: []string{"Run column"},
 		},
 	}

@@ -273,7 +273,7 @@ ones win when both are present:
   `RDD_PLUS_UPDATE_BASE_URL` are read while the newer name is unset. `RDD_PLUS_HOME` is read when
   `TSP_HOME` and `TPP_HOME` are unset.
 - The OpenCode snippet and Pi's settings hook are copies, not managed files: re-copy
-  `assets/hosts/opencode/tpp.ts` and the `tpp gate` hook from
+  `assets/hosts/opencode/tsp.ts` and the `tpp gate` hook from
   `assets/hosts/pi/settings.stop-hook.json`. The Pi extension is different: `tpp sync --hosts pi`
   manages `~/.pi/agent/extensions/tpp/index.ts`.
 
@@ -361,7 +361,7 @@ evidence record; anything not executed is a hypothesis.
 go test ./...           # unit, integration (real git repositories), and differential tests
 go run ./tools/mutants  # 23 literal mutants on the gate; every one must be killed
 make build              # bin/tpp
-node --test assets/hosts/pi/tpp.test.mjs  # the Pi extension's pure surface
+node --test assets/hosts/pi/tsp.test.mjs  # the Pi extension's pure surface
 ```
 
 Integration tests build the CLI once and drive it with real repositories in temporary
@@ -370,7 +370,7 @@ original Node hook when `node` and `~/.claude/hooks/testing-gate.mjs` are presen
 
 CI runs that suite on every pull request and on every push to `master`, with `node` installed so the
 benchmark's JavaScript cases run instead of skipping, and it runs
-`node --test assets/hosts/pi/tpp.test.mjs` for the Pi extension. It checks `gofmt`, `go vet`, the build and
+`node --test assets/hosts/pi/tsp.test.mjs` for the Pi extension. It checks `gofmt`, `go vet`, the build and
 `go test ./... -count=1` — the same commands `make vet`, `make build` and `make test` run locally.
 
 ## Pending
@@ -443,7 +443,7 @@ on top is knowing what THIS session did, which the repository cannot tell you.
 | Claude Code | verified: `sync` wires the Stop hook, `gate` reads its payload and answers in its schema, `doctor` runs the wired command and requires exit zero |
 | Anything that runs a command | verified: `check`, `plan init`, `plan check`, `plan gaps` need no host at all |
 | Gemini CLI | not implemented: its `settings.json` takes command hooks under different event names, and its payload and output schemas are not verified here |
-| Pi | opt-in extension: `sync --hosts pi` installs it and Pi exposes a native `/tpp` command (`check`, `feedback --summary`, `doctor`); its dispatch is tested in CI (`assets/hosts/pi/tpp.test.mjs`). The native Pi Stop hook is **not verified** — payload contract read from the pi-hooks package, never watched firing |
+| Pi | opt-in extension: `sync --hosts pi` installs it and Pi exposes a native `/tsp` command with `/tpp` compatibility alias (`check`, `feedback --summary`, `doctor`); its dispatch is tested in CI (`assets/hosts/pi/tsp.test.mjs`). The native Pi Stop hook is **not verified** — payload contract read from the pi-hooks package, never watched firing |
 | Codex, OpenCode | not implemented: each has its own extension surface, and guessing a payload schema would ship a hook that silently never fires |
 
 Nothing above is a promise about a host that is not listed as verified. A hook that looks wired and

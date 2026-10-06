@@ -1,4 +1,4 @@
-// tpp is a deterministic companion for the testing discipline: it installs the skills,
+// tsp is a deterministic companion for the testing discipline: it installs the skills,
 // wires the Stop hook that keeps them invoked, and reports what the environment can do.
 package main
 
@@ -42,7 +42,7 @@ import (
 // and exit 0 would say it arrived.
 const exitArtifact = bench.ExitArtifact
 
-const usage = `usage: tpp <command> [flags]
+const usage = `usage: tsp <command> [flags]
 
 commands:
   gate     Stop hook: read the hook payload on stdin, decide, log, emit feedback
@@ -50,7 +50,7 @@ commands:
            (bind --session <id> --path <plan> --run <slug> [--cwd <dir>] [--config-dir <dir>],
             bind --unset --session <id> [--cwd <dir>] [--config-dir <dir>])
   setup    install and verify in one step: sync, run the doctor's checks, say whether the binary's
-           directory is on PATH, and end on one line saying tpp is working (exit 0) or what is left
+           directory is on PATH, and end on one line saying tsp is working (exit 0) or what is left
   sync     install the embedded skills into discovered hosts and wire Claude's Stop hook
   uninstall remove the installed skills and unwire the Stop hook (--dry-run writes nothing,
            --orphans also removes recorded paths the manifest no longer ships, --force
@@ -378,7 +378,7 @@ func runUpdate(args []string) int {
 	}
 	// A binary in a directory this user cannot write (a system bin dir) cannot be replaced in place; say so
 	// before go reports a bare permission error.
-	if probe, err := os.CreateTemp(gobin, ".tpp-update-*"); err != nil {
+	if probe, err := os.CreateTemp(gobin, ".tsp-update-*"); err != nil {
 		fmt.Fprintf(os.Stderr, "update: %s is not writable, so the running binary cannot be replaced there: %v\n", gobin, err)
 		return 1
 	} else {
@@ -411,10 +411,14 @@ func runUpdate(args []string) int {
 		}
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "update: installed tsp %s, but tpp still points at the old build: %v\n", result.Latest, err)
+		fmt.Fprintf(os.Stderr, "update: installed tsp %s, but %s still points at the old build: %v\n", result.Latest, filepath.Base(exe), err)
 		return 1
 	}
-	fmt.Printf("installed tsp %s (tpp is now tsp) into %s; restart your shell, confirm with `tsp version`, then run `tsp sync` to move your hooks to tsp\n", result.Latest, gobin)
+	if filepath.Base(exe) == target {
+		fmt.Printf("installed tsp %s into %s; restart your shell, confirm with `tsp version`, then run `tsp sync` to move your hooks to tsp\n", result.Latest, gobin)
+	} else {
+		fmt.Printf("installed tsp %s (tpp is now tsp) into %s; restart your shell, confirm with `tsp version`, then run `tsp sync` to move your hooks to tsp\n", result.Latest, gobin)
+	}
 	return 0
 }
 
@@ -542,7 +546,7 @@ func parseFeatureArgs(args []string) (string, bool, bool) {
 }
 
 func featureUsage(reason string) int {
-	fmt.Fprintf(os.Stderr, "feature: %s\nusage: tpp feature list|enable|disable <id> [--preview]\n", reason)
+	fmt.Fprintf(os.Stderr, "feature: %s\nusage: tsp feature list|enable|disable <id> [--preview]\n", reason)
 	return 2
 }
 
@@ -880,7 +884,7 @@ func runDoctor(args []string) int {
 }
 
 // selfDir is the directory of the running binary, so a spawned agent runs this build when the
-// skill tells it to call `tpp plan init`.
+// skill tells it to call `tsp plan init`.
 func selfDir() string {
 	exe, err := os.Executable()
 	if err != nil {

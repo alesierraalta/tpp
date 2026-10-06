@@ -1342,7 +1342,7 @@ func runColumnProblems(name string, scan tableScan) []string {
 	}
 	iRun := columnIndex(scan.header, "run")
 	if iRun < 0 {
-		return []string{fmt.Sprintf("the %s table has no Run column: run tpp plan upgrade to add it", name)}
+		return []string{fmt.Sprintf("the %s table has no Run column: run tsp plan upgrade to add it", name)}
 	}
 	var problems []string
 	for _, r := range scan.rows {

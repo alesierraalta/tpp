@@ -15,8 +15,8 @@ import (
 	"github.com/alesierraalta/tsp/internal/sync"
 )
 
-// runSetup is the install in one command: the same sync as `tpp sync`, the same checks as `tpp doctor`,
-// and a PATH check, ending on one line that says tpp is working (exit 0) or what is left (exit non-zero),
+// runSetup is the install in one command: the same sync as `tsp sync`, the same checks as `tsp doctor`,
+// and a PATH check, ending on one line that says tsp is working (exit 0) or what is left (exit non-zero),
 // so whoever runs it — a person or an agent — knows the install is done from the exit code and that line.
 func runSetup(args []string) int {
 	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
@@ -60,7 +60,7 @@ func runSetup(args []string) int {
 	if claude {
 		fmt.Print(report.String())
 	} else {
-		fmt.Printf("tpp doctor · mode %s · no Claude Code host: skills and the Stop hook are not checked\n\ncapabilities\n", report.Mode)
+		fmt.Printf("tsp doctor · mode %s · no Claude Code host: skills and the Stop hook are not checked\n\ncapabilities\n", report.Mode)
 		fmt.Print(report.CapabilitiesString())
 		problems = missingRequiredTools(report)
 	}
@@ -77,7 +77,7 @@ func runSetup(args []string) int {
 	if claude {
 		hook = "Stop hook wired to " + hookBinary(report.HookCommand)
 	}
-	fmt.Printf("tpp is installed and working: %d skills in %s, %s\n", len(assets.SkillNames()), strings.Join(hosts, ", "), hook)
+	fmt.Printf("tsp is installed and working: %d skills in %s, %s\n", len(assets.SkillNames()), strings.Join(hosts, ", "), hook)
 	return 0
 }
 
@@ -127,5 +127,5 @@ func pathWarning() string {
 			return ""
 		}
 	}
-	return fmt.Sprintf("setup: warning: %s is not on PATH, so `tpp` is not found in a shell; add it with:\n  export PATH=\"%s:$PATH\"", dir, dir)
+	return fmt.Sprintf("setup: warning: %s is not on PATH, so `tsp` is not found in a shell; add it with:\n  export PATH=\"%s:$PATH\"", dir, dir)
 }

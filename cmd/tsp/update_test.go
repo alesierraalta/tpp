@@ -102,7 +102,7 @@ func TestUpdateWithAFakeGoRunsTheInstallArgv(t *testing.T) {
 	fakeBin := t.TempDir()
 	argsFile := filepath.Join(fakeBin, "go-args")
 	gobinFile := filepath.Join(fakeBin, "go-gobin")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > '" + argsFile + "'\nprintf '%s' \"$GOBIN\" > '" + gobinFile + "'\n: > \"$GOBIN/tsp\"\n"
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > '" + argsFile + "'\nprintf '%s' \"$GOBIN\" > '" + gobinFile + "'\nprintf '#!/bin/sh\\nexit 0\\n' > \"$GOBIN/tsp.next\"\n/bin/chmod +x \"$GOBIN/tsp.next\"\n/bin/mv \"$GOBIN/tsp.next\" \"$GOBIN/tsp\"\n"
 	if err := os.WriteFile(filepath.Join(fakeBin, "go"), []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake go: %v", err)
 	}
@@ -138,6 +138,44 @@ func TestUpdateWithAFakeGoRunsTheInstallArgv(t *testing.T) {
 	}
 	if r, err := filepath.EvalSymlinks(bin); err != nil || r != filepath.Join(wantDir, "tsp") {
 		t.Fatalf("running tpp resolves to %q (err %v), want it symlinked to the fresh install %s (issue #144)", r, err, filepath.Join(wantDir, "tsp"))
+	}
+}
+
+func TestCanonicalTspUpdateKeepsTheInstalledExecutable(t *testing.T) {
+	bin := buildCLI(t, "tsp")
+	srv := fakeProxy(t, "v99.0.0")
+	home := t.TempDir()
+	fakeBin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fakeBin, "go"), []byte("#!/bin/sh\nprintf '#!/bin/sh\\nexit 0\\n' > \"$GOBIN/tsp.next\"\n/bin/chmod +x \"$GOBIN/tsp.next\"\n/bin/mv \"$GOBIN/tsp.next\" \"$GOBIN/tsp\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out, code := runCLIEnv(t, bin, []string{
+		"TSP_HOME=" + home,
+		"TSP_UPDATE_BASE_URL=" + srv.URL,
+		"PATH=" + fakeBin,
+	}, "update")
+	if code != 0 {
+		t.Fatalf("canonical tsp update = %d, want 0\n%s", code, out)
+	}
+	info, err := os.Lstat(bin)
+	if err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("canonical executable is not a regular file: info=%v err=%v", info, err)
+	}
+	resolved, err := filepath.EvalSymlinks(bin)
+	if err != nil || resolved != bin {
+		t.Fatalf("canonical executable resolves to %q, err %v; want %q", resolved, err, bin)
+	}
+	entries, err := os.ReadDir(filepath.Dir(bin))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".tsp-update-link-") || strings.HasPrefix(entry.Name(), ".tpp-update-link-") {
+			t.Fatalf("pending bridge link remains: %s", entry.Name())
+		}
+	}
+	if !strings.Contains(out, "installed tsp v99.0.0") || strings.Contains(out, "tpp is now tsp") {
+		t.Fatalf("canonical success message is inaccurate:\n%s", out)
 	}
 }
 

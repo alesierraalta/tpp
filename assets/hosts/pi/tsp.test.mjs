@@ -1,8 +1,10 @@
-// Deterministic tests for the Pi extension's pure surface: dispatch, in-session detection, the
-// process-scoped observation, and UI guarding. No Pi runtime, no child processes, no PATH.
-// Run: node --test assets/hosts/pi/tpp.test.mjs
+// Deterministic tests for the Pi extension's dispatch, in-session detection, observation, and UI.
+// The registered-callback test mocks execFile; no real child process or ambient PATH is used.
+// Run: node --test assets/hosts/pi/tsp.test.mjs
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { mock, test } from "node:test";
+import childProcess from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
 import tppExtension, {
   GENTLE_OBSERVATION_ENV,
   GENTLE_OBSERVATION_VALUE,
@@ -11,24 +13,54 @@ import tppExtension, {
   buildArgv,
   childEnv,
   runTppCommand,
-} from "./tpp.ts";
+} from "./tsp.ts";
 
 // The literals internal/mode pins on the Go side: the shared protocol, spelled out on both shores.
 const protocolEnv = "TPP_GENTLE_OBSERVATION";
 const protocolValue = "pi-session-gentle-active";
 
-test("observation protocol matches the Go literals; the factory registers one /tpp command", () => {
+test("observation protocol matches Go literals; registered commands invoke the shared CLI", async (t) => {
   assert.equal(GENTLE_OBSERVATION_ENV, protocolEnv);
   assert.equal(GENTLE_OBSERVATION_VALUE, protocolValue);
   const calls = [];
-  tppExtension({
+  const pi = {
     registerCommand: (name, options) => calls.push({ name, options }),
-    getAllTools: () => { throw new Error("the factory must not touch tools at load time; only the handler reads them"); },
+    getAllTools: () => [],
+  };
+  tppExtension(pi);
+  assert.deepEqual(calls.map(({ name }) => name), ["tsp", "tpp"]);
+  assert.match(calls[0].options.description, /tsp/);
+  const executions = [];
+  const execFileMock = mock.method(childProcess, "execFile", (file, args, options, callback) => {
+    executions.push({ file, args, cwd: options.cwd });
+    callback(null, "ok\\n", "");
+    return {};
   });
-  assert.equal(calls.length, 1, "exactly one registration");
-  assert.equal(calls[0].name, "tpp");
-  assert.equal(typeof calls[0].options.handler, "function");
-  assert.match(calls[0].options.description, /check/);
+  syncBuiltinESMExports();
+  t.after(() => {
+    execFileMock.mock.restore();
+    syncBuiltinESMExports();
+  });
+  const invocations = [];
+  for (const { name, options } of calls) {
+    const rec = harness();
+    const ctx = {
+      cwd: "/w", hasUI: true,
+      ui: { notify: (...args) => rec.deps.notify(...args), setStatus: (_key, text) => rec.deps.setStatus(text) },
+    };
+    assert.equal(typeof options.handler, "function");
+    await options.handler("check", ctx);
+    invocations.push({ name, notifications: rec.rec.notify, status: rec.rec.status });
+  }
+  assert.deepEqual(invocations.map(({ name }) => name), ["tsp", "tpp"]);
+  assert.deepEqual(executions, [
+    { file: "tsp", args: ["check", "--cwd", "/w"], cwd: "/w" },
+    { file: "tsp", args: ["check", "--cwd", "/w"], cwd: "/w" },
+  ]);
+  for (const { notifications, status } of invocations) {
+    assert.deepEqual(notifications, [{ message: "ok\\n", type: "info" }]);
+    assert.deepEqual(status, ["tsp check: ok"]);
+  }
 });
 
 test("dispatch and argv expose the shared CLI's check, feedback --summary, and doctor", () => {

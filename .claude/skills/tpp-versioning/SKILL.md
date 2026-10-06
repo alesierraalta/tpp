@@ -7,6 +7,15 @@ metadata:
   version: "1.6"
 ---
 
+## Product naming and compatibility
+
+TSP is the canonical current product and Go module: `github.com/alesierraalta/tsp/cmd/tsp`;
+`go install github.com/alesierraalta/tsp/cmd/tsp@latest` remains pending the first TSP publication (T5). Until then, the
+concrete bridge is `github.com/alesierraalta/tpp/cmd/tpp@v0.5.1`. Preserve this guide's
+`tpp-versioning` folder/slug for this slice. When describing migration, retain the historical
+rdd-plus → tpp bridge rather than recasting it as a TSP-era event. The `tpp` Pi component ID
+and `~/.pi/agent/extensions/tpp/index.ts` path are deliberate compatibility surfaces.
+
 ## Activation Contract
 
 Load when a change to the binary (`cmd/`, `internal/`) or an embedded skill (`assets/skills/`) is about to
@@ -19,13 +28,13 @@ ship, when the operator asks to version or release, or to install the latest bui
 - Binary version lives only in `internal/buildinfo/buildinfo.go` (`var Version`). Bump the patch
   (`0.3.8` → `0.3.9`); a minor bump is the operator's call.
 - A skill whose `SKILL.md`, `assets/` or `references/` changed bumps its own `metadata.version` patch.
-- test-strategy's `requires_tpp` and its "written for `tpp X`" line always equal the binary
-  version (`TestSkillNamesTheTppVersionItRequires` enforces it), so every binary bump also bumps
-  test-strategy's `metadata.version` patch. Other skills (e.g. breakcheck) change `requires_tpp` only
-  when they rely on behaviour that version introduced.
+- At T5, set test-strategy's `requires_tsp` to the first published TSP release version. Its
+  `requires_tpp` remains the historical 0.5.1 bridge minimum and is not a TSP minimum;
+  `TestSkillNamesTheTppVersionItRequires` checks the legacy bridge requirement. Other skills
+  change their requirement only when they rely on behaviour that version introduced.
 - Never rewrite historical records: `docs/testing/test-plan.md` rows, `bench/history.md`, fixture reports.
 - Every released binary version gets an annotated tag `vX.Y.Z` on its merge commit, pushed to origin:
-  `tpp update` reads the Go module proxy, which only sees tagged releases (an untagged main is a
+  `tsp update` reads the Go module proxy, which only sees tagged releases (an untagged main is a
   `v0.0.0-…` pseudo-version that cannot be compared). No GitHub release objects unless asked.
 - `main` is protected: ship through a PR whose `test` check passes, merged with a merge commit.
 - No AI attribution anywhere: no `Co-Authored-By` trailer, no "Generated with Claude Code" line in commit
@@ -37,7 +46,7 @@ ship, when the operator asks to version or release, or to install the latest bui
 
 | Changed | Bump |
 |---|---|
-| Binary (any) | `buildinfo.Version` patch + test-strategy `metadata.version` patch + its `requires_tpp` |
+| Binary (any) | `buildinfo.Version` patch + test-strategy `metadata.version` patch; set `requires_tsp` when T5 establishes the first published version |
 | Embedded skill text/assets only (`assets/skills/`) | that skill's `metadata.version` patch + `buildinfo.Version` patch (the skill ships inside the binary, so only a new binary version and tag delivers it) + test-strategy lockstep |
 | Tests, CI, `odd/`, `.claude/` only | nothing |
 
@@ -46,20 +55,20 @@ ship, when the operator asks to version or release, or to install the latest bui
 1. Diff against the last version bump: `git log --oneline -1 -- internal/buildinfo/buildinfo.go` and
    `git diff <that>..HEAD --stat -- cmd internal assets/skills`; pick bumps from the table.
 2. Edit the version strings, then update every live mention: `rtk proxy grep -rn '<old>' internal cmd
-   assets README.md` — the prose in `SKILL.md` ("written for `tpp X`", "aligned with <skill> X")
+   assets README.md` — the prose in `SKILL.md` (TSP build identity, "aligned with <skill> X")
    and `TestEmbeddedSkillIdentityNamesTheEmbeddedSkill` in `internal/feedback/feedback_test.go`.
 3. `gofmt -l`, `go vet ./...`, then the FULL suite as CI runs it — no `-short`, in a clean clone of the
    branch (`git clone --branch <b> . $S/ci && cd $S/ci && go test ./... -count=1`), because `-short` skips the
-   process-spawning tests and a local checkout may carry foreign changes; `go run ./cmd/tpp version`.
-4. Commit `chore(release): tpp X, <skill> Y` on a branch, open the PR listing what ships, wait for
+   process-spawning tests and a local checkout may carry foreign changes; `go run ./cmd/tsp version`.
+4. Commit `chore(release): tsp X, <skill> Y` on a branch, open the PR listing what ships, wait for
    `test`, merge.
 5. Tag the merge commit and push it: `git tag -a vX -m "tpp X" <merge sha> && git push origin vX`;
-   confirm `https://proxy.golang.org/github.com/alesierraalta/tpp/@v/vX.info` answers with that hash.
+   confirm `https://proxy.golang.org/github.com/alesierraalta/tsp/@v/vX.info` answers with that hash.
 6. Install: follow [references/install.md](references/install.md).
 
 ## Output Contract
 
-Report old → new for each version, the PR and merge commit, the installed `tpp version` line, the
+Report old → new for each version, the PR and merge commit, the installed `tsp version` line, the
 `doctor` verdict, and anything skipped.
 
 ## References

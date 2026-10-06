@@ -20,7 +20,7 @@ import (
 
 func runBenchEval(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: tpp bench eval <import|pending|adjudicate|confirm|reopen|close|compare|verify|prove-novel>")
+		fmt.Fprintln(os.Stderr, "usage: tpp bench eval <import|pending|adjudicate|confirm|reopen|close|compare|verify|prove-novel|confirm-novel>")
 		return 2
 	}
 	switch args[0] {
@@ -42,6 +42,8 @@ func runBenchEval(args []string) int {
 		return runBenchEvalVerify(args[1:])
 	case "prove-novel":
 		return runBenchEvalProveNovel(args[1:])
+	case "confirm-novel":
+		return runBenchEvalConfirmNovel(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "bench eval: unknown subcommand %q\n", args[0])
 		return 2

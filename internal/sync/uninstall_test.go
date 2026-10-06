@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alesierraalta/tpp/internal/assets"
-	"github.com/alesierraalta/tpp/internal/feature"
-	"github.com/alesierraalta/tpp/internal/state"
+	"github.com/alesierraalta/tsp/internal/assets"
+	"github.com/alesierraalta/tsp/internal/feature"
+	"github.com/alesierraalta/tsp/internal/state"
 )
 
 // seededInstall puts a real installation on disk: skills, state.json, and the wired Stop hook.

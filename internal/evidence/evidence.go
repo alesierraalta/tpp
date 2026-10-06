@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alesierraalta/tpp/internal/plan"
+	"github.com/alesierraalta/tsp/internal/plan"
 )
 
 // Options is the run's shape: what to execute, where, under what bound, and what to narrow or record.

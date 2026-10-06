@@ -9,7 +9,7 @@ COMMIT := $(shell git rev-parse HEAD)$(shell test -n "$$(git status --porcelain)
 endif
 
 build:
-	go build -ldflags "-X github.com/alesierraalta/tpp/internal/buildinfo.Commit=$(COMMIT)" -o bin/tpp ./cmd/tpp
+	go build -ldflags "-X github.com/alesierraalta/tsp/internal/buildinfo.Commit=$(COMMIT)" -o bin/tpp ./cmd/tpp
 
 test:
 	go test ./... -count=1

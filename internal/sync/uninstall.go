@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alesierraalta/tpp/internal/manifest"
-	"github.com/alesierraalta/tpp/internal/state"
+	"github.com/alesierraalta/tsp/internal/manifest"
+	"github.com/alesierraalta/tsp/internal/state"
 )
 
 // UninstallClass names what uninstall would do with one recorded path or the wired hook.

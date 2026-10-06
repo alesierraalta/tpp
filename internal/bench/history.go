@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alesierraalta/tpp/internal/buildinfo"
+	"github.com/alesierraalta/tsp/internal/buildinfo"
 )
 
 // HistoryEntry is one benchmark run as remembered across skill versions.

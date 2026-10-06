@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alesierraalta/tpp/internal/feature"
-	"github.com/alesierraalta/tpp/internal/sanitize"
+	"github.com/alesierraalta/tsp/internal/feature"
+	"github.com/alesierraalta/tsp/internal/sanitize"
 )
 
 // validText is the shape --template prints, filled in: one key per line, the run's identity in

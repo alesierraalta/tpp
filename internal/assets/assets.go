@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	root "github.com/alesierraalta/tpp/assets"
+	root "github.com/alesierraalta/tsp/assets"
 )
 
 // Skills returns the embedded skill tree: one directory per skill, each with a SKILL.md.

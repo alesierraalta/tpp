@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alesierraalta/tpp/internal/plan"
+	"github.com/alesierraalta/tsp/internal/plan"
 )
 
 // testLedgerHeader is the smallest ledger the reader accepts: the column names the row reader resolves by

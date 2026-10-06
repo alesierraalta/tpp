@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alesierraalta/tpp/internal/assets"
-	"github.com/alesierraalta/tpp/internal/sync"
+	"github.com/alesierraalta/tsp/internal/assets"
+	"github.com/alesierraalta/tsp/internal/sync"
 )
 
 func allPresent(name string) (string, error) { return "/usr/bin/" + name, nil }

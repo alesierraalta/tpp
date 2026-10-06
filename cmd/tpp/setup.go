@@ -8,11 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/alesierraalta/tpp/internal/assets"
-	"github.com/alesierraalta/tpp/internal/doctor"
-	"github.com/alesierraalta/tpp/internal/hookcmd"
-	"github.com/alesierraalta/tpp/internal/mode"
-	"github.com/alesierraalta/tpp/internal/sync"
+	"github.com/alesierraalta/tsp/internal/assets"
+	"github.com/alesierraalta/tsp/internal/doctor"
+	"github.com/alesierraalta/tsp/internal/hookcmd"
+	"github.com/alesierraalta/tsp/internal/mode"
+	"github.com/alesierraalta/tsp/internal/sync"
 )
 
 // runSetup is the install in one command: the same sync as `tpp sync`, the same checks as `tpp doctor`,

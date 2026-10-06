@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alesierraalta/tpp/internal/plan"
+	"github.com/alesierraalta/tsp/internal/plan"
 )
 
 // setBinding installs the explicit per-session plan binding the Stop gate audits against. The run

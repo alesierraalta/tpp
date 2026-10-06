@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alesierraalta/tpp/internal/buildinfo"
+	"github.com/alesierraalta/tsp/internal/buildinfo"
 )
 
 // The runs column was added to the aggregate after readings had already been recorded, so an older

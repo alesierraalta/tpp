@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alesierraalta/tpp/internal/plan"
+	"github.com/alesierraalta/tsp/internal/plan"
 )
 
 // row builds a ledger row with every machine cell filled, so a case varies only the cell it is about.

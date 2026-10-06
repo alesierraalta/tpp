@@ -11,9 +11,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/alesierraalta/tpp/internal/hookcmd"
-	"github.com/alesierraalta/tpp/internal/manifest"
-	"github.com/alesierraalta/tpp/internal/state"
+	"github.com/alesierraalta/tsp/internal/hookcmd"
+	"github.com/alesierraalta/tsp/internal/manifest"
+	"github.com/alesierraalta/tsp/internal/state"
 )
 
 // ActionClass names what the synchronizer would do with one path.

@@ -16,12 +16,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alesierraalta/tpp/internal/assets"
-	"github.com/alesierraalta/tpp/internal/buildinfo"
-	"github.com/alesierraalta/tpp/internal/hookcmd"
-	"github.com/alesierraalta/tpp/internal/manifest"
-	"github.com/alesierraalta/tpp/internal/skilltree"
-	"github.com/alesierraalta/tpp/internal/state"
+	"github.com/alesierraalta/tsp/internal/assets"
+	"github.com/alesierraalta/tsp/internal/buildinfo"
+	"github.com/alesierraalta/tsp/internal/hookcmd"
+	"github.com/alesierraalta/tsp/internal/manifest"
+	"github.com/alesierraalta/tsp/internal/skilltree"
+	"github.com/alesierraalta/tsp/internal/state"
 )
 
 // Options controls a sync run.

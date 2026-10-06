@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	root "github.com/alesierraalta/tpp/assets"
-	"github.com/alesierraalta/tpp/internal/assets"
-	"github.com/alesierraalta/tpp/internal/state"
+	root "github.com/alesierraalta/tsp/assets"
+	"github.com/alesierraalta/tsp/internal/assets"
+	"github.com/alesierraalta/tsp/internal/state"
 )
 
 const bin = "/opt/tools/tpp"

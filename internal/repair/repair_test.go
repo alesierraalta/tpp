@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alesierraalta/tpp/internal/assets"
-	"github.com/alesierraalta/tpp/internal/repair"
-	"github.com/alesierraalta/tpp/internal/sync"
+	"github.com/alesierraalta/tsp/internal/assets"
+	"github.com/alesierraalta/tsp/internal/repair"
+	"github.com/alesierraalta/tsp/internal/sync"
 )
 
 func currentBin(t *testing.T) string {

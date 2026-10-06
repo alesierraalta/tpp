@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alesierraalta/tpp/internal/sanitize"
+	"github.com/alesierraalta/tsp/internal/sanitize"
 )
 
 // The operator asked to be asked: the audit reaches the model as context and the user as a line

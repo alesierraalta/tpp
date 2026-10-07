@@ -16,6 +16,7 @@ import (
 
 	"github.com/alesierraalta/tpp/internal/bench"
 	"github.com/alesierraalta/tpp/internal/eval"
+	plan "github.com/alesierraalta/tpp/internal/plan"
 )
 
 func runBenchEval(args []string) int {
@@ -582,6 +583,7 @@ func runBenchEvalReopen(args []string) int {
 func runBenchEvalClose(args []string) int {
 	fs := evalFlagSet("bench eval close")
 	runDir := fs.String("eval", "", "evaluation run directory")
+	benchDir := fs.String("bench-dir", "bench", "benchmark directory (backlog root)")
 	if fs.Parse(args) != nil {
 		return 2
 	}
@@ -589,6 +591,16 @@ func runBenchEvalClose(args []string) int {
 		fmt.Fprintln(os.Stderr, "bench eval close: requires --eval")
 		return 2
 	}
+	// One exclusive lock spans the whole close: from before LoadRun until the completed run
+	// and its artifacts are written (or any refusal returns), close holds the same run-dir
+	// lock prove-novel and confirm-novel take, so a concurrent promotion or close queues
+	// instead of reading stale state. No lock, no seal: a lock that cannot be taken refuses
+	// here, before the run directory is read or mutated.
+	lock, err := plan.LockPlan(*runDir)
+	if err != nil {
+		return evalCommandError("close", fmt.Errorf("run directory lock: %w; refusing to run unlocked", err))
+	}
+	defer plan.UnlockPlan(lock)
 	stored, err := eval.LoadRun(*runDir)
 	if err != nil {
 		return evalCommandError("close", err)
@@ -619,7 +631,7 @@ func runBenchEvalClose(args []string) int {
 	// The authoritative inputs are validated before anything mutates: a corrupted snapshot or
 	// result, an unreadable manifest or policy, or a broken event chain must fail with the run still
 	// ADJUDICATING on disk rather than completed without its states and metrics.
-	if err := preflightClose(stored); err != nil {
+	if err := preflightClose(stored, absolutePath(*benchDir)); err != nil {
 		return evalCommandError("close", err)
 	}
 	violations := make([]string, 0)
@@ -744,6 +756,7 @@ func runBenchEvalCompare(args []string) int {
 	manifestPath := fs.String("manifest", "", "sealed manifest file")
 	policyPath := fs.String("policy", "", "sealed policy file")
 	outDir := fs.String("out", "", "comparison output directory")
+	benchDir := fs.String("bench-dir", "bench", "benchmark directory (backlog root)")
 	if fs.Parse(args) != nil {
 		return 2
 	}
@@ -751,7 +764,7 @@ func runBenchEvalCompare(args []string) int {
 		fmt.Fprintln(os.Stderr, "bench eval compare: requires --baseline, --candidate, --manifest, --policy, and --out")
 		return 2
 	}
-	artifact, report, advice, err := buildComparison(*baselineDir, *candidateDir, *manifestPath, *policyPath)
+	artifact, report, advice, err := buildComparison(*baselineDir, *candidateDir, *manifestPath, *policyPath, absolutePath(*benchDir))
 	if err != nil {
 		return evalCommandError("compare", err)
 	}
@@ -772,6 +785,7 @@ func runBenchEvalCompare(args []string) int {
 func runBenchEvalVerify(args []string) int {
 	fs := evalFlagSet("bench eval verify")
 	comparisonDir := fs.String("comparison", "", "comparison output directory")
+	benchDir := fs.String("bench-dir", "bench", "benchmark directory (backlog root)")
 	if fs.Parse(args) != nil {
 		return 2
 	}
@@ -796,7 +810,7 @@ func runBenchEvalVerify(args []string) int {
 			return 1
 		}
 	}
-	expected, report, _, err := buildComparison(recorded.BaselineDir, recorded.CandidateDir, recorded.ManifestPath, recorded.PolicyPath)
+	expected, report, _, err := buildComparison(recorded.BaselineDir, recorded.CandidateDir, recorded.ManifestPath, recorded.PolicyPath, absolutePath(*benchDir))
 	if err != nil {
 		return evalCommandError("verify", err)
 	}
@@ -818,7 +832,7 @@ func runBenchEvalVerify(args []string) int {
 	return 0
 }
 
-func buildComparison(baselineDir, candidateDir, manifestPath, policyPath string) (comparisonArtifact, string, eval.StopAdvice, error) {
+func buildComparison(baselineDir, candidateDir, manifestPath, policyPath, benchRoot string) (comparisonArtifact, string, eval.StopAdvice, error) {
 	manifestPath, policyPath = absolutePath(manifestPath), absolutePath(policyPath)
 	manifest, err := eval.LoadManifest(manifestPath)
 	if err != nil {
@@ -828,11 +842,11 @@ func buildComparison(baselineDir, candidateDir, manifestPath, policyPath string)
 	if err != nil {
 		return comparisonArtifact{}, "", eval.StopAdvice{}, err
 	}
-	baseline, baselinePaths, err := loadEvalSide(baselineDir)
+	baseline, baselinePaths, err := loadEvalSide(baselineDir, benchRoot)
 	if err != nil {
 		return comparisonArtifact{}, "", eval.StopAdvice{}, err
 	}
-	candidate, candidatePaths, err := loadEvalSide(candidateDir)
+	candidate, candidatePaths, err := loadEvalSide(candidateDir, benchRoot)
 	if err != nil {
 		return comparisonArtifact{}, "", eval.StopAdvice{}, err
 	}
@@ -854,7 +868,7 @@ func buildComparison(baselineDir, candidateDir, manifestPath, policyPath string)
 	return artifact, report, eval.ShouldStop(input), nil
 }
 
-func loadEvalSide(evalDir string) (eval.Side, []string, error) {
+func loadEvalSide(evalDir, benchRoot string) (eval.Side, []string, error) {
 	evalDir = absolutePath(evalDir)
 	entries, err := os.ReadDir(evalDir)
 	if err != nil {
@@ -896,6 +910,12 @@ func loadEvalSide(evalDir string) (eval.Side, []string, error) {
 			// match the moved inputs.
 			if err := validateConfirmationBindings(stored); err != nil {
 				return eval.Side{}, nil, fmt.Errorf("validate completed run %s confirmation: %w", runDir, err)
+			}
+			// Completed-artifact validation also covers the spec 4.3 backlog evidence: a sealed run
+			// whose CONFIRMED_NOVEL promotion lost (or never had) its backlog record, or whose backlog
+			// carries a record no recorded confirmation bound, is not a verifiable reading.
+			if err := eval.ReconcileNovelBacklog(benchRoot, stored); err != nil {
+				return eval.Side{}, nil, fmt.Errorf("validate completed run %s backlog: %w", runDir, err)
 			}
 			inputPaths = append(inputPaths, paths...)
 		}
@@ -1104,7 +1124,7 @@ func closeSourceInputs(stored eval.StoredRun) ([]string, error) {
 // invocation, not protection against a concurrent writer landing changes between this check and
 // the writes that follow; a fault in the writes themselves after a clean preflight is the separate
 // crash-consistency question.
-func preflightClose(stored eval.StoredRun) error {
+func preflightClose(stored eval.StoredRun, benchRoot string) error {
 	external, err := closeSourceInputs(stored)
 	if err != nil {
 		return err
@@ -1121,6 +1141,13 @@ func preflightClose(stored eval.StoredRun) error {
 	// Hash/schema first, then binding: a recorded confirmation must still bind to the current
 	// source inputs, or the close would seal a claim its inputs no longer support.
 	if err := validateConfirmationBindings(stored); err != nil {
+		return err
+	}
+	// Finally the spec 4.3 backlog evidence: every CONFIRMED_NOVEL promotion this run records
+	// must be backed by its append-only backlog record, and every record this run appended must
+	// be bound by a recorded novel confirmation. Read-only; never appends (human decision: close
+	// refuses a missing record and points at confirm-novel instead of repairing silently).
+	if err := eval.ReconcileNovelBacklog(benchRoot, stored); err != nil {
 		return err
 	}
 	return nil

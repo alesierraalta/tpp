@@ -29,9 +29,9 @@ import (
 // effective novel proof" instead of racing the write and reporting a success that was
 // overwritten; a lock that cannot be taken refuses here, before any mutation, never
 // proceeding unlocked. The dry run takes the same lock — one acquisition point, released
-// on return either way — but writes nothing. prove-novel and confirm-novel are
-// serialized: the other eval subcommands (adjudicate, confirm, close, verify, ...) are
-// NOT yet locked against concurrent writers.
+// on return either way — but writes nothing. prove-novel, confirm-novel and close are
+// serialized: the other eval subcommands (adjudicate, confirm, reopen, ...) are NOT yet
+// locked against concurrent writers.
 func runBenchEvalProveNovel(args []string) int {
 	fs := evalFlagSet("bench eval prove-novel")
 	fs.Usage = func() {

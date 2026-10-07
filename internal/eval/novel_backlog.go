@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -276,4 +277,131 @@ func ensureSafeBacklogDir(root, dir string) error {
 		return fmt.Errorf("backlog directory escapes root")
 	}
 	return nil
+}
+
+// ReconcileNovelBacklog verifies the spec 4.3 backlog evidence for a run, read-only: every
+// finding the controlled workflow currently holds at CONFIRMED_NOVEL must have this run's
+// backlog record bound to the proof event digest its effective confirmation references, and
+// every record this run appended must be bound by a novel confirmation recorded in that
+// case's log (earlier epochs included; other runs' records in the shared file are ignored).
+// A missing record names its repair (rerun confirm-novel); an unknown, mis-bound, or
+// malformed record is refused as tampering. It never writes: close refuses and leaves the
+// decision to the operator (human decision: no auto-append). A legacy B0 CONFIRMED_NOVEL
+// that a historical EventDecide set carries no confirmation and owes no record.
+func ReconcileNovelBacklog(root string, stored StoredRun) error {
+	// The harness-prefixed run identity a confirm-novel record is stamped with. Mirrors
+	// novelBacklogRecordFor in cmd/tpp — the two must agree for records to match this run.
+	runID := fmt.Sprintf("run-%d", stored.K)
+	if harness := strings.TrimSpace(stored.Record.HarnessID); harness != "" {
+		runID = harness + "/" + runID
+	}
+	caseIDs := make([]string, 0, len(stored.CaseRuns))
+	for caseID := range stored.CaseRuns {
+		caseIDs = append(caseIDs, caseID)
+	}
+	sort.Strings(caseIDs)
+	for _, caseID := range caseIDs {
+		caseRun := stored.CaseRuns[caseID]
+		if !validBacklogCaseID(caseID) {
+			return fmt.Errorf("case %q is not a safe backlog path component", caseID)
+		}
+		records, err := readNovelBacklogFile(filepath.Join(root, "backlog", caseID+".jsonl"), caseID)
+		if err != nil {
+			return fmt.Errorf("case %s backlog: %w", caseID, err)
+		}
+		bound, err := novelConfirmBindings(caseRun.Log.Events)
+		if err != nil {
+			return fmt.Errorf("case %s: %w", caseID, err)
+		}
+		// Tampering first: every record this run appended must reference a proof event
+		// digest some recorded novel confirmation in this case's log bound — any epoch —
+		// and claim the finding that confirmation belongs to. A record bound to nothing,
+		// or to another finding, is not stale history but a forgery.
+		for _, record := range records {
+			if record.RunID != runID {
+				continue // another run's record in the shared case file (backlog is shared across runs)
+			}
+			findingID, ok := bound[record.ProofEventDigest]
+			if !ok {
+				return fmt.Errorf("case %s: backlog record for finding %s references proof event digest %s that no recorded novel confirmation bound; refusing to seal a tampered backlog", caseID, record.FindingID, record.ProofEventDigest)
+			}
+			if findingID != record.FindingID {
+				return fmt.Errorf("case %s: backlog record claims finding %s for proof event digest %s that finding %s confirmed; refusing to seal a tampered backlog", caseID, record.FindingID, record.ProofEventDigest, findingID)
+			}
+		}
+		// Completeness: every finding currently CONFIRMED_NOVEL through a novel confirmation
+		// must have this run's record for the digest that confirmation binds. A legacy decide-
+		// promoted CONFIRMED_NOVEL owes nothing (no confirmation, no proof, no record).
+		for _, finding := range caseRun.Findings {
+			if caseRun.FindingState(finding.ID) != FindingConfirmedNovel {
+				continue
+			}
+			setter, setterIdx, ok := latestConfirmedSetter(caseRun.Log.Events, finding.ID)
+			if !ok {
+				return fmt.Errorf("case %s finding %s: no recorded event sets the finding to %s", caseID, finding.ID, FindingConfirmedNovel)
+			}
+			if setter.Kind == EventDecide {
+				continue // legacy B0 direct CONFIRMED_NOVEL: no confirmation, no record required
+			}
+			if setter.Kind != EventNovelConfirm {
+				return fmt.Errorf("case %s finding %s: unexpected %s event sets the finding to %s", caseID, finding.ID, setter.Kind, FindingConfirmedNovel)
+			}
+			payload, err := decodeNovelConfirmation(caseRun.Log.Events[:setterIdx], setter)
+			if err != nil {
+				return fmt.Errorf("case %s finding %s: recorded novel confirmation does not verify: %w", caseID, finding.ID, err)
+			}
+			if !hasBacklogRecord(records, runID, finding.ID, payload.ProofHash) {
+				return fmt.Errorf("case %s finding %s: CONFIRMED_NOVEL promotion has no backlog record for proof event digest %s; rerun `tpp bench eval confirm-novel` to repair the backlog record", caseID, finding.ID, payload.ProofHash)
+			}
+		}
+	}
+	return nil
+}
+
+// novelConfirmBindings maps every proof event digest a recorded novel confirmation in the
+// log bound — current or earlier epoch, the backlog keeps stale records as history — to
+// the finding that confirmed it. A confirmation that does not decode, or two findings
+// bound to one digest, is a broken or forged log and fails closed.
+func novelConfirmBindings(events []Event) (map[string]string, error) {
+	bindings := make(map[string]string)
+	for index, event := range events {
+		if event.Kind != EventNovelConfirm {
+			continue
+		}
+		payload, err := decodeNovelConfirmation(events[:index], event)
+		if err != nil {
+			return nil, fmt.Errorf("recorded novel confirmation does not verify: %w", err)
+		}
+		if prior, exists := bindings[payload.ProofHash]; exists && prior != event.ID {
+			return nil, fmt.Errorf("proof event digest %s confirms both finding %s and finding %s", payload.ProofHash, prior, event.ID)
+		}
+		bindings[payload.ProofHash] = event.ID
+	}
+	return bindings, nil
+}
+
+// latestConfirmedSetter returns the last state-changing event that set the finding to
+// CONFIRMED_NOVEL, with its index in the log. State-preserving events (a re-decision) are
+// skipped so the transition itself is returned; its kind decides whether the promotion
+// was a controlled novel confirmation or a historical direct decide.
+func latestConfirmedSetter(events []Event, findingID string) (Event, int, bool) {
+	for index := len(events) - 1; index >= 0; index-- {
+		event := events[index]
+		if event.Entity == EntityFinding && event.ID == findingID &&
+			event.PreviousState != event.NewState && event.NewState == string(FindingConfirmedNovel) {
+			return event, index, true
+		}
+	}
+	return Event{}, 0, false
+}
+
+// hasBacklogRecord reports whether this run appended the record tying the finding's
+// promotion to the proof event digest its confirmation references.
+func hasBacklogRecord(records []NovelBacklogRecord, runID, findingID, proofDigest string) bool {
+	for _, record := range records {
+		if record.RunID == runID && record.FindingID == findingID && record.ProofEventDigest == proofDigest {
+			return true
+		}
+	}
+	return false
 }

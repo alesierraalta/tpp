@@ -81,13 +81,13 @@ func RunWith(cfgDir string, lookPath func(string) (string, error), probe func(co
 		}
 		r.Skills = append(r.Skills, st)
 		if !st.Installed {
-			r.Problems = append(r.Problems, "skill not installed: "+name+" (run: tpp sync)")
+			r.Problems = append(r.Problems, "skill not installed: "+name+" (run: tsp sync)")
 		}
 	}
 	r.HookKind, r.HookCommand = hookWired(filepath.Join(cfgDir, "settings.json"))
 	r.HookWired = r.HookKind != HookNone
 	if !r.HookWired {
-		r.Problems = append(r.Problems, "gate hook not wired in settings.json (run: tpp sync)")
+		r.Problems = append(r.Problems, "gate hook not wired in settings.json (run: tsp sync)")
 	} else {
 		r.WiredBinary, r.PathBinary, r.BinariesDiffer = compareGateBinaries(r.HookCommand, lookPath)
 		if probe != nil {
@@ -117,7 +117,7 @@ func RunWith(cfgDir string, lookPath func(string) (string, error), probe func(co
 // writes its own bytes, so the order and the blank lines between them are one list a reader can follow.
 func (r Report) String() string {
 	var b strings.Builder
-	header := "tpp doctor"
+	header := "tsp doctor"
 	if r.Mode != "" {
 		header += " · mode " + r.Mode
 	}
@@ -160,7 +160,7 @@ func (r Report) writeHook(b *strings.Builder) {
 		fmt.Fprintf(b, "  the wired command answers a payload\n")
 	}
 	if r.BinariesDiffer {
-		fmt.Fprintf(b, "  warning: the wired gate binary %s and the tpp on PATH %s are different files: the two would give different verdicts\n", r.WiredBinary, r.PathBinary)
+		fmt.Fprintf(b, "  warning: the wired gate binary %s and the gate binary on PATH %s are different files: the two would give different verdicts\n", r.WiredBinary, r.PathBinary)
 	}
 }
 

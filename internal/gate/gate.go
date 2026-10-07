@@ -314,7 +314,7 @@ func audit(d Deps, root, rel, run string, res Result, entry *Entry) Result {
 	case len(gaps.RunProblems) > 0:
 		res.RunProblem = strings.Join(gaps.RunProblems, "; ")
 	case gaps.RunMissing:
-		res.RunProblem = "no row in " + rel + " carries run \"" + run + "\": tpp plan gaps --all shows every row"
+		res.RunProblem = "no row in " + rel + " carries run \"" + run + "\": tsp plan gaps --all shows every row"
 	}
 	switch {
 	case gaps.Any():

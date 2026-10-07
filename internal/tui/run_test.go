@@ -110,7 +110,7 @@ func TestRunStatusView(t *testing.T) {
 	if s.statusCalls != 1 {
 		t.Errorf("Status called %d times, want 1", s.statusCalls)
 	}
-	for _, want := range []string{"State root: /tmp/rdd-home", "Installed version: 1.4.0", "tpp tui: status"} {
+	for _, want := range []string{"State root: /tmp/rdd-home", "Installed version: 1.4.0", "tsp tui: status"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q", want)
 		}
@@ -217,7 +217,7 @@ func TestRunArrowSplitAcrossReads(t *testing.T) {
 	if err := Run(in, &out, s.deps()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	hasTitle := strings.Contains(out.String(), "tpp tui: features")
+	hasTitle := strings.Contains(out.String(), "tsp tui: features")
 	if s.featuresCall != 1 || s.statusCalls != 0 || !hasTitle {
 		t.Errorf("features=%d status=%d hasTitle=%v, want 1, 0, true", s.featuresCall, s.statusCalls, hasTitle)
 	}

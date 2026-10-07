@@ -150,8 +150,8 @@ func TestTemplateFillsTheIdentityAndNamesTheSubmitCommand(t *testing.T) {
 			t.Fatalf("template missing the %q field:\n%s", want, got)
 		}
 	}
-	if !strings.Contains(got, "--file") {
-		t.Fatalf("the template must name the command that submits it:\n%s", got)
+	if !strings.Contains(got, "tsp feedback --file") || strings.Contains(got, "tpp") {
+		t.Fatalf("the template must name the tsp command that submits it:\n%s", got)
 	}
 }
 
@@ -668,5 +668,16 @@ func TestPlanMissingSaysSo(t *testing.T) {
 	_, err := Parse(text)
 	if err == nil || !strings.Contains(err.Error(), "plan") {
 		t.Fatalf("an empty plan is a missing required field naming plan, got %v", err)
+	}
+}
+
+// An empty ledger points at the command that starts it, under the binary's current name.
+func TestSummaryOfAnEmptyLedgerNamesTheTspCommand(t *testing.T) {
+	got, err := Summary(t.TempDir())
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if !strings.Contains(got, "`tsp feedback --template`") {
+		t.Fatalf("empty summary must name the tsp command:\n%s", got)
 	}
 }

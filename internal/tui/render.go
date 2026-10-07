@@ -12,7 +12,7 @@ const (
 	helpPlan     = "up/down scroll | pgup/pgdn page | esc back | q quit"
 )
 
-const planTitle = "tpp tui: sync plan (dry-run; writes nothing)"
+const planTitle = "tsp tui: sync plan (dry-run; writes nothing)"
 
 var menuItems = []string{"Status", "Features", "Sync plan", "Quit"}
 
@@ -81,11 +81,11 @@ func renderMenu(sel int) string {
 		}
 		items.WriteString(name)
 	}
-	return joinSections("tpp tui", items.String(), helpRoot)
+	return joinSections("tsp tui", items.String(), helpRoot)
 }
 
 func renderStatus(sv StatusView, err error) string {
-	const title = "tpp tui: status"
+	const title = "tsp tui: status"
 	if err != nil {
 		return joinSections(title, "error: "+err.Error(), helpStatus)
 	}
@@ -103,7 +103,7 @@ func renderStatus(sv StatusView, err error) string {
 }
 
 func renderFeatures(rows []FeatureRow, sel int, detail string) string {
-	const title = "tpp tui: features"
+	const title = "tsp tui: features"
 	table := make([][]string, len(rows))
 	for i, row := range rows {
 		table[i] = []string{row.ID, row.Title, stateLabel(row.Enabled)}

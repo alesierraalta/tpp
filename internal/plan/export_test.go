@@ -47,6 +47,7 @@ func TestExportRendersFindingsWithTheirEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
+		"## tsp findings",
 		"1ba6bec",
 		"pr-42.md",
 		"| Id | Location | Severity | Status | Pinning test | Evidence |",

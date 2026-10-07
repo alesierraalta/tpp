@@ -206,7 +206,7 @@ func replayWith(run Runner, timeout time.Duration) func(plan.Mutation, string, s
 		}
 		defer func() {
 			if err := os.RemoveAll(staged); err != nil {
-				fmt.Fprintf(os.Stderr, "tpp: the staged replay tree %s could not be removed: %v\n", staged, err)
+				fmt.Fprintf(os.Stderr, "tsp: the staged replay tree %s could not be removed: %v\n", staged, err)
 			}
 		}()
 		original, mode, err := applyMutation(staged, mutation)

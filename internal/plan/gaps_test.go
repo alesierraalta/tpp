@@ -928,7 +928,7 @@ func TestGapsForRunDisclosesUnscopedRowsWithoutCountingThem(t *testing.T) {
 	if g.Any() {
 		t.Fatalf("unscoped rows are disclosed, not owed: %+v", g)
 	}
-	if !strings.Contains(g.Report(), "2 row(s) belong to no run and are not counted; tpp plan gaps --all shows every row") {
+	if !strings.Contains(g.Report(), "2 row(s) belong to no run and are not counted; tsp plan gaps --all shows every row") {
 		t.Fatalf("report omitted the unscoped-row disclosure:\n%s", g.Report())
 	}
 }

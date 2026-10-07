@@ -42,7 +42,7 @@ func TestAuditReasonOffersFeedbackWithoutDemandingIt(t *testing.T) {
 		t.Fatalf("the operator asked to be offered feedback:\n%s", reason)
 	}
 	// An offer with no command attached is not actionable: the operator cannot record the run.
-	if !strings.Contains(reason, "tpp feedback") {
+	if !strings.Contains(reason, "tsp feedback") {
 		t.Fatalf("the offer must name the recording command:\n%s", reason)
 	}
 	for _, forbidden := range []string{"you must", "block", "refuse"} {
@@ -57,7 +57,7 @@ func TestReasonOmitsTheFeedbackOfferWhenDisabled(t *testing.T) {
 		BuildAuditReason("p.md", "layers swept: 1 of 2\n", false),
 		BuildCompleteReason("p.md", false),
 	} {
-		if strings.Contains(reason, "tpp feedback") || strings.Contains(reason, "Want the run graded") {
+		if strings.Contains(reason, "tsp feedback") || strings.Contains(reason, "Want the run graded") {
 			t.Fatalf("disabled feedback offer leaked into reason:\n%s", reason)
 		}
 	}
@@ -224,7 +224,7 @@ func TestAuditLineIgnoresTheProseItUsedToCount(t *testing.T) {
 			"  assigned and never invoked (line 53): Persistence (database-persistence-testing)\n"+
 			"  assigned and never invoked (line 55): Critical e2e journeys (real-run-validation)\n"+
 			"ranked targets done: 3 of 7\n", true)}
-	if line := auditLine(res); line != "tpp: the testing plan owes nothing. Want feedback on this run?" {
+	if line := auditLine(res); line != "tsp: the testing plan owes nothing. Want feedback on this run?" {
 		t.Fatalf("the line must read the decision, never the report text: %q", line)
 	}
 }
@@ -609,7 +609,7 @@ func TestDecideReportsTheRunScopeProblemInsteadOfOwesNothing(t *testing.T) {
 		{
 			name:       "a run no row carries",
 			plan:       settledOtherRun,
-			wantLine:   []string{`carries run "run-x"`, "gaps --all"},
+			wantLine:   []string{`carries run "run-x"`, "tsp plan gaps --all"},
 			wantReason: []string{`no row carries run "run-x"`},
 		},
 		{

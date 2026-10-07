@@ -699,7 +699,7 @@ func TestReportListsChangesAndCountsTheRest(t *testing.T) {
 				t.Errorf("dry-run=%v report lists %s row by row:\n%s", dryRun, hidden, out)
 			}
 		}
-		if !strings.Contains(out, "skip-user: 3 files not managed by tpp (left untouched)") {
+		if !strings.Contains(out, "skip-user: 3 files not managed by tsp (left untouched)") {
 			t.Errorf("dry-run=%v report does not count the user files:\n%s", dryRun, out)
 		}
 	}

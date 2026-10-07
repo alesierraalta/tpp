@@ -78,6 +78,10 @@ func TestDoctorEmptyConfigDir(t *testing.T) {
 	if len(r.Problems) < len(assets.SkillNames())+1 {
 		t.Fatalf("expected a problem per missing skill plus the hook, got %d", len(r.Problems))
 	}
+	out := r.String()
+	if !strings.HasPrefix(out, "tsp doctor") || !strings.Contains(out, "(run: tsp sync)") || strings.Contains(out, "tpp") {
+		t.Fatalf("the report must name the tsp commands that fix it:\n%s", out)
+	}
 }
 
 func TestDoctorReportsSkillDrift(t *testing.T) {

@@ -76,13 +76,16 @@ hand-applied gate is a weaker claim than the binary's:
 12. **Persist before you report, in the shipped shape.** The plan is a set of tables, not a
     document you compose: create it with `tsp plan init` (or copy
     [assets/test-plan-template.md](assets/test-plan-template.md) when the binary is absent) and
-    fill its rows. Prose replaces no row, and every finding cell opens with `path:line`. When the
+    fill its rows. The plan file is the first artifact: create it before any probe, scratch file
+    or test — a session that starts by probing has already decided to finish without one.
+    Prose replaces no row, and every finding cell opens with `path:line`. When the
     plan is not `docs/testing/test-plan.md`, declare it so the Stop hook and `tsp check` read
     it: write `.tsp.json` at the worktree root.
     ```json
     {"planPath": "docs/testing/<name>.md"}
     ```
-    A plan nobody declares is a plan nothing clears. The declaration is repository-local, so a
+    A plan nobody declares is a plan nothing clears — a file at some other path with no
+    `.tsp.json` naming it is a run with no plan. The declaration is repository-local, so a
     scoped plan cannot silently become the default plan for another checkout. The final message is
     written only after the declared plan is on disk and `tsp plan check` passes: it reports
     findings that are not rows, cite no location, cite an evidence id that does not exist, or
@@ -101,7 +104,10 @@ hand-applied gate is a weaker claim than the binary's:
     test (rule 4) that turns red the day someone fixes the bug, so it defends the defect instead
     of demanding its repair. Promote through `no-excess-tests`, name it in the finding row, and
     label any characterization test as such in its own name. A finding whose probe was never
-    promoted stays `open`, reason `not pinned`.
+    promoted stays `open`, reason `not pinned`. Before the final message, the tree is the arbiter:
+    `git status` must show the test file each pinned finding names, and a row whose test file is
+    absent from the tree, or that this run never watched go red on the defective code, does not
+    claim a pin.
 
 14. **Record a retrospective at the end of every run**, including blocked or partial ones. Run
     `tsp feedback --template` into a `mktemp` file outside the repository, fill only the existing

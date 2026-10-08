@@ -143,3 +143,43 @@ func TestTestStrategySkillRequiresTheInvocationModeInTheRoutingLedger(t *testing
 		}
 	}
 }
+
+// The gpt-6-luna baseline (b2aff3f, 90 runs) lost 20 runs to an absent plan: 9 wrote a template at an
+// undeclared alternate path, 11 wrote nothing, and every agent still exited 0. The rule existed but never
+// ordered the plan before the probing, so the session could reach its final message with no plan on disk.
+// This pins the ordering and the consequence of the undeclared path.
+func TestTestStrategySkillPutsThePlanBeforeAnyOtherArtifact(t *testing.T) {
+	data, err := fs.ReadFile(Skills(), "test-strategy/SKILL.md")
+	if err != nil {
+		t.Fatalf("SKILL.md missing: %v", err)
+	}
+	text := string(data)
+	for _, want := range []struct{ phrase, contract string }{
+		{"The plan file is the first artifact", "the ordering that stops a run from probing before it plans"},
+		{"is a run with no plan", "the consequence of writing a plan at a path nothing declares"},
+	} {
+		if !strings.Contains(text, want.phrase) {
+			t.Errorf("test-strategy no longer names %q: %s", want.phrase, want.contract)
+		}
+	}
+}
+
+// The same baseline claimed a pinning test on 29 defect-runs whose tests never failed the defective code:
+// rows read `pinned` while the agent had added or changed no test file at all. A claim the tree cannot
+// corroborate is the same unverifiable report rule 12 already rejects for prose findings, so the skill has
+// to name the check it owes before the final message.
+func TestTestStrategySkillForbidsPinningClaimsWithoutTheTestInTree(t *testing.T) {
+	data, err := fs.ReadFile(Skills(), "test-strategy/SKILL.md")
+	if err != nil {
+		t.Fatalf("SKILL.md missing: %v", err)
+	}
+	text := string(data)
+	for _, want := range []struct{ phrase, contract string }{
+		{"`git status` must show the test file", "the tree check a pinned claim has to survive before the final message"},
+		{"never watched go red", "the observation a pinning claim requires, missing from the failed runs"},
+	} {
+		if !strings.Contains(text, want.phrase) {
+			t.Errorf("test-strategy no longer names %q: %s", want.phrase, want.contract)
+		}
+	}
+}

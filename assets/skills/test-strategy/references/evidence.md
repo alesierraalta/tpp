@@ -90,6 +90,12 @@ findings. This contract applies to every testing skill routed by `test-strategy`
     refusal keeps its own reason. The output is pinned like any other, so it must name the failing test: a
     compile error must not be able to stand in for the red test. Prefer it over `! cmd`, which passes on a
     compile failure too.
+12. **A test that did not run is not a pass.** A command that exits zero while its output shows a skipped Go
+    test or subtest (`--- SKIP:`), or a run whose every package matched no test (`[no tests to run]`), is
+    refused at its first run (`tests-not-run`): a test guarded by `t.Skip` when a tool is missing reads as
+    green in a sandbox image without that tool. Go prints a skip only under `-v`, so a Go test row writes
+    `go test -v` and normalizes the elapsed times; packages with no test files, and one package of several
+    matching nothing beside packages that ran, stay admissible.
 
 ## Record template
 

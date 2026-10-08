@@ -143,6 +143,42 @@ func TestPlanInitMicroWritesTheMicroTemplate(t *testing.T) {
 	}
 }
 
+// The header of a fresh plan names where the plan was written: the repository-relative path for a plan inside
+// the repository, the absolute path for one kept outside it, and the default path when no --path is given.
+func TestPlanInitHeaderNamesThePathItWroteTo(t *testing.T) {
+	bin := buildCLI(t)
+	repo := t.TempDir()
+	if out, err := exec.Command("git", "init", "-q", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	outside := filepath.Join(t.TempDir(), "reviews", "pr-7.md")
+	cases := []struct {
+		name, file, want string
+		args             []string
+	}{
+		{"default path", filepath.Join(repo, "docs/testing/test-plan.md"), "docs/testing/test-plan.md", nil},
+		{"relative path", filepath.Join(repo, "plans/a.md"), "plans/a.md", []string{"--path", "plans/a.md"}},
+		{"absolute path outside the repository", outside, outside, []string{"--path", outside}},
+		{"micro plan", filepath.Join(repo, "plans/m.md"), "plans/m.md", []string{"--micro", "--path", "plans/m.md"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command(bin, append([]string{"plan", "init"}, tc.args...)...)
+			cmd.Dir = repo
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("plan init: %v\n%s", err, out)
+			}
+			got, err := os.ReadFile(tc.file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := "Plan path: `" + tc.want + "`"; !strings.Contains(string(got), want) {
+				t.Fatalf("header does not read %q:\n%s", want, strings.SplitN(string(got), "\n", 4)[2])
+			}
+		})
+	}
+}
+
 // The TUI needs a real terminal; on a pipe it must refuse before tui.Run and point at the
 // non-interactive equivalents instead of hanging on a loop no one can drive.
 func TestTUIRefusesWithoutATerminal(t *testing.T) {

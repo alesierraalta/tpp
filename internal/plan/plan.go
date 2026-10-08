@@ -40,23 +40,30 @@ func embeddedTemplate(path string) (string, error) {
 const MicroTemplatePath = "test-strategy/assets/test-micro-plan-template.md"
 
 // Init writes the skeleton to path. An existing plan is never overwritten unless force is set:
-// the plan never shrinks, so replacing one is a decision, not a default.
-func Init(path string, force bool) error {
-	return initFrom(path, TemplatePath, force)
+// the plan never shrinks, so replacing one is a decision, not a default. shown is the path the header
+// names; empty keeps the template's default.
+func Init(path, shown string, force bool) error {
+	return initFrom(path, shown, TemplatePath, force)
 }
 
 // InitMicro writes the micro skeleton to path, refusing an existing plan exactly as Init does.
-func InitMicro(path string, force bool) error {
-	return initFrom(path, MicroTemplatePath, force)
+func InitMicro(path, shown string, force bool) error {
+	return initFrom(path, shown, MicroTemplatePath, force)
 }
 
-func initFrom(path, template string, force bool) error {
+// templateHeaderPath is how both skeletons name the plan in their header line.
+const templateHeaderPath = "Plan path: `" + DefaultPath + "`"
+
+func initFrom(path, shown, template string, force bool) error {
 	if _, err := os.Stat(path); err == nil && !force {
 		return fmt.Errorf("%s already exists; pass --force to replace it", path)
 	}
 	body, err := embeddedTemplate(template)
 	if err != nil {
 		return err
+	}
+	if shown != "" {
+		body = strings.Replace(body, templateHeaderPath, "Plan path: `"+shown+"`", 1)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err

@@ -415,3 +415,60 @@ func TestRememberAndResolveRoundTrip(t *testing.T) {
 		t.Fatalf("resolve missing map = %q, %t, want empty false", got, ok)
 	}
 }
+
+// A pair the map already holds is not written again: the Stop gate remembers the same repository and plan on
+// every session stop, and a map that appends each time grows without bound. A new pair is still appended, and a
+// torn line (a crash mid-write) neither breaks the lookup nor hides a pair recorded after it.
+func TestRememberWritesAPairOnce(t *testing.T) {
+	dir := t.TempDir()
+	telemetryDir := TelemetryDir(dir)
+	key, err := LoadKey(dir)
+	if err != nil {
+		t.Fatalf("load key: %v", err)
+	}
+	mapPath := filepath.Join(telemetryDir, ".pseudonyms.jsonl")
+	lineCount := func() int {
+		raw, err := os.ReadFile(mapPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.Count(string(raw), "\n")
+	}
+	repo := key.ID("repo", "alterCEO")
+	for i := 0; i < 3; i++ {
+		if err := key.Remember(telemetryDir, repo, "alterCEO"); err != nil {
+			t.Fatalf("remember: %v", err)
+		}
+	}
+	if n := lineCount(); n != 1 {
+		t.Fatalf("map holds %d lines after remembering one pair three times, want 1", n)
+	}
+
+	// A torn line, then a new pair, then the old pair again.
+	f, err := os.OpenFile(mapPath, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write(append(make([]byte, 40), '\n')); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	plan := key.ID("plan", "docs/testing/test-plan.md")
+	if err := key.Remember(telemetryDir, plan, "docs/testing/test-plan.md"); err != nil {
+		t.Fatalf("remember: %v", err)
+	}
+	if err := key.Remember(telemetryDir, plan, "docs/testing/test-plan.md"); err != nil {
+		t.Fatalf("remember: %v", err)
+	}
+	if err := key.Remember(telemetryDir, repo, "alterCEO"); err != nil {
+		t.Fatalf("remember: %v", err)
+	}
+	if n := lineCount(); n != 3 {
+		t.Fatalf("map holds %d lines, want 3 (one pair, the torn line, a second pair)", n)
+	}
+	for p, want := range map[string]string{repo: "alterCEO", plan: "docs/testing/test-plan.md"} {
+		if got, ok := Resolve(telemetryDir, p); !ok || got != want {
+			t.Fatalf("resolve(%q) = %q, %t, want %q", p, got, ok, want)
+		}
+	}
+}

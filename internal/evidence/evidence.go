@@ -235,34 +235,10 @@ func admitRow(row plan.LedgerRow, opts Options, deps Deps, record bool) RowResul
 			row.ID, row.Label, observadoLabel))
 	}
 
-	// Resolve the cell first: the live ledger writes its commands inside backticks, so one whole
-	// wrapping span is the ordinary spelling of a command and is stripped. Resolution is not a check,
-	// so the reasons below still fire in the order the contract owes them.
-	cell := strings.TrimSpace(row.Admit)
-	command, _ := admitSpan(cell)
-	if absentCommand[strings.ToLower(command)] {
-		return refused(result, ReasonNoAdmitCommand, fmt.Sprintf(
-			"evidence %s declares no command in its Admit cell (%q is a placeholder, not a command)", row.ID, command))
-	}
-
-	// One command whose output is the observation: anything that chains, pipelines, backgrounds,
-	// groups, or substitutes a command is refused, because the tool cannot tell what a second process
-	// will do with the stream. Redirection is the tail of the table and runs after the placeholder rule.
-	if marker, reason, ok := commandMarker(command, false); ok {
-		return refused(result, reason, markerDetail(row.ID, command, marker, reason))
-	}
-	if strings.Contains(command, "`") {
-		return refused(result, ReasonHasMarkup, fmt.Sprintf(
-			"evidence %s carries backticks in its Admit cell (%q) that are not one wrapping span: Admit carries one bare command, unlike Executed, which is prose a human reads and may quote with backticks",
-			row.ID, cell))
-	}
-	if placeholder := commandPlaceholder(command); placeholder != "" {
-		return refused(result, ReasonHasPlaceholder, fmt.Sprintf(
-			"evidence %s admits %q, which still holds the unexpanded placeholder %q: the row runs only once its author fills it in",
-			row.ID, command, placeholder))
-	}
-	if marker, reason, ok := commandMarker(command, true); ok {
-		return refused(result, reason, markerDetail(row.ID, command, marker, reason))
+	// The command checks are shared with add-evidence, so writer and admission refuse the same cells.
+	command, reason, detail := admitCommand(row.ID, row.Admit)
+	if reason != "" {
+		return refused(result, reason, detail)
 	}
 
 	// A row whose Normalize expression does not compile is a defect in the row, not in the command, so it
@@ -483,6 +459,49 @@ func testsNotRun(output string) string {
 		return strings.TrimSpace(packages[0])
 	}
 	return ""
+}
+
+// admitCommand resolves an Admit cell to the one command it declares, or names why it declares none that may run:
+// no command, a chain or pipeline, stray backticks, an unexpanded placeholder, or a redirection. The order is the
+// contract's, so a cell that breaks several rules is told the first one.
+func admitCommand(id, admit string) (command, reason, detail string) {
+	// Resolve the cell first: the live ledger writes its commands inside backticks, so one whole
+	// wrapping span is the ordinary spelling of a command and is stripped. Resolution is not a check,
+	// so the reasons below still fire in the order the contract owes them.
+	cell := strings.TrimSpace(admit)
+	command, _ = admitSpan(cell)
+	if absentCommand[strings.ToLower(command)] {
+		return command, ReasonNoAdmitCommand, fmt.Sprintf(
+			"evidence %s declares no command in its Admit cell (%q is a placeholder, not a command)", id, command)
+	}
+	// One command whose output is the observation: anything that chains, pipelines, backgrounds,
+	// groups, or substitutes a command is refused, because the tool cannot tell what a second process
+	// will do with the stream. Redirection is the tail of the table and runs after the placeholder rule.
+	if marker, reason, ok := commandMarker(command, false); ok {
+		return command, reason, markerDetail(id, command, marker, reason)
+	}
+	if strings.Contains(command, "`") {
+		return command, ReasonHasMarkup, fmt.Sprintf(
+			"evidence %s carries backticks in its Admit cell (%q) that are not one wrapping span: Admit carries one bare command, unlike Executed, which is prose a human reads and may quote with backticks",
+			id, cell)
+	}
+	if placeholder := commandPlaceholder(command); placeholder != "" {
+		return command, ReasonHasPlaceholder, fmt.Sprintf(
+			"evidence %s admits %q, which still holds the unexpanded placeholder %q: the row runs only once its author fills it in",
+			id, command, placeholder)
+	}
+	if marker, reason, ok := commandMarker(command, true); ok {
+		return command, reason, markerDetail(id, command, marker, reason)
+	}
+	return command, "", ""
+}
+
+// CheckAdmitCommand answers whether an Admit cell declares one command plan admit may run, with the reason code and
+// sentence admit itself would refuse it with. It is the check add-evidence runs before writing the row, so a row the
+// writer accepts is never refused by admit for its command before anything runs.
+func CheckAdmitCommand(id, admit string) (reason, detail string) {
+	_, reason, detail = admitCommand(id, admit)
+	return reason, detail
 }
 
 // refused marks a result refused without clearing what the row already resolved to.

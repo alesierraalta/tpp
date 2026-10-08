@@ -100,7 +100,7 @@ flowchart TD
     full --> execute
     light --> execute
     micro --> execute
-    execute[Execute: probes, real runs, mutations,<br/>pinning tests observed red then green] --> ledger[Evidence ledger rows<br/>tsp plan admit replays and pins them]
+    execute[Execute: probes, real runs, mutations,<br/>pinning tests observed red then green] --> ledger[Evidence ledger rows<br/>tsp plan add-evidence writes them,<br/>tsp plan admit replays and pins them]
     ledger --> findings[Findings rows<br/>tsp plan add-finding]
     findings --> check{tsp plan check}
     check -- breach --> execute
@@ -320,7 +320,7 @@ and `repair` are documented in the Commands table below.
 | `tsp uninstall [--dry-run] [--orphans] [--force] [--config-dir <dir>]` | Removes managed assets and unwires the Stop hook; never touches foreign files. Modified content needs `--force` (snapshot first); `--orphans` also removes assets the manifest no longer ships; `--dry-run` writes nothing. |
 | `tsp restore [--id <backup-id>] [--dry-run]` | Copies a backup store entry back onto its original paths (default: the latest backup). |
 | `tsp repair [--config-dir <dir>] [--dry-run] [--force]` | Brings a broken install back to what `doctor` reports healthy (missing/drifted managed skills and Stop hook re-wire), Claude-only — the Pi extension is untouched; a healthy install is a no-op. |
-| `tsp plan` | Writes the plan skeleton, checks the contract, names the breadth still owed, and records one Findings row from flags. `add-finding` writes that row only: it refuses a row the checker would reject and never writes an evidence row. |
+| `tsp plan` | Writes the plan skeleton, checks the contract, names the breadth still owed, and records one Findings or Evidence ledger row from flags. `add-finding` writes a Findings row and `add-evidence` an Evidence ledger row; each refuses a row the checker would reject, and `add-evidence` never writes `Digest` or `Mode`, which `plan admit --record` pins. |
 | `tsp plan admit` | Reads the plan's Evidence ledger and decides every row. A dry run by default: `--execute` runs each admitted row's one command through `sh -c` twice, so a pin is only recorded over an output that held still, `--sandbox` observes it in a container with the tree mounted read-only and no network (it needs docker, and the default image is pulled on first use) and replays a declared `Mutate` edit against a writable copy of the tree, where the command must go red under the edit and green once the file is put back (a cell may hold a survey of edits separated by ` ;; `, each replayed on its own copy; an edit prefixed `~ ` is declared equivalent and must stay green, or the row is refused as `mutation-not-equivalent`; an admitted survey prints `N killed, M equivalent`; an edit whose own text contains ` ;; ` cannot be expressed), a row whose `Expect` cell is `fail` pins a test observed red (only an exit from 1 to 125 qualifies, so a missing command (127) is never pinned as red; a zero exit is refused as `expected-failure-passed`), a zero exit whose output shows a skipped Go test (`--- SKIP:`) or a run where no package had a test to run is refused as `tests-not-run`, `--only <ids>` narrows the run, `--timeout` bounds one command, and `--record <ids>` writes the observed digest into the plan together with the mode it was observed in. Exit 1 when a row is refused. |
 | `tsp plan export [--path <plan>] [--commit <sha>]` | Prints the plan's Findings as Markdown for a pull request comment: one row per finding with its location, severity, status, pinning test and the evidence that re-observes it (the Admit command, the digest shortened to 12 hex, and `Expect: fail` when declared), headed by the commit covered (default the short HEAD) and the plan's base name, never its directory. Every cell is sanitised like the gaps report's quotes. It never posts: `tsp plan export --path <plan> \| gh pr comment <n> -F -` is the operator's call. |
 | `tsp feedback` | Records one honest process report about the testing method itself, or reads the reports back. `--template` prints a fillable skeleton, `--file <path>` records it, `--summary` (the default) answers whether the method is earning its keep. |
@@ -412,6 +412,7 @@ and run bound to the exact session, and stays silent without a valid binding.
 ```
 tsp plan init                # write the skeleton, tables and all; never overwrites silently
 tsp plan check               # exit 1 and name every breach of the contract
+tsp plan add-evidence ...    # write one Evidence ledger row; Digest and Mode stay for plan admit --record
 tsp plan add-finding ...     # write one Findings row; refuses a row the checker would reject
 ```
 

@@ -2538,3 +2538,56 @@ func TestBindCLIStoresAndUnsetsPerSessionBindings(t *testing.T) {
 		t.Fatalf("after the second unset the dir holds %d entries (err %v), want 1", len(entries), err)
 	}
 }
+
+// plan add-evidence writes a ledger row from flags that plan admit then reads as runnable; a value the caller
+// got wrong exits 2 and a plan that cannot take the row exits 1, both leaving the plan unchanged.
+func TestPlanAddEvidenceWritesARowAdmitCanRun(t *testing.T) {
+	bin := buildCLI(t)
+	repo := t.TempDir()
+	if out, err := exec.Command("git", "init", "-q", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	p := filepath.Join(repo, "plan.md")
+	if out, code := runCLI(t, bin, "plan", "init", "--path", p); code != 0 {
+		t.Fatalf("plan init = %d\n%s", code, out)
+	}
+	args := []string{"plan", "add-evidence", "--path", p, "--id", "E1", "--claim", "echo prints its argument",
+		"--executed", "ran echo", "--admit", "echo pinned", "--observed", "pinned", "--reproduction", "rerun"}
+	out, code := runCLI(t, bin, args...)
+	if code != 0 || !strings.Contains(out, "added E1 to ") {
+		t.Fatalf("add-evidence = %d\n%s", code, out)
+	}
+	if out, code := runCLI(t, bin, "plan", "check", "--path", p); code != 0 {
+		t.Fatalf("plan check after add-evidence = %d\n%s", code, out)
+	}
+	cmd := exec.Command(bin, "plan", "admit", "--path", p)
+	cmd.Dir = repo
+	admitted, _ := cmd.CombinedOutput()
+	if !strings.Contains(string(admitted), "E1  WOULD RUN  echo pinned") {
+		t.Fatalf("plan admit does not read the written row as runnable:\n%s", admitted)
+	}
+
+	before, _ := os.ReadFile(p)
+	if out, code := runCLI(t, bin, append(args[:4:4], "--id", "E2", "--claim", "c", "--executed", "e", "--observed", "o", "--expect", "red")...); code != 2 || !strings.Contains(out, "--expect") {
+		t.Fatalf("a bad --expect = %d, want 2\n%s", code, out)
+	}
+	if out, code := runCLI(t, bin, args...); code != 1 || !strings.Contains(out, "already row") {
+		t.Fatalf("a duplicate id = %d, want 1\n%s", code, out)
+	}
+	for _, bad := range []struct{ admit, reason string }{
+		{"go test ./... | tee out.txt", "admit-multiple-commands"},
+		{"go test <package>", "admit-has-placeholder"},
+		{"go test ./... > out.txt", "admit-has-redirection"},
+	} {
+		out, code := runCLI(t, bin, append(args[:4:4], "--id", "E4", "--claim", "c", "--executed", "e", "--observed", "o", "--admit", bad.admit)...)
+		if code != 2 || !strings.Contains(out, bad.reason) {
+			t.Fatalf("--admit %q = %d, want 2 naming %s\n%s", bad.admit, code, bad.reason, out)
+		}
+	}
+	if out, code := runCLI(t, bin, "plan", "add-evidence", "--path", p, "--id", "E3"); code != 2 || !strings.Contains(out, "--claim is required") {
+		t.Fatalf("a missing --claim = %d, want 2\n%s", code, out)
+	}
+	if after, _ := os.ReadFile(p); string(after) != string(before) {
+		t.Fatal("a refused add-evidence changed the plan")
+	}
+}

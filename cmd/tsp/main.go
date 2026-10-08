@@ -64,7 +64,8 @@ commands:
   bench    run the testing skill against sealed-key fixtures and score it (run | score | history |
            compare | rescore | adjudicate)
   plan     write the skeleton, check the contract, name what breadth is still owed, record a
-           Findings row from flags, and admit every Evidence row (init | check | gaps | upgrade | add-finding | admit)
+           Findings or Evidence ledger row from flags, and admit every Evidence row
+           (init | check | gaps | upgrade | add-finding | add-evidence | admit)
   check    say what this repository still owes, from git and the plan alone: no hook payload,
            no transcript, no host. Exit 1 when there is something to do.
   status   report the local installation state and optional features
@@ -121,6 +122,13 @@ plan add-finding --id <id> --location <path:line> --severity <class> --data-safe
            (writes one Findings row; refuses a row plan check would reject, and never writes an
             evidence row. A bad value exits 2; a plan that refuses the row exits 1)
            (swept = status done, fixed or closed; n/a, na, none and skipped leave the denominator)
+plan add-evidence --id <id> --claim <text> --executed <text> --observed <text> [--admit <command>] [--inputs <text>]
+           [--normalize <regexp>] [--mutate '<old> => <new> @ <path>:<line>'] [--expect pass|fail]
+           [--control <text>] [--reproduction <text>] [--label observado] [--path <path>]
+           (writes one Evidence ledger row; refuses a row plan check rejects and an --admit, --normalize,
+            --mutate or --expect that plan admit would refuse before running; never writes Digest or Mode, which
+            plan admit --record pins. A row without --admit is recorded but admit reports it as no-admit-command.
+            A bad value exits 2; a plan that refuses the row exits 1)
 plan admit [--path <path>] [--execute] [--sandbox] [--sandbox-image <image>] [--timeout 120s] [--only <ids>] [--record <ids>]
            (dry run by default: --execute runs each admitted row's one command through sh -c;
             --record writes the freshly observed digest back into the named rows and requires
@@ -1085,6 +1093,17 @@ func runPlan(args []string) int {
 	verdictBy := fs.String("verdict-by", "", "who settled it and when (add-finding)")
 	reason := fs.String("reason", "", "why the verdict stands (add-finding)")
 	fingerprint := fs.String("fingerprint", "", "cited-files fingerprint at verdict, default - (add-finding)")
+	claim := fs.String("claim", "", "what the observation establishes (add-evidence)")
+	executed := fs.String("executed", "", "what was executed, as prose a human reads (add-evidence)")
+	admitCommand := fs.String("admit", "", "the one bare command plan admit runs for this row (add-evidence)")
+	inputs := fs.String("inputs", "", "inputs and parameters (add-evidence)")
+	observedText := fs.String("observed", "", "what was observed (add-evidence)")
+	normalize := fs.String("normalize", "", "Go regexp for the part of the output that moves, such as a time (add-evidence)")
+	mutate := fs.String("mutate", "", "falsifiability claim: '<old> => <new> @ <path>:<line>' (add-evidence)")
+	expect := fs.String("expect", "", "pass (default) or fail for a test observed red (add-evidence)")
+	control := fs.String("control", "", "mutation or negative control and its result, as prose (add-evidence)")
+	reproduction := fs.String("reproduction", "", "how to reproduce the observation (add-evidence)")
+	label := fs.String("label", "observado", "the row's label; the ledger holds only observado rows (add-evidence)")
 	execute := fs.Bool("execute", false, "run each admitted command; the default is a dry run (admit only)")
 	timeout := fs.Duration("timeout", 120*time.Second, "bound one command; 0 leaves it unbounded (admit only)")
 	only := fs.String("only", "", "comma-separated evidence ids to admit; empty means every row (admit only)")
@@ -1226,6 +1245,38 @@ func runPlan(args []string) int {
 			fmt.Fprintln(os.Stderr, "plan add-finding:", err)
 			// The package owns the vocabulary, so it owns the split: a value it refuses is a malformed
 			// invocation (2), anything else is the plan refusing the row (1).
+			if errors.Is(err, plan.ErrUsage) {
+				return 2
+			}
+			return 1
+		}
+		fmt.Printf("added %s to %s at line %d\n", *id, effectivePath, line)
+		return 0
+	case "add-evidence":
+		for _, req := range []struct{ flag, value string }{
+			{"id", *id}, {"claim", *claim}, {"executed", *executed}, {"observed", *observedText},
+		} {
+			if strings.TrimSpace(req.value) == "" {
+				fmt.Fprintf(os.Stderr, "plan add-evidence: --%s is required\n", req.flag)
+				return 2
+			}
+		}
+		// The Admit cell is held to the checks plan admit runs before spawning anything, so a row this writes is
+		// never one admit refuses for its command. A row without --admit is still an observation, recorded for a
+		// human to read; admit reports it as no-admit-command.
+		if strings.TrimSpace(*admitCommand) != "" {
+			if reason, detail := admitCommandProblem(*id, *admitCommand); reason != "" {
+				fmt.Fprintf(os.Stderr, "plan add-evidence: --admit: %s [%s]\n", detail, reason)
+				return 2
+			}
+		}
+		line, err := plan.AddEvidence(effectivePath, plan.Evidence{
+			ID: *id, Claim: *claim, Executed: *executed, Admit: *admitCommand, Inputs: *inputs,
+			Observed: *observedText, Normalize: *normalize, Mutate: *mutate, Expect: *expect,
+			Control: *control, Reproduction: *reproduction, Label: *label,
+		})
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "plan add-evidence:", err)
 			if errors.Is(err, plan.ErrUsage) {
 				return 2
 			}
@@ -1960,4 +2011,9 @@ func sandboxRefusal(image, output string, err error) error {
 		}
 	}
 	return err
+}
+
+// admitCommandProblem is evidence.CheckAdmitCommand under a name runPlan's --evidence flag does not shadow.
+func admitCommandProblem(id, admit string) (reason, detail string) {
+	return evidence.CheckAdmitCommand(id, admit)
 }

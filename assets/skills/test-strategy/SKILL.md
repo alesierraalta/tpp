@@ -104,10 +104,9 @@ hand-applied gate is a weaker claim than the binary's:
     test (rule 4) that turns red the day someone fixes the bug, so it defends the defect instead
     of demanding its repair. Promote through `no-excess-tests`, name it in the finding row, and
     label any characterization test as such in its own name. A finding whose probe was never
-    promoted stays `open`, reason `not pinned`. Before the final message, the tree is the arbiter:
-    `git status` must show the test file each pinned finding names, and a row whose test file is
-    absent from the tree, or that this run never watched go red on the defective code, does not
-    claim a pin.
+    promoted stays `open`, reason `not pinned`. A run that reports a defect and adds no test file is not finished:
+    before the final message, every reported finding names a test file this run added or changed,
+    so the plan never stands in for the test.
 
 14. **Record a retrospective at the end of every run**, including blocked or partial ones. Run
     `tsp feedback --template` into a `mktemp` file outside the repository, fill only the existing

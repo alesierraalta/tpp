@@ -55,16 +55,21 @@ func fingerprintRepo(t *testing.T, files map[string]string) (string, func(path, 
 	}
 }
 
-// The script reads the plan declaration under its current name and, for a repository declared before the
-// rename, under the legacy one; when both exist the current one decides.
+// The script reads the plan declaration under its current name and, for a repository declared before a
+// rename, under a legacy one; when several exist the newest name decides, the same order the plan package uses.
 func TestFingerprintExcludesThePlanTheDeclarationNames(t *testing.T) {
 	cases := []struct {
 		name  string
 		files map[string]string
 	}{
-		{"current declaration", map[string]string{".tpp.json": `{"planPath":"plans/p.md"}`}},
+		{"current declaration", map[string]string{".tsp.json": `{"planPath":"plans/p.md"}`}},
+		{"tpp declaration", map[string]string{".tpp.json": `{"planPath":"plans/p.md"}`}},
 		{"legacy declaration", map[string]string{".rdd-plus.json": `{"planPath":"plans/p.md"}`}},
 		{"current declaration wins", map[string]string{
+			".tsp.json": `{"planPath":"plans/p.md"}`,
+			".tpp.json": `{"planPath":"plans/other.md"}`,
+		}},
+		{"tpp declaration wins over legacy", map[string]string{
 			".tpp.json":      `{"planPath":"plans/p.md"}`,
 			".rdd-plus.json": `{"planPath":"plans/other.md"}`,
 		}},

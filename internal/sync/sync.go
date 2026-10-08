@@ -137,7 +137,7 @@ func (r Report) String() string {
 				fmt.Fprintf(&b, "%sorphan: %s (not removed)\n", prefix, path)
 			}
 			if len(host.Foreign) > 0 {
-				fmt.Fprintf(&b, "%sskip-user: %d files not managed by tpp (left untouched)\n", prefix, len(host.Foreign))
+				fmt.Fprintf(&b, "%sskip-user: %d files not managed by tsp (left untouched)\n", prefix, len(host.Foreign))
 			}
 			for _, h := range host.RemovedHooks {
 				fmt.Fprintf(&b, "%sremoved previous gate hook: %s\n", prefix, h)

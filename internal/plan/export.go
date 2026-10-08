@@ -30,7 +30,7 @@ func Export(doc, planName, commit string) (string, error) {
 		return "", errors.New("the plan has no Findings table to export")
 	}
 	var b strings.Builder
-	b.WriteString("## tpp findings\n\n")
+	b.WriteString("## tsp findings\n\n")
 	fmt.Fprintf(&b, "Commit: %s · Plan: %s\n\n", span(quote(commit)), span(quote(planName)))
 	if len(scan.rows) == 0 {
 		b.WriteString("No findings recorded.\n")

@@ -210,7 +210,7 @@ func planUninstallHook(name string, hostState state.HostState, opts UninstallOpt
 	plan.report.RemovedHooks = removed
 	reason := fmt.Sprintf("state records the Stop hook as wired; would remove %s from %s", strings.Join(removed, ", "), settingsPath)
 	if len(removed) == 0 {
-		reason = fmt.Sprintf("state records the Stop hook as wired, but %s carries no tpp gate entry", settingsPath)
+		reason = fmt.Sprintf("state records the Stop hook as wired, but %s carries no tsp gate entry", settingsPath)
 	}
 	return UninstallAction{Class: UninstallHook, Host: name, Path: settingsPath, Reason: reason}, nil
 }

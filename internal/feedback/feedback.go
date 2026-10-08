@@ -146,9 +146,9 @@ func Template(r Report) string {
 		plan = NotGiven
 	}
 	return strings.Join([]string{
-		"# tpp run feedback — what the method cost and what it paid.",
+		"# tsp run feedback — what the method cost and what it paid.",
 		"# Fill in paid, cost, reason and verdict. verdict is one of: " + strings.Join(Verdicts, ", ") + ".",
-		"# Submit with: tpp feedback --file <this file>",
+		"# Submit with: tsp feedback --file <this file>",
 		"ts: " + r.TS,
 		"repo: " + r.Repo,
 		"plan: " + plan,
@@ -165,7 +165,7 @@ func Template(r Report) string {
 
 // markdownHeader opens the rendering. It is written only when the file is missing; a report that
 // already landed is never rewritten.
-const markdownHeader = "# Run feedback\n\nOne section per `tpp feedback` report; never rewritten. Each report grades the method\nitself: what paid off, what was ceremony, and where a rule had to be reverse-engineered.\n\n"
+const markdownHeader = "# Run feedback\n\nOne section per `tsp feedback` report; never rewritten. Each report grades the method\nitself: what paid off, what was ceremony, and where a rule had to be reverse-engineered.\n\n"
 
 // Record appends one report to the ledger and one section to the markdown file. Both files are
 // append-only.
@@ -330,7 +330,7 @@ func Summary(configDir string) (string, error) {
 		return "", err
 	}
 	if len(reports) == 0 {
-		return "no reports yet: run `tpp feedback --template` after a run to start the ledger\n", nil
+		return "no reports yet: run `tsp feedback --template` after a run to start the ledger\n", nil
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "run feedback: %d report(s)\n", len(reports))

@@ -99,7 +99,7 @@ func (g Gaps) Report() string {
 	}
 	unscoped := g.UnscopedLayers + g.UnscopedTargets
 	if unscoped > 0 {
-		fmt.Fprintf(&b, "%d row(s) belong to no run and are not counted; tpp plan gaps --all shows every row\n", unscoped)
+		fmt.Fprintf(&b, "%d row(s) belong to no run and are not counted; tsp plan gaps --all shows every row\n", unscoped)
 	}
 	if g.RunMissing {
 		fmt.Fprintf(&b, "no row carries run %q: a run nobody opened reads as work nobody planned, never as nothing owed\n", g.Run)

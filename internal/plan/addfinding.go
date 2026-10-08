@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // ErrUsage marks a refusal of the invocation's own values (exit 2) rather than a refusal by the plan.
@@ -50,7 +51,7 @@ type Finding struct {
 // regular file and left the real plan untouched.
 func AddFinding(path string, f Finding) (int, error) {
 	target := canonicalPath(path)
-	lock, err := LockPlan(target)
+	lock, err := LockPlanWithin(target, lockWait)
 	if err != nil {
 		return 0, err
 	}
@@ -423,4 +424,37 @@ func writePlan(path, body string) error {
 		return err
 	}
 	return nil
+}
+
+// lockWait bounds how long add-finding and upgrade wait for another writer's lock. A writer holds it for one read
+// and one rename, so a lock still held after this long is stuck rather than busy, and blocking forever on it would
+// hang the agent that asked.
+var lockWait = 10 * time.Second
+
+// LockPlanWithin takes the plan lock as LockPlan does, giving up after wait with an error that names the plan and
+// the bound. The wait that gave up keeps running in the background and releases the lock if it is ever granted,
+// so a late grant never leaves the plan locked by a caller that already left.
+func LockPlanWithin(path string, wait time.Duration) (*os.File, error) {
+	type locked struct {
+		file *os.File
+		err  error
+	}
+	result := make(chan locked, 1)
+	go func() {
+		file, err := LockPlan(path)
+		result <- locked{file, err}
+	}()
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case got := <-result:
+		return got.file, got.err
+	case <-timer.C:
+		go func() {
+			if got := <-result; got.file != nil {
+				UnlockPlan(got.file)
+			}
+		}()
+		return nil, fmt.Errorf("timed out waiting for the plan lock on %s after %s", path, wait)
+	}
 }

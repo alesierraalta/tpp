@@ -4,8 +4,8 @@ description: "Trigger: haz test stragety, haz test strategy, test-strategy, haz 
 license: Apache-2.0
 metadata:
   author: "alesierraalta"
-  version: "0.5.1"
-  requires_tsp: "0.6.1"
+  version: "0.5.2"
+  requires_tsp: "0.6.2"
   requires_tpp: "0.5.1"
   scope: [common]
   auto_invoke: "Any request to test something: infer scope and mode from repo state, build or resume the persisted plan, execute it through specialized testing skills"
@@ -24,7 +24,7 @@ This skill decides WHICH targets and routes; siblings do the work.
 
 ## Tooling
 
-Written for `tsp 0.6.1` (`tsp version` prints the build); `requires_tpp: 0.5.1` is only the historical bridge requirement. Build it with `make build` (writes
+Written for `tsp 0.6.2` (`tsp version` prints the build); `requires_tpp: 0.5.1` is only the historical bridge requirement. Build it with `make build` (writes
 `bin/tsp`) and put it on `PATH`, or use `go install github.com/alesierraalta/tsp/cmd/tsp@latest`. An existing TPP install moves over with `tpp update` from the bridge `go install github.com/alesierraalta/tpp/cmd/tpp@v0.5.1`. Without the binary, fall back and say so in the report, since a
 hand-applied gate is a weaker claim than the binary's:
 

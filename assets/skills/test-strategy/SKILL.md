@@ -182,6 +182,9 @@ it covers; post it (`gh pr comment <n> -F -`) only with the operator's approval.
 
 **Always first**: resolve and read the declared plan (`docs/testing/test-plan.md` when the declaration has no `planPath`),
 `git status`, the diff against main, and the test runner. Pick mode and scope from the state table; state the inference in one line.
+Read a branch's change with the three-dot range (`git diff origin/main...HEAD`, `git log origin/main..HEAD`
+for its commits): the two-dot diff `origin/main..HEAD` also carries every commit main gained since the
+branch forked, so a scoped plan would rank changes the branch never made.
 
 **PLAN**
 
@@ -219,7 +222,13 @@ it covers; post it (`gh pr comment <n> -F -`) only with the operator's approval.
    of the contract: rewrite it before promoting. Those two runs are one evidence row, and the
    test's identity goes in the finding (rule 13).
 5. Update the plan: row status, rung, evidence ledger, findings, testability blocks with the
-   minimal change that opens them. Write the file, run `tsp plan check` until it passes,
+   minimal change that opens them. The ledger's machine columns, in
+   [references/evidence.md](references/evidence.md) rules 8–11: `Admit` one bare command `plan admit`
+   runs (no backticks, pipes or placeholders); `Digest` written by `tsp plan admit --execute --record <id>`,
+   never by hand; `Normalize` a Go regexp for the part that moves (an elapsed time), else empty; `Mode`
+   `host` or `sandbox`, written by `--record`; `Mutate` `<old> => <new> @ <path>:<line>`, replayed only
+   under `--sandbox`; `Expect` empty, `pass`, or `fail` for a test observed red. Every row keeps one cell
+   per header column, empty cells as `| |`. Write the file, run `tsp plan check` until it passes,
    then report the delta (rule 12).
 
 ## Output Contract

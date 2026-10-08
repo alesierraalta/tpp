@@ -924,6 +924,10 @@ func flagSet(fs *flag.FlagSet, name string) bool {
 	return set
 }
 
+// feedbackRepeatWindow is how close in time a report may follow an identical-looking last report before
+// the operator is told it may be a duplicate submission.
+const feedbackRepeatWindow = 30 * time.Minute
+
 // runFeedback is the destination the gate's Stop offer never had: --template hands the operator a
 // fillable report, --file records it, and review actions read or acknowledge a pending snapshot.
 func runFeedback(args []string) int {
@@ -989,9 +993,14 @@ func runFeedback(args []string) int {
 		if strings.TrimSpace(r.Plan) == "" {
 			r.Plan = feedback.NotGiven
 		}
+		// Read before recording: once the report lands, it is the last report it would be compared with.
+		repeats, _ := feedback.Repeats(*configDir, r, feedbackRepeatWindow)
 		if err := feedback.Record(*configDir, r); err != nil {
 			fmt.Fprintln(os.Stderr, "feedback:", err)
 			return 1
+		}
+		if repeats {
+			fmt.Fprintf(os.Stderr, "feedback: warning: this report repeats the repository, plan and verdict of the last report, recorded within %s; it was recorded anyway\n", feedbackRepeatWindow)
 		}
 		recordedRepo := r.Repo
 		if r.Repo != "" {

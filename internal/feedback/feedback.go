@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/alesierraalta/tsp/internal/assets"
 	"github.com/alesierraalta/tsp/internal/feature"
@@ -154,11 +155,17 @@ func Template(r Report) string {
 		"plan: " + plan,
 		"skill: " + r.Skill,
 		"build: " + r.Build,
+		"# paid = what the method found or proved that the change would otherwise have shipped without; \"nothing\" when it found nothing",
 		"paid: ",
+		"# cost = the time and steps the method added beyond making the change itself",
 		"cost: ",
+		"# reason = one line on why the verdict below follows from paid and cost",
 		"reason: ",
+		"# verdict = paid (worth its cost), partly (some steps paid, some were ceremony), or ceremony (cost without a finding)",
 		"verdict: ",
+		"# guess = optional: your hunch about the method or the code that this run did not prove",
 		"guess: ",
+		"# freeform = optional: anything else the next run should know",
 		"freeform: ",
 	}, "\n") + "\n"
 }
@@ -480,4 +487,24 @@ func isVerdict(v string) bool {
 		}
 	}
 	return false
+}
+
+// Repeats reports whether r repeats the repository, plan and verdict of the ledger's last report within
+// window. It never refuses anything: a near duplicate may be a deliberate second report.
+func Repeats(configDir string, r Report, window time.Duration) (bool, error) {
+	reports, err := Read(configDir)
+	if err != nil || len(reports) == 0 {
+		return false, err
+	}
+	last := reports[len(reports)-1]
+	if last.Repo != r.Repo || last.Plan != r.Plan || last.Verdict != r.Verdict {
+		return false, nil
+	}
+	then, err1 := time.Parse(time.RFC3339, last.TS)
+	now, err2 := time.Parse(time.RFC3339, r.TS)
+	if err1 != nil || err2 != nil {
+		return false, nil
+	}
+	gap := now.Sub(then)
+	return gap >= -window && gap <= window, nil
 }

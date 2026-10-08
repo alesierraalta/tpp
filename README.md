@@ -505,7 +505,9 @@ tsp feedback                     # no flags: the summary, the cheapest path to t
 ```
 
 One report is `paid`, `cost`, `reason`, and a `verdict` of `paid`, `partly`, or `ceremony`; `guess`
-and `freeform` are optional. The `skill` field names what actually ran as `<name>` or `<name> <version>`; for example, a breakcheck run records `breakcheck <its version>`. Each report appends one JSON line to
+and `freeform` are optional. The template defines each field on a comment line above it: `paid` is what
+the method found or proved, not whether paid services were called. A report that repeats the repository,
+plan and verdict of the last report within 30 minutes is still recorded, with a warning on stderr. The `skill` field names what actually ran as `<name>` or `<name> <version>`; for example, a breakcheck run records `breakcheck <its version>`. Each report appends one JSON line to
 `<config-dir>/telemetry/run-feedback.jsonl` and one section to `run-feedback.md`, beside the gate's
 own log. The summary counts reports, verdicts, and skill versions and prints the `guess` lines of
 the most recent reports; it clusters nothing and invents no score.

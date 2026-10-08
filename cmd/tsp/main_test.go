@@ -547,6 +547,22 @@ func TestFeedbackCLIRequiresOptInThenRecords(t *testing.T) {
 	if rows := len(strings.Split(strings.TrimSpace(string(raw)), "\n")); rows != 1 {
 		t.Fatalf("ledger rows = %d, want 1", rows)
 	}
+	if strings.Contains(out, "warning:") {
+		t.Fatalf("a first report must not warn: %q", out)
+	}
+
+	// The same report again is recorded, and the operator hears that it repeats the last one.
+	out, code = runCLIWithHomeEnv(t, home, bin, "feedback", "--config-dir", configDir, "--file", report)
+	if code != 0 || !strings.Contains(out, "warning: this report repeats the repository, plan and verdict of the last report") {
+		t.Fatalf("repeated feedback = %d %q", code, out)
+	}
+	raw, err = os.ReadFile(filepath.Join(sanitize.TelemetryDir(configDir), "run-feedback.jsonl"))
+	if err != nil {
+		t.Fatalf("ledger: %v", err)
+	}
+	if rows := len(strings.Split(strings.TrimSpace(string(raw)), "\n")); rows != 2 {
+		t.Fatalf("ledger rows = %d, want 2: a warning never refuses", rows)
+	}
 }
 
 // The feedback command is the destination the gate's offer always lacked: --template prints a

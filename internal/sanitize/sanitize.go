@@ -130,10 +130,16 @@ type pseudonymRecord struct {
 	Value     string `json:"value"`
 }
 
-// Remember appends one pseudonym-to-value line to the local resolution map.
+// Remember appends one pseudonym-to-value line to the local resolution map, unless the map already holds that
+// exact pair: the Stop gate remembers the same repository and plan on every session stop, and appending each time
+// grew the map without bound while every lookup scans it whole. A pseudonym names one value by construction, so a
+// pair already present is the whole answer.
 func (k *Key) Remember(telemetryDir, pseudonym, value string) error {
 	if err := os.MkdirAll(telemetryDir, 0700); err != nil {
 		return fmt.Errorf("create telemetry directory: %w", err)
+	}
+	if known, ok := Resolve(telemetryDir, pseudonym); ok && known == value {
+		return nil
 	}
 	line, err := json.Marshal(pseudonymRecord{Pseudonym: pseudonym, Value: value})
 	if err != nil {

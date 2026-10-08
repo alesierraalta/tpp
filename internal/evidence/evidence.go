@@ -323,7 +323,7 @@ func admitRow(row plan.LedgerRow, opts Options, deps Deps, record bool) RowResul
 		}
 		return deps.Run(ctx, opts.Dir, command)
 	}
-	runFailure := func(err error, suffix string) RowResult {
+	runFailure := func(err error, suffix, output string) RowResult {
 		// A runner that knows the failure is about its own environment rather than about the command says so
 		// with a Refusal, and its reason code is reported as it stands: a sandbox that refused a write is not
 		// a failing test, and calling it one would send the reader looking in the wrong place.
@@ -333,19 +333,19 @@ func admitRow(row plan.LedgerRow, opts Options, deps Deps, record bool) RowResul
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			return refused(result, ReasonTimeout, fmt.Sprintf(
-				"evidence %s hit the %s timeout%s: %v", row.ID, opts.Timeout, suffix, err))
+				"evidence %s hit the %s timeout%s: %v%s", row.ID, opts.Timeout, suffix, err, outputTail(output)))
 		}
-		return refused(result, ReasonCommandFailed, fmt.Sprintf("evidence %s failed to run%s: %v", row.ID, suffix, err))
+		return refused(result, ReasonCommandFailed, fmt.Sprintf("evidence %s failed to run%s: %v%s", row.ID, suffix, err, outputTail(output)))
 	}
 
 	// runOutcome reads one run against what the row expects. A row expecting a failure is observing a test
 	// that is red, so only a command that ran to its end and exited non-zero is that observation: a runner
 	// refusal, a deadline, and a command that never ran stay the failures they are, and a zero exit is a
 	// command that no longer fails. The zero exit is a refusal of its own, never a pin taken over a green run.
-	runOutcome := func(err error, suffix string) (RowResult, bool) {
+	runOutcome := func(err error, suffix, output string) (RowResult, bool) {
 		if !expectFail {
 			if err != nil {
-				return runFailure(err, suffix), false
+				return runFailure(err, suffix, output), false
 			}
 			return result, true
 		}
@@ -361,11 +361,11 @@ func admitRow(row plan.LedgerRow, opts Options, deps Deps, record bool) RowResul
 		if !errors.As(err, &refusal) && !errors.Is(err, context.DeadlineExceeded) && errors.As(err, &exit) && exit.ExitCode() > 0 && exit.ExitCode() < 126 {
 			return result, true
 		}
-		return runFailure(err, suffix), false
+		return runFailure(err, suffix, output), false
 	}
 
 	output, err := runOnce()
-	if failed, ok := runOutcome(err, ""); !ok {
+	if failed, ok := runOutcome(err, "", output); !ok {
 		return failed
 	}
 
@@ -400,7 +400,7 @@ func admitRow(row plan.LedgerRow, opts Options, deps Deps, record bool) RowResul
 		}
 	} else {
 		again, err = runOnce()
-		if failed, ok := runOutcome(err, " on its second run"); !ok {
+		if failed, ok := runOutcome(err, " on its second run", again); !ok {
 			return failed
 		}
 	}
@@ -502,6 +502,23 @@ func admitCommand(id, admit string) (command, reason, detail string) {
 func CheckAdmitCommand(id, admit string) (reason, detail string) {
 	_, reason, detail = admitCommand(id, admit)
 	return reason, detail
+}
+
+// failureTailLines bounds how much of a failing command's output a refusal carries: enough for a test runner's
+// failure summary, never enough for a noisy command to flood the report.
+const failureTailLines = 20
+
+// outputTail renders the last lines of a failing command's output for its refusal, because the failing test's
+// name and the error live there and the refusal is otherwise the only place the operator sees the run.
+func outputTail(output string) string {
+	lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
+	if strings.TrimSpace(output) == "" {
+		return ""
+	}
+	if len(lines) > failureTailLines {
+		lines = lines[len(lines)-failureTailLines:]
+	}
+	return fmt.Sprintf("; last lines of its output:\n%s", strings.Join(lines, "\n"))
 }
 
 // refused marks a result refused without clearing what the row already resolved to.

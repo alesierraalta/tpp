@@ -164,22 +164,24 @@ func TestTestStrategySkillPutsThePlanBeforeAnyOtherArtifact(t *testing.T) {
 	}
 }
 
-// The same baseline claimed a pinning test on 29 defect-runs whose tests never failed the defective code:
-// rows read `pinned` while the agent had added or changed no test file at all. A claim the tree cannot
-// corroborate is the same unverifiable report rule 12 already rejects for prose findings, so the skill has
-// to name the check it owes before the final message.
-func TestTestStrategySkillForbidsPinningClaimsWithoutTheTestInTree(t *testing.T) {
+// The test gap in both gpt-6-luna readings is runs that wrote no test file at all (30 of 90 before plan-first,
+// 37 of 90 after it), not pinning claims the suite fails to back (1 and 2). Reporting a defect and writing no
+// test has to read as unfinished work, so the run cannot close on the plan alone.
+func TestTestStrategySkillRequiresATestFileForEveryReportedFinding(t *testing.T) {
 	data, err := fs.ReadFile(Skills(), "test-strategy/SKILL.md")
 	if err != nil {
 		t.Fatalf("SKILL.md missing: %v", err)
 	}
 	text := string(data)
 	for _, want := range []struct{ phrase, contract string }{
-		{"`git status` must show the test file", "the tree check a pinned claim has to survive before the final message"},
-		{"never watched go red", "the observation a pinning claim requires, missing from the failed runs"},
+		{"A run that reports a defect and adds no test file is not finished", "the completion rule the no-test-file runs broke"},
+		{"a test file this run added or changed", "what each reported finding owes in the tree"},
 	} {
 		if !strings.Contains(text, want.phrase) {
 			t.Errorf("test-strategy no longer names %q: %s", want.phrase, want.contract)
 		}
+	}
+	if strings.Contains(text, "the tree is the arbiter") {
+		t.Error("test-strategy still carries the pinning-claim gate written for a gap the measurement did not show")
 	}
 }

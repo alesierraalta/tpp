@@ -88,6 +88,8 @@ const (
 	ReasonCommandFailed     = "command-failed"
 	ReasonTimeout           = "timeout"
 	ReasonEmptyOutput       = "empty-output"
+	// A test that was skipped, or a filter that left nothing to run, exits zero with output that reads like a pass.
+	ReasonTestsNotRun       = "tests-not-run"
 	ReasonDigestMismatch    = "digest-mismatch"
 	ReasonDigestMissing     = "digest-missing"
 	ReasonModeMismatch      = "mode-mismatch"
@@ -397,6 +399,11 @@ func admitRow(row plan.LedgerRow, opts Options, deps Deps, record bool) RowResul
 		return refused(result, ReasonEmptyOutput, fmt.Sprintf(
 			"evidence %s produced no output, so there is nothing to observe", row.ID))
 	}
+	if marker := testsNotRun(output); marker != "" {
+		return refused(result, ReasonTestsNotRun, fmt.Sprintf(
+			"evidence %s exited zero but its output shows tests that did not run (%q): a skip or an empty filter reads like a pass, so pinning it would record a green run that never ran; make the tests run where the row is observed (for a sandbox, an image that carries what they need) or narrow the command to tests that run",
+			row.ID, marker))
+	}
 	fresh, err := Digest(output, row.Normalize)
 	if err != nil {
 		return refused(result, ReasonNormalizeInvalid, fmt.Sprintf(
@@ -451,6 +458,31 @@ func admitRow(row plan.LedgerRow, opts Options, deps Deps, record bool) RowResul
 	}
 	result.Verdict = VerdictAdmitted
 	return result
+}
+
+var (
+	goSkipRe       = regexp.MustCompile(`(?m)^[ \t]*--- SKIP: .*$`)
+	goPackageOkRe  = regexp.MustCompile(`(?m)^ok[ \t]+\S+.*$`)
+	noTestsToRunRe = regexp.MustCompile(`\[no tests to run\]\s*$`)
+)
+
+// testsNotRun names the line that shows a Go test did not run: any skipped test or subtest, or a run whose every
+// package result matched no test. A package with no test files, or one package of several matching nothing
+// beside packages that ran, is an ordinary multi-package run and is not reported.
+func testsNotRun(output string) string {
+	if skip := goSkipRe.FindString(output); skip != "" {
+		return strings.TrimSpace(skip)
+	}
+	packages := goPackageOkRe.FindAllString(output, -1)
+	for _, p := range packages {
+		if !noTestsToRunRe.MatchString(p) {
+			return ""
+		}
+	}
+	if len(packages) > 0 {
+		return strings.TrimSpace(packages[0])
+	}
+	return ""
 }
 
 // refused marks a result refused without clearing what the row already resolved to.

@@ -1176,3 +1176,38 @@ func TestAdmitReadsTheExpectCell(t *testing.T) {
 		})
 	}
 }
+
+// A test that was skipped, or a filter that matched nothing, exits zero and prints a line that reads like a
+// pass. Pinning that output would record a green run that never ran, so the row is refused at its first run.
+// A multi-package run where some packages ran tests and others had none to run stays admissible.
+func TestAdmitRefusesOutputWhereNoTestRan(t *testing.T) {
+	cases := []struct {
+		name   string
+		output string
+		reason string
+	}{
+		{"a skipped test", "=== RUN   TestFingerprint\n    fingerprint_test.go:83: bash not available\n--- SKIP: TestFingerprint (0.00s)\nPASS\nok  \texample.com/assets\t0.01s\n", ReasonTestsNotRun},
+		{"a skipped subtest", "=== RUN   TestA\n=== RUN   TestA/case\n    --- SKIP: TestA/case (0.00s)\n--- PASS: TestA (0.00s)\nPASS\nok  \texample.com/a\t0.01s\n", ReasonTestsNotRun},
+		{"a filter that matched nothing", "ok  \texample.com/assets\t0.01s [no tests to run]\n", ReasonTestsNotRun},
+		{"every package matched nothing", "ok  \texample.com/a\t0.01s [no tests to run]\nok  \texample.com/b\t0.01s [no tests to run]\n", ReasonTestsNotRun},
+		{"some packages ran tests", "ok  \texample.com/a\t0.01s [no tests to run]\nok  \texample.com/b\t0.02s\n", ""},
+		{"packages without test files", "?   \texample.com/cmd\t[no test files]\nok  \texample.com/b\t0.02s\n", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, calls := admit(t, []plan.LedgerRow{row("E1", "go test ./...", "", "observado")}, Options{Execute: true}, tc.output, nil)
+			if tc.reason == "" {
+				if got[0].Reason == ReasonTestsNotRun {
+					t.Fatalf("a run where tests ran was refused: %+v", got[0])
+				}
+				return
+			}
+			if got[0].Verdict != VerdictRefused || got[0].Reason != tc.reason {
+				t.Fatalf("got %s %q (%s), want refused %q", got[0].Verdict, got[0].Reason, got[0].Detail, tc.reason)
+			}
+			if got[0].Digest != "" || len(calls) != 1 {
+				t.Fatalf("a refused first run must pin nothing and spend no probe: digest %q, %d calls", got[0].Digest, len(calls))
+			}
+		})
+	}
+}

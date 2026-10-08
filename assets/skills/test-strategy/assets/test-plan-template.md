@@ -98,7 +98,8 @@ canonical output, written by `tsp plan admit --execute --record <id>` rather tha
 
 A pin only means something over output that holds still, so `--execute` runs each admitted command twice:
 the second run is the probe, and a row whose two observations disagree is refused as unstable instead of
-pinned. `Normalize` is the escape hatch for the part of an output that legitimately moves, such as an
+pinned. A zero exit whose output shows a skipped Go test or a filter that matched nothing is refused as
+`tests-not-run`, so a Go test row runs `go test -v`, where a skip is visible. `Normalize` is the escape hatch for the part of an output that legitimately moves, such as an
 elapsed time: it holds a Go regular expression whose every match becomes `X` before hashing. Leave it empty
 the first time and fill it only when the probe names what moves, keeping it as narrow as that part — a
 pattern broad enough to swallow the output turns the pin into decoration. `plan check` requires none of

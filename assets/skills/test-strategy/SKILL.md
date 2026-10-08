@@ -228,7 +228,8 @@ branch forked, so a scoped plan would rank changes the branch never made.
    never by hand; `Normalize` a Go regexp for the part that moves (an elapsed time), else empty; `Mode`
    `host` or `sandbox`, written by `--record`; `Mutate` `<old> => <new> @ <path>:<line>`, replayed only
    under `--sandbox`; `Expect` empty, `pass`, or `fail` for a test observed red. Every row keeps one cell
-   per header column, empty cells as `| |`. Write the file, run `tsp plan check` until it passes,
+   per header column, empty cells as `| |`; `tsp plan add-evidence` writes such a row from flags (and
+   `tsp plan add-finding` the Findings row), so neither is hand-edited. Write the file, run `tsp plan check` until it passes,
    then report the delta (rule 12).
 
 ## Output Contract

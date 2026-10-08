@@ -142,7 +142,8 @@ test. Prefer it over `! cmd`, which also passes on a compile failure. `Expect` b
 a mutation already defines its own red and green runs.
 
 Every row carries exactly one cell per header column (14 here); an empty cell stays as `| |`. A literal
-`|` inside a cell is written `\|`, or it splits the cell and `plan check` refuses the row. Add the ledger
+`|` inside a cell is written `\|`, or it splits the cell and `plan check` refuses the row. `tsp plan add-evidence`
+writes a ledger row from flags, escaping `|` and leaving `Digest` and `Mode` empty. Add the ledger
 row before `tsp plan add-finding` names it: that command writes the Findings row only and refuses
 an Evidence id the ledger does not carry.
 

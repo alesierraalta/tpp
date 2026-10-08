@@ -46,11 +46,6 @@ type Deps struct {
 // writer wait for the lifetime of another process.
 const planLockWait = time.Second
 
-type planLockResult struct {
-	file *os.File
-	err  error
-}
-
 // Run admits the requested Evidence rows and returns the process exit code; it reports rows to deps.Out, refusals to
 // deps.Err, and records admitted observations only when requested. A valid dry run reads and validates the plan,
 // reports WOULD RUN rows, reaches no command runner or plan write, and rejects --record or --sandbox before reading it.
@@ -237,7 +232,7 @@ var syncRecordedDirectory = func(dir string) error {
 // and the write it guards cannot be split by a cooperating writer, because every writer takes this lock. A lock
 // that cannot be taken is a refusal, never an unserialized write.
 func writeRecorded(path string, raw []byte, doc string) error {
-	lock, err := lockPlanWithBound(path)
+	lock, err := plan.LockPlanWithin(path, planLockWait)
 	if err != nil {
 		return err
 	}
@@ -254,29 +249,6 @@ func writeRecorded(path string, raw []byte, doc string) error {
 		return err
 	}
 	return writeRecordedAtomically(path, []byte(doc), info.Mode().Perm())
-}
-
-func lockPlanWithBound(path string) (*os.File, error) {
-	result := make(chan planLockResult, 1)
-	go func() {
-		file, err := plan.LockPlan(path)
-		result <- planLockResult{file: file, err: err}
-	}()
-
-	timer := time.NewTimer(planLockWait)
-	defer timer.Stop()
-	select {
-	case locked := <-result:
-		return locked.file, locked.err
-	case <-timer.C:
-		go func() {
-			locked := <-result
-			if locked.file != nil {
-				plan.UnlockPlan(locked.file)
-			}
-		}()
-		return nil, fmt.Errorf("timed out waiting for the plan lock on %s after %s", path, planLockWait)
-	}
 }
 
 // writeRecordedAtomically writes beside the plan, flushes the complete temporary file, and replaces the plan in

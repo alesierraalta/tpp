@@ -15,7 +15,7 @@ func Upgrade(path, run string) (int, error) {
 		}
 	}
 	target := canonicalPath(path)
-	lock, err := LockPlan(target)
+	lock, err := LockPlanWithin(target, lockWait)
 	if err != nil {
 		return 0, err
 	}

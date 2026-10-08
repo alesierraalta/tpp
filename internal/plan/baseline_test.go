@@ -20,7 +20,7 @@ func TestCheckRefusesABaselineFingerprintThatFingerprintShDidNotWrite(t *testing
 	} {
 		t.Run(value, func(t *testing.T) {
 			p := filepath.Join(t.TempDir(), "plan.md")
-			if err := Init(p, false); err != nil {
+			if err := Init(p, "", false); err != nil {
 				t.Fatal(err)
 			}
 			body, _ := os.ReadFile(p)

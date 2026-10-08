@@ -119,7 +119,7 @@ func TestGapsOweNoBreadthForAMicroPlan(t *testing.T) {
 
 func TestInitMicroWritesTheMicroTemplateAndRefusesToOverwrite(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "docs", "testing", "test-plan.md")
-	if err := InitMicro(p, false); err != nil {
+	if err := InitMicro(p, "", false); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(p)
@@ -134,10 +134,10 @@ func TestInitMicroWritesTheMicroTemplateAndRefusesToOverwrite(t *testing.T) {
 	if strings.Contains(string(got), "## Layer matrix") {
 		t.Fatal("a micro template carries no layer matrix")
 	}
-	if err := InitMicro(p, false); err == nil {
+	if err := InitMicro(p, "", false); err == nil {
 		t.Fatal("an existing plan must not be silently overwritten")
 	}
-	if err := InitMicro(p, true); err != nil {
+	if err := InitMicro(p, "", true); err != nil {
 		t.Fatal(err)
 	}
 }

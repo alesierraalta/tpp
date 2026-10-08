@@ -72,7 +72,7 @@ func TestFindingsStatusVocabularyMatchesShippedTemplate(t *testing.T) {
 func TestInitWritesTheTemplateAndRefusesToOverwrite(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "docs", "testing", "test-plan.md")
-	if err := Init(p, false); err != nil {
+	if err := Init(p, "", false); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(p)
@@ -84,11 +84,11 @@ func TestInitWritesTheTemplateAndRefusesToOverwrite(t *testing.T) {
 			t.Fatalf("template missing %q", want)
 		}
 	}
-	if err := Init(p, false); err == nil {
+	if err := Init(p, "", false); err == nil {
 		t.Fatal("an existing plan must not be silently overwritten")
 	}
 	write(t, dir, "docs/testing/test-plan.md", "mine")
-	if err := Init(p, true); err != nil {
+	if err := Init(p, "", true); err != nil {
 		t.Fatal(err)
 	}
 	if data, _ := os.ReadFile(p); string(data) == "mine" {
@@ -112,7 +112,7 @@ func replaceFixture(t *testing.T, doc, what, old, row string) string {
 func TestCheckAcceptsACompliantPlan(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "plan.md")
-	if err := Init(p, false); err != nil {
+	if err := Init(p, "", false); err != nil {
 		t.Fatal(err)
 	}
 	body, _ := os.ReadFile(p)
@@ -473,7 +473,7 @@ func TestCheckLightPlanOwesAReasonForEverySkippedLayer(t *testing.T) {
 func TestCheckRejectsALightHeaderThePlanNeverRanked(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "plan.md")
-	if err := Init(p, false); err != nil {
+	if err := Init(p, "", false); err != nil {
 		t.Fatal(err)
 	}
 	body, err := os.ReadFile(p)
@@ -1564,7 +1564,7 @@ func TestCheckAcceptsTheShippedPlansWithAFencedExample(t *testing.T) {
 func TestCheckAcceptsTheShippedTemplateWithItsHypothesesTable(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "plan.md")
-	if err := Init(p, false); err != nil {
+	if err := Init(p, "", false); err != nil {
 		t.Fatal(err)
 	}
 	body, err := os.ReadFile(p)

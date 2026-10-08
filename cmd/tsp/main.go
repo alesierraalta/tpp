@@ -1153,7 +1153,11 @@ func runPlan(args []string) int {
 		if *micro {
 			initPlan = plan.InitMicro
 		}
-		if err := initPlan(effectivePath, *force); err != nil {
+		shown := effectivePath
+		if rel, err := filepath.Rel(root, effectivePath); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			shown = filepath.ToSlash(rel)
+		}
+		if err := initPlan(effectivePath, shown, *force); err != nil {
 			fmt.Fprintln(os.Stderr, "plan init:", err)
 			return 1
 		}

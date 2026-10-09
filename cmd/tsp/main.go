@@ -1109,7 +1109,7 @@ func runPlan(args []string) int {
 	only := fs.String("only", "", "comma-separated evidence ids to admit; empty means every row (admit only)")
 	record := fs.String("record", "", "comma-separated evidence ids whose freshly observed digest is written into the plan (admit only; requires --execute)")
 	sandbox := fs.Bool("sandbox", false, "observe each command inside a container instead of on this machine (admit only; requires --execute and docker)")
-	sandboxImage := fs.String("sandbox-image", sandboxImageDefault, "image the sandbox runs in (admit only; see --sandbox); the default is pulled on first use")
+	sandboxImage := fs.String("sandbox-image", sandboxImageDefault, "image the sandbox runs in (admit only; see --sandbox); sandboxImage in the repository declaration overrides this default, which is pulled on first use")
 	commit := fs.String("commit", "", "commit the export covers; the default is the short HEAD of the repository (export only)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
@@ -1146,7 +1146,15 @@ func runPlan(args []string) int {
 	}
 	switch args[0] {
 	case "admit":
-		return runPlanAdmit(effectivePath, *execute, *timeout, *only, *record, *sandbox, *sandboxImage)
+		// The image is the flag when it was asked for, else the repository's sandboxImage declaration,
+		// else nothing: resolveSandboxImage only reads the declaration on this path, so an admit that
+		// runs on this machine cannot be refused by a declaration it does not use.
+		image, err := resolveSandboxImage(root, *sandbox, flagSet(fs, "sandbox-image"), *sandboxImage)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "plan:", err)
+			return 1
+		}
+		return runPlanAdmit(effectivePath, *execute, *timeout, *only, *record, *sandbox, image)
 	case "gaps":
 		selectedRun := declaredRun
 		if *all {
@@ -1298,6 +1306,24 @@ func runPlan(args []string) int {
 // usage error. --record without --execute is a usage error because recording pins an observation this
 // run made: a dry run makes none, and a pinned value nobody observed is the failure this flag exists
 // to prevent.
+// resolveSandboxImage answers the image --sandbox runs in: the flag when it was set, else the
+// repository's sandboxImage declaration, else the flag's own default. The declaration is read only
+// when the sandbox was asked for and the flag was not, so a broken declaration never refuses an admit
+// that runs on this machine or one where the operator already chose the image.
+func resolveSandboxImage(root string, sandbox, flagSet bool, value string) (string, error) {
+	if flagSet || !sandbox {
+		return value, nil
+	}
+	declared, err := plan.DeclaredSandboxImage(root, nil)
+	if err != nil {
+		return "", err
+	}
+	if declared == "" {
+		return value, nil
+	}
+	return declared, nil
+}
+
 func runPlanAdmit(path string, execute bool, timeout time.Duration, only, record string, sandbox bool, sandboxImage string) int {
 	return admit.Run(admit.Request{
 		Path:    path,
@@ -1908,7 +1934,8 @@ func runBenchHistory(args []string) int {
 
 // sandboxImageDefault is the smallest official Go image that satisfies this module's `go 1.26` directive. It
 // is a default and not a decision: the image a row needs is the image its command needs, so --sandbox-image
-// exists, and the default only spares the common case a flag.
+// and the repository's sandboxImage declaration exist, and the default only spares the common case a flag.
+// The default itself stays on the alpine image: changing it would move every existing sandbox pin at once.
 const sandboxImageDefault = "golang:1.26-alpine"
 
 // sandboxRunner returns a runner that observes one command inside a container. mount is how the container sees
@@ -1926,30 +1953,23 @@ const sandboxImageDefault = "golang:1.26-alpine"
 //     change.
 //   - `--quiet`: an image pulled on first use prints its progress into the same buffer as the command, so the
 //     first run's output would differ from the second and every row would read as unstable.
+//   - a writable user home: `--read-only` covers /root, so HOME and XDG_CACHE_HOME both point at the
+//     tmpfs at /tmp and the two directories are created before the row's command runs. Without this a
+//     row that writes a per-user cache (the plan lock) or a HOME config refuses in the sandbox and
+//     only in it, and the operator had to set env by hand to admit it.
 //
 // `--read-only` and `--network none` do not change whether a command passes; they are exactly the isolation this
 // mode claims, so they are asserted here rather than relied on to make anything work.
 func sandboxRunner(image, mount string) admit.Runner {
 	return func(ctx context.Context, dir, command string) (string, error) {
-		if !filepath.IsAbs(dir) {
-			return "", evidence.Refusal{
-				Reason: evidence.ReasonMisconfigured,
-				Detail: fmt.Sprintf("the sandbox mounts the working directory by absolute path, and %q is not one", dir),
-			}
+		args, err := sandboxArgs(dir, image, mount, command)
+		if err != nil {
+			return "", err
 		}
-		cmd := exec.CommandContext(ctx, "docker",
-			"run", "--rm", "--quiet",
-			"--network", "none",
-			"--read-only",
-			"--tmpfs", "/tmp:exec",
-			"-v", dir+":/w:"+mount,
-			"-w", "/w",
-			"-e", "GOCACHE=/tmp/gocache",
-			image, "sh", "-c", command,
-		)
+		cmd := exec.CommandContext(ctx, "docker", args...)
 		var buf bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &buf, &buf
-		err := cmd.Run()
+		err = cmd.Run()
 		output := buf.String()
 		if err == nil {
 			return output, nil
@@ -1961,6 +1981,38 @@ func sandboxRunner(image, mount string) admit.Runner {
 		}
 		return output, sandboxRefusal(image, output, err)
 	}
+}
+
+// sandboxArgs is docker's full argument vector for one observation, split out from the run above so the
+// confinement and the environment are testable without a container: what the row's command sees inside
+// the sandbox is a property of this vector alone. A dir that is not absolute is refused here, before
+// docker starts, because the mount path is the tree the container is given.
+func sandboxArgs(dir, image, mount, command string) ([]string, error) {
+	if !filepath.IsAbs(dir) {
+		return nil, evidence.Refusal{
+			Reason: evidence.ReasonMisconfigured,
+			Detail: fmt.Sprintf("the sandbox mounts the working directory by absolute path, and %q is not one", dir),
+		}
+	}
+	return []string{
+		"run", "--rm", "--quiet",
+		"--network", "none",
+		"--read-only",
+		"--tmpfs", "/tmp:exec",
+		"-v", dir + ":/w:" + mount,
+		"-w", "/w",
+		"-e", "GOCACHE=/tmp/gocache",
+		"-e", "HOME=/tmp/home",
+		"-e", "XDG_CACHE_HOME=/tmp/xdg",
+		image, "sh", "-c", sandboxScript(command),
+	}, nil
+}
+
+// sandboxScript is the row's command with the writable user directories created first: the container's
+// root is read-only, so nothing under /tmp exists until something makes it. mkdir is silent, and it
+// cannot change the command's own exit status, which is what the admission reads.
+func sandboxScript(command string) string {
+	return "mkdir -p /tmp/home /tmp/xdg\n" + command
 }
 
 // sandboxRefusal names why a sandboxed command produced no observation. Three of these are about the sandbox

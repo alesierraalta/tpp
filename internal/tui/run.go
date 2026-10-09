@@ -61,8 +61,9 @@ type app struct {
 	detail     string
 	planReport string
 	planErr    error
-	scroll     int // first body line shown when a frame is taller than the terminal
-	page       int // body lines that fit on screen at the last redraw
+	scroll     int               // first body line shown when a frame is taller than the terminal
+	page       int               // body lines that fit on screen at the last redraw
+	size       func() (int, int) // injected terminal geometry; nil queries a real terminal
 }
 
 // escWait is how long a held partial escape sequence waits for its continuation before it is
@@ -78,6 +79,14 @@ type readResult struct {
 // (per-OS helpers; anything else — bytes.Buffer in tests, pipes — skips it), draws on the
 // alternate screen with the cursor hidden, and restores the terminal on every exit path via defer.
 func Run(in io.Reader, out io.Writer, deps Deps) error {
+	return run(in, out, deps, time.After, nil)
+}
+
+// run is Run with the two nondeterministic dependencies injected: after schedules the flush of
+// a held escape sequence and size reports the terminal geometry (nil keeps the *os.File query).
+// Tests pass a timer that never fires and a fixed size so key decoding and scrolling are
+// scheduler-independent.
+func run(in io.Reader, out io.Writer, deps Deps, after func(time.Duration) <-chan time.Time, size func() (int, int)) error {
 	restore, err := beginRaw(in, out)
 	if err != nil {
 		return err
@@ -90,7 +99,7 @@ func Run(in io.Reader, out io.Writer, deps Deps) error {
 	}
 	defer func() { _, _ = io.WriteString(out, "\x1b[?25h\x1b[?1049l") }()
 
-	a := &app{deps: deps, out: out}
+	a := &app{deps: deps, out: out, size: size}
 	if err := a.redraw(); err != nil {
 		return err
 	}
@@ -101,7 +110,7 @@ func Run(in io.Reader, out io.Writer, deps Deps) error {
 	for {
 		var wait <-chan time.Time
 		if dec.holding() {
-			wait = time.After(escWait)
+			wait = after(escWait)
 		}
 		var keys []key
 		var readErr error
@@ -255,11 +264,17 @@ func (a *app) handleFeatures(k key) bool {
 	case keyUp:
 		if a.featureSel > 0 {
 			a.featureSel--
+			a.followSelection()
 		}
 	case keyDown:
 		if a.featureSel < len(a.rows)-1 {
 			a.featureSel++
+			a.followSelection()
 		}
+	case keyPgUp:
+		a.scroll -= max(a.page, 1)
+	case keyPgDn:
+		a.scroll += max(a.page, 1)
 	case keyEsc:
 		a.view = viewMenu
 	case keySpace:
@@ -283,8 +298,23 @@ func (a *app) handleFeatures(k key) bool {
 			return false
 		}
 		a.detail = text
+		// The preview rewrites the whole frame: show its top instead of resuming the old offset.
+		a.scroll = 0
 	}
 	return false
+}
+
+// followSelection moves the offset so the selected row stays inside the visible page. The
+// features frame is title, blank, then one line per row, so the selection sits at body line
+// 2+featureSel; redraw clamps the offset against the frame the last draw produced.
+func (a *app) followSelection() {
+	line := 2 + a.featureSel
+	switch {
+	case line < a.scroll:
+		a.scroll = line
+	case a.page > 0 && line >= a.scroll+a.page:
+		a.scroll = line - a.page + 1
+	}
 }
 
 func (a *app) frame() string {
@@ -302,8 +332,13 @@ func (a *app) frame() string {
 
 func (a *app) redraw() error {
 	rows, cols := 0, 0
-	if f, ok := a.out.(*os.File); ok {
-		rows, cols = termSize(f)
+	switch {
+	case a.size != nil:
+		rows, cols = a.size()
+	default:
+		if f, ok := a.out.(*os.File); ok {
+			rows, cols = termSize(f)
+		}
 	}
 	lines := strings.Split(a.frame(), "\n")
 	lines, a.scroll, a.page = viewport(lines, a.scroll, rows)

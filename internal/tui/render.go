@@ -8,7 +8,7 @@ import (
 const (
 	helpRoot     = "up/down move | enter select | q quit"
 	helpStatus   = "up/down scroll | pgup/pgdn page | esc back | q quit"
-	helpFeatures = "space toggle | enter preview | esc back | q quit"
+	helpFeatures = "up/down | pgup/pgdn | space toggle | enter | esc | q quit"
 	helpPlan     = "up/down scroll | pgup/pgdn page | esc back | q quit"
 )
 

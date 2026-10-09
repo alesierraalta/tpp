@@ -64,7 +64,7 @@ func TestRenderFeatures(t *testing.T) {
 		"> feedback  Feedback  disabled\n" +
 		"  logging   Logging   enabled\n" +
 		"\n" +
-		"space toggle | enter preview | esc back | q quit"
+		"up/down | pgup/pgdn | space toggle | enter | esc | q quit"
 	if got := renderFeatures(rows, 0, ""); got != want {
 		t.Errorf("renderFeatures no detail =\n%q\nwant\n%q", got, want)
 	}
@@ -76,7 +76,7 @@ func TestRenderFeatures(t *testing.T) {
 		"\n" +
 		"Preview text.\n" +
 		"\n" +
-		"space toggle | enter preview | esc back | q quit"
+		"up/down | pgup/pgdn | space toggle | enter | esc | q quit"
 	if got := renderFeatures(rows, 1, "Preview text.\n"); got != wantDetail {
 		t.Errorf("renderFeatures with detail =\n%q\nwant\n%q", got, wantDetail)
 	}

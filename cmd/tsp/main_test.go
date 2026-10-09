@@ -2591,3 +2591,73 @@ func TestPlanAddEvidenceWritesARowAdmitCanRun(t *testing.T) {
 		t.Fatal("a refused add-evidence changed the plan")
 	}
 }
+
+// The sandbox runs with --read-only and a tmpfs only at /tmp, so the per-user cache os.UserCacheDir
+// resolves (the plan lock writes one) and HOME itself do not exist behind it: a row that needs either had
+// to set env by hand. Both now live on the writable tmpfs, and the dirs are created before the row's own
+// command so a tool that writes HOME on start finds a directory that is there.
+func TestSandboxArgsGiveTheContainerAWritableUserHome(t *testing.T) {
+	args, err := sandboxArgs(t.TempDir(), "example/golang:1.26", admit.SandboxReadOnly, "go test ./...")
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(args, " ")
+	for _, want := range []string{"-e HOME=/tmp/home", "-e XDG_CACHE_HOME=/tmp/xdg"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("args = %q, want %q", joined, want)
+		}
+	}
+	script := args[len(args)-1]
+	if !strings.HasPrefix(script, "mkdir -p /tmp/home /tmp/xdg\n") {
+		t.Errorf("script = %q, want the user dirs created first", script)
+	}
+	if !strings.HasSuffix(script, "go test ./...") {
+		t.Errorf("script = %q, want the row's command at the end", script)
+	}
+}
+
+// --sandbox-image wins over the repository declaration, the declaration wins over the default, and a
+// repository that declares nothing leaves the default to the flag itself. Without --sandbox the
+// declaration is not read at all, so a broken .tsp.json cannot refuse an admit that runs on this machine.
+func TestResolveSandboxImageOrder(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".tsp.json"), []byte(`{"sandboxImage":"golang:1.26"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name             string
+		root             string
+		sandbox, flagSet bool
+		flagValue        string
+		want             string
+	}{
+		{"flag wins", root, true, true, "alpine:3", "alpine:3"},
+		{"declaration when the flag is absent", root, true, false, "", "golang:1.26"},
+		{"default untouched when nothing declares", t.TempDir(), true, false, "", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := resolveSandboxImage(c.root, c.sandbox, c.flagSet, c.flagValue)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != c.want {
+				t.Fatalf("image = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestResolveSandboxImageDoesNotReadTheDeclarationOffTheSandboxPath(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".tsp.json"), []byte(`{not json`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := resolveSandboxImage(root, false, false, sandboxImageDefault)
+	if err != nil {
+		t.Fatalf("a declaration outside --sandbox must not be read: %v", err)
+	}
+	if got != sandboxImageDefault {
+		t.Fatalf("image = %q, want the flag's own default %q", got, sandboxImageDefault)
+	}
+}

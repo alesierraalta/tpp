@@ -309,3 +309,41 @@ func TestAMalformedLegacyDeclarationIsNamedInTheError(t *testing.T) {
 		t.Fatalf("error = %v, want an error naming %s", err, LegacyConfigName)
 	}
 }
+
+func TestDeclaredSandboxImageReadsTheDeclaration(t *testing.T) {
+	got, err := DeclaredSandboxImage(t.TempDir(), declares(`{"planPath":"docs/testing/custom-plan.md","sandboxImage":"golang:1.26"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "golang:1.26" {
+		t.Fatalf("image = %q, want golang:1.26", got)
+	}
+}
+
+func TestDeclaredSandboxImageIsAbsentWhenTheKeyIsAbsent(t *testing.T) {
+	got, err := DeclaredSandboxImage(t.TempDir(), declares(`{"planPath":"docs/testing/custom-plan.md"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "" {
+		t.Fatalf("image = %q, want empty", got)
+	}
+}
+
+func TestDeclaredSandboxImageRefusesAnUnusableValue(t *testing.T) {
+	for _, body := range []string{`{"sandboxImage":""}`, `{"sandboxImage":"   "}`, `{"sandboxImage":"golang 1.26"}`} {
+		t.Run(body, func(t *testing.T) {
+			_, err := DeclaredSandboxImage(t.TempDir(), declares(body))
+			if err == nil || !strings.Contains(err.Error(), ConfigName) {
+				t.Fatalf("error = %v, want a declaration error naming %s", err, ConfigName)
+			}
+		})
+	}
+}
+
+func TestDeclaredSandboxImageStillRefusesAnUnknownKey(t *testing.T) {
+	_, err := DeclaredSandboxImage(t.TempDir(), declares(`{"sandboximage":"golang:1.26"}`))
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("error = %v, want the fail-closed unknown-field refusal", err)
+	}
+}

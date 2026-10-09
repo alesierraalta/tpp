@@ -21,8 +21,9 @@ const LegacyConfigName = ".rdd-plus.json"
 type Reader func(path string) (string, error)
 
 type declaration struct {
-	planPath string
-	run      string
+	planPath     string
+	run          string
+	sandboxImage string
 }
 
 var runSlugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,63}$`)
@@ -53,7 +54,7 @@ func readDeclaration(root string, read Reader) (declaration, error) {
 	// so {"planpath": ...} would decode into the field and DisallowUnknownFields would not refuse it.
 	// Checking the exact key is what makes a typo fail closed.
 	for key := range fields {
-		if key != "planPath" && key != "run" {
+		if key != "planPath" && key != "run" && key != "sandboxImage" {
 			return declaration{}, fmt.Errorf("%s: unknown field %q", name, key)
 		}
 	}
@@ -76,6 +77,19 @@ func readDeclaration(root string, read Reader) (declaration, error) {
 		}
 		if err := ValidateRun(name, d.run); err != nil {
 			return declaration{}, err
+		}
+	}
+	if declared, present := fields["sandboxImage"]; present {
+		if err := json.Unmarshal(declared, &d.sandboxImage); err != nil {
+			return declaration{}, fmt.Errorf("%s: sandboxImage must be a string: %w", name, err)
+		}
+		if strings.TrimSpace(d.sandboxImage) == "" {
+			return declaration{}, fmt.Errorf("%s: sandboxImage is empty", name)
+		}
+		// One image reference, not a command line: the value is passed to docker as a single argument,
+		// and a value with a space in it would be read as something the repository never meant.
+		if strings.TrimSpace(d.sandboxImage) != d.sandboxImage || strings.ContainsAny(d.sandboxImage, " \t") {
+			return declaration{}, fmt.Errorf("%s: sandboxImage %q is not a single image reference", name, d.sandboxImage)
 		}
 	}
 	return d, nil
@@ -115,6 +129,15 @@ func readDeclarationFile(root string, read Reader) (string, string, error) {
 func DeclaredPath(root string, read Reader) (string, error) {
 	d, err := readDeclaration(root, read)
 	return d.planPath, err
+}
+
+// DeclaredSandboxImage returns the image plan admit --sandbox runs in when the root declares one,
+// or "" when no sandboxImage key is present. It exists so a repository whose commands need a
+// particular image (git, bash) declares it once instead of carrying a flag on every admit, and the
+// flag still wins: an explicit --sandbox-image is the operator's decision over the repository's.
+func DeclaredSandboxImage(root string, read Reader) (string, error) {
+	d, err := readDeclaration(root, read)
+	return d.sandboxImage, err
 }
 
 // DeclaredRun returns the active run the root declares, or "" when no run key is present.

@@ -1154,6 +1154,11 @@ func runPlan(args []string) int {
 			fmt.Fprintln(os.Stderr, "plan:", err)
 			return 1
 		}
+		// Only --record rewrites the plan, and only an executed run records: that pair is the write this
+		// refusal guards. A --record without --execute stays runPlanAdmit's usage error (exit 2).
+		if *execute && *record != "" && refuseIgnoredPlanWrite(root, "admit", effectivePath) {
+			return 1
+		}
 		return runPlanAdmit(effectivePath, *execute, *timeout, *only, *record, *sandbox, image)
 	case "gaps":
 		selectedRun := declaredRun
@@ -1173,6 +1178,9 @@ func runPlan(args []string) int {
 		}
 		return 0
 	case "upgrade":
+		if refuseIgnoredPlanWrite(root, "upgrade", effectivePath) {
+			return 1
+		}
 		selectedRun := ""
 		if flagSet(fs, "run") {
 			selectedRun = *run
@@ -1185,6 +1193,9 @@ func runPlan(args []string) int {
 		fmt.Printf("upgraded %s: %d table(s) changed\n", effectivePath, changed)
 		return 0
 	case "init":
+		if refuseIgnoredPlanWrite(root, "init", effectivePath) {
+			return 1
+		}
 		initPlan := plan.Init
 		if *micro {
 			initPlan = plan.InitMicro
@@ -1244,6 +1255,9 @@ func runPlan(args []string) int {
 				return 2
 			}
 		}
+		if refuseIgnoredPlanWrite(root, "add-finding", effectivePath) {
+			return 1
+		}
 		line, err := plan.AddFinding(effectivePath, plan.Finding{
 			ID: *id, Location: *location, Severity: *severity, DataSafe: *dataSafe,
 			Evidence: *evidence, Test: *test, Status: *status, VerdictBy: *verdictBy,
@@ -1277,6 +1291,9 @@ func runPlan(args []string) int {
 				fmt.Fprintf(os.Stderr, "plan add-evidence: --admit: %s [%s]\n", detail, reason)
 				return 2
 			}
+		}
+		if refuseIgnoredPlanWrite(root, "add-evidence", effectivePath) {
+			return 1
 		}
 		line, err := plan.AddEvidence(effectivePath, plan.Evidence{
 			ID: *id, Claim: *claim, Executed: *executed, Admit: *admitCommand, Inputs: *inputs,
@@ -1341,6 +1358,27 @@ func runPlanAdmit(path string, execute bool, timeout time.Duration, only, record
 		Out:           os.Stdout,
 		Err:           os.Stderr,
 	})
+}
+
+// refuseIgnoredPlanWrite stops a subcommand that would write the plan at a path git keeps out of version
+// control, and reports whether it did. A plan git ignores can never reach a pull request, so a write there
+// records evidence no reviewer will ever see; naming the path and refusing turns that silence into a
+// refusal the operator can act on — unignore the path, or git add -f the plan the way the field had to
+// discover alone. check-ignore answers yes only when a rule matches the path and nothing has staged it,
+// so a force-added plan writes like any other; a tracked path, a path outside a repository, or a missing
+// git answers no and leaves the write alone, the same fail-open rule check's ignoredPlanWarning uses. The
+// check runs from the working directory, the base the plan path is resolved against; the message names the
+// path the way plan init's header does — repository-relative inside the repository, absolute outside it.
+func refuseIgnoredPlanWrite(root, sub, path string) bool {
+	if err := exec.Command("git", "check-ignore", "-q", "--", path).Run(); err != nil {
+		return false
+	}
+	shown := path
+	if rel, err := filepath.Rel(root, path); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		shown = filepath.ToSlash(rel)
+	}
+	fmt.Fprintf(os.Stderr, "plan %s: git ignores %s: the run's evidence cannot be versioned; unignore the path or git add -f %s\n", sub, shown, shown)
+	return true
 }
 
 // waitDelayAfterKill is how long the output pipes may stay open once the shell is gone: the gap between the

@@ -84,14 +84,14 @@ func TestSkillRequiresTheTspReleaseItShipsWith(t *testing.T) {
 	if field == nil {
 		t.Fatal("test-strategy frontmatter has no requires_tsp")
 	}
-	if got := string(field[1]); got != "0.6.3" || got != buildinfo.Version {
-		t.Fatalf("test-strategy requires tsp %s, want the shipped build %s and release 0.6.3", got, buildinfo.Version)
+	if got := string(field[1]); got != "0.6.4" || got != buildinfo.Version {
+		t.Fatalf("test-strategy requires tsp %s, want the shipped build %s and release 0.6.4", got, buildinfo.Version)
 	}
-	if got := string(requiredVersion(data)[1]); got != "0.6.3" {
+	if got := string(requiredVersion(data)[1]); got != "0.6.4" {
 		t.Fatalf("required version = %s, want requires_tsp to win over legacy keys", got)
 	}
 	if !strings.Contains(string(data), "go install github.com/alesierraalta/tsp/cmd/tsp@latest") {
-		t.Fatal("test-strategy requires tsp 0.6.3 but names no install path")
+		t.Fatal("test-strategy requires tsp 0.6.4 but names no install path")
 	}
 }
 

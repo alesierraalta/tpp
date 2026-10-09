@@ -1284,6 +1284,99 @@ func TestPlanAddFindingHelp(t *testing.T) {
 	}
 }
 
+// A plan git ignores can never reach a pull request: the subcommands that write the plan refuse an ignored,
+// unstaged path by name instead of silently persisting evidence nobody will review, the refusal clears once the
+// path is staged (git add -f, the workaround the field had to find by hand), usage errors keep their exit 2,
+// and the read subcommands are not refused.
+func TestPlanWritesRefuseAPathGitIgnores(t *testing.T) {
+	bin := buildCLI(t)
+	repo := t.TempDir()
+	if out, err := exec.Command("git", "init", "-q", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	ignore := filepath.Join(repo, ".gitignore")
+	if err := os.WriteFile(ignore, []byte("docs/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) (int, string) {
+		cmd := exec.Command(bin, args...)
+		cmd.Dir = repo
+		out, err := cmd.CombinedOutput()
+		code := 0
+		ee := &exec.ExitError{}
+		if err != nil {
+			if asExit(err, ee) {
+				code = ee.ExitCode()
+			} else {
+				t.Fatalf("run %v: %v", args, err)
+			}
+		}
+		return code, string(out)
+	}
+	refused := func(args ...string) {
+		t.Helper()
+		code, out := run(args...)
+		if code != 1 || !strings.Contains(out, "git ignores docs/testing/test-plan.md") {
+			t.Fatalf("%v on an ignored path = %d\n%s", args, code, out)
+		}
+	}
+
+	// The write is refused before anything lands on disk, and the message names the path.
+	code, out := run("plan", "init", "--path", "docs/testing/test-plan.md")
+	if code != 1 || !strings.Contains(out, "plan init: git ignores docs/testing/test-plan.md") {
+		t.Fatalf("plan init on an ignored path = %d\n%s", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "docs/testing/test-plan.md")); !os.IsNotExist(err) {
+		t.Fatalf("the refused init must not write the plan: %v", err)
+	}
+
+	// A missing required flag is still a usage error, not the refusal: nothing has been read yet.
+	code, out = run("plan", "add-finding", "--path", "docs/testing/test-plan.md", "--id", "F1")
+	if code != 2 {
+		t.Fatalf("a usage error outranks the refusal: %d\n%s", code, out)
+	}
+
+	// The rule arriving after the plan exists is the field's situation: every write is still refused.
+	if err := os.WriteFile(ignore, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := run("plan", "init", "--path", "docs/testing/test-plan.md"); code != 0 {
+		t.Fatalf("plan init = %d\n%s", code, out)
+	}
+	if err := os.WriteFile(ignore, []byte("docs/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	refused(cliFindingArgs("docs/testing/test-plan.md", "F1", "E1")...)
+	refused("plan", "upgrade", "--path", "docs/testing/test-plan.md")
+
+	// A recording admit writes the plan too, so it is refused the same way; --record without
+	// --execute is still the usage error it always was.
+	code, out = run("plan", "admit", "--path", "docs/testing/test-plan.md", "--execute", "--record", "E1")
+	if code != 1 || !strings.Contains(out, "plan admit: git ignores docs/testing/test-plan.md") {
+		t.Fatalf("plan admit --record on an ignored path = %d\n%s", code, out)
+	}
+	if code, out := run("plan", "admit", "--path", "docs/testing/test-plan.md", "--record", "E1"); code != 2 {
+		t.Fatalf("--record without --execute = %d, want 2\n%s", code, out)
+	}
+
+	// Reads are not refused: plan gaps on the same ignored plan still answers for itself.
+	if _, out := run("plan", "gaps", "--path", "docs/testing/test-plan.md"); strings.Contains(out, "git ignores") {
+		t.Fatalf("plan gaps must not be refused:\n%s", out)
+	}
+
+	// Staged with git add -f — the workaround the field had to find by hand — the writes pass.
+	if out, err := exec.Command("git", "-C", repo, "add", "-f", "docs/testing/test-plan.md").CombinedOutput(); err != nil {
+		t.Fatalf("git add -f: %v\n%s", err, out)
+	}
+	if code, out := run("plan", "add-evidence", "--path", "docs/testing/test-plan.md", "--id", "E1",
+		"--claim", "observed", "--executed", "ran it", "--observed", "ok"); code != 0 {
+		t.Fatalf("plan add-evidence after git add -f = %d\n%s", code, out)
+	}
+	if code, out := run(cliFindingArgs("docs/testing/test-plan.md", "F1", "E1")...); code != 0 || !strings.Contains(out, "added F1") {
+		t.Fatalf("plan add-finding after git add -f = %d\n%s", code, out)
+	}
+}
+
 // A docker binary that is not there is not a failing row: nothing starts, so no container ever exists and the
 // refusal has to name the sandbox rather than the command. exec reports a binary it could not find or start as
 // an *exec.Error, while a docker that ran and failed reports an *exec.ExitError, which is the line this test
